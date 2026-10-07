@@ -1,0 +1,35 @@
+[project]
+name = "nao_bridge"
+version = "0.1.0"
+description = "High-level async API, MCP server and WebSocket server bridging AI agents to Naoqi robots (Nao), with a fake-robot mode for hardware-free use."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.9,<2",
+    "websockets>=17.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.29,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+target-version = "py312"  # keep in sync with requires-python
+
+[tool.pytest.ini_options]
+# Only the fast, deterministic tier is collected by default; tests-e2e/ is opt-in.
+testpaths = ["tests"]
+
+[tool.pyright]
+include = ["src", "tests", "tests-e2e"]  # type-check test code too, not just src
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]

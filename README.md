@@ -4,9 +4,9 @@ This repository provides a set of tools to communicate with Nao robots and their
 The focus is on providing interactive high-level APIs to enable AI agent-based interactions with the robot.
 
 It contains:
-- [NaoAPI](https://github.com/funwithagents/nao-mcp/src/nao_mcp/nao_api.py): a wrapper to simplify connection to Nao and access its API
-- [Nao MCP server](https://github.com/funwithagents/nao-mcp/src/nao_mcp/nao_websocket_server.py): a MCP server to communicate with NaoAPI
-- [Nao websocket server](https://github.com/funwithagents/nao-mcp/src/nao_mcp/nao_websocket_server.py): a websocket server to communicate with NaoAPI
+- [NaoAPI](https://github.com/funwithagents/nao-mcp/src/nao_bridge/nao_api.py): a wrapper to simplify connection to Nao and access its API
+- [Nao MCP server](https://github.com/funwithagents/nao-mcp/src/nao_bridge/nao_websocket_server.py): a MCP server to communicate with NaoAPI
+- [Nao websocket server](https://github.com/funwithagents/nao-mcp/src/nao_bridge/nao_websocket_server.py): a websocket server to communicate with NaoAPI
 
 > [!IMPORTANT]
 > This has only been tested with Naoqi 2.1.4.13 on a Nao v5.
@@ -114,7 +114,7 @@ For a real robot:
         "config": {
           "command": "path/to/pythonvenv/bin/python",
           "args": [
-            "path/to/repo/src/nao_mcp/nao_mcp_server.py",
+            "path/to/repo/src/nao_bridge/nao_mcp_server.py",
             "--ip", "<nao-ip>"
           ]
         }
@@ -134,7 +134,7 @@ For fake robot mode:
         "config": {
           "command": "path/to/pythonvenv/bin/python",
           "args": [
-            "path/to/repo/src/nao_mcp/nao_mcp_server.py",
+            "path/to/repo/src/nao_bridge/nao_mcp_server.py",
             "--fake-robot"
           ]
         }
@@ -161,7 +161,7 @@ For a real robot:
   "nao-mcp": {
     "command": "path/to/pythonvenv/bin/python",
     "args": [
-      "path/to/repo/src/nao_mcp/nao_mcp_server.py",
+      "path/to/repo/src/nao_bridge/nao_mcp_server.py",
       "--ip", "<nao-ip>"
     ]
   }
@@ -174,7 +174,7 @@ For fake robot mode:
   "nao-mcp": {
     "command": "path/to/pythonvenv/bin/python",
     "args": [
-      "path/to/repo/src/nao_mcp/nao_mcp_server.py",
+      "path/to/repo/src/nao_bridge/nao_mcp_server.py",
       "--fake-robot"
     ]
   }
@@ -225,4 +225,4 @@ It provides access to all NaoAPI features through websocket messages in JSON for
 
 > [!WARNING]
 > Full description of the JSON for each message is still TODO.
-> For now, you can check the message parsing in the `_apply_command_xxx` functions in [nao_websocket_server.py](https://github.com/funwithagents/nao-mcp/src/nao_mcp/nao_websocket_server.py)
+> For now, you can check the message parsing in the `_apply_command_xxx` functions in [nao_websocket_server.py](https://github.com/funwithagents/nao-mcp/src/nao_bridge/nao_websocket_server.py)
