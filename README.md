@@ -117,7 +117,7 @@ async with NaoBridge.from_dict({"streams": streams}) as bridge:
 
 - **Touch**: `bridge.on_touch` is an event; handlers receive a `TouchEvent(part, touched)` on the event loop
 - **Joints**: `bridge.joints` holds the latest `JointsState(names, angles, ts)` (radians): read `.value`, iterate `.changes()` (a slow reader skips to the latest), or `await .wait_for(predicate)`
-- **Audio**: every `bridge.audio_input()` call is its own subscriber receiving every chunk; `preroll_s=` starts it up to 2 s in the past (e.g. to hear the sentence that woke a wake-word detector); `bridge.mic.latest()` gives the newest chunk for level meters
+- **Audio**: every `bridge.audio_input()` call is its own subscriber receiving every chunk; `preroll_s=` starts it in the past, as far as the ring of the last 200 chunks reaches (e.g. to hear the sentence that woke a wake-word detector); `bridge.mic.latest()` gives the newest chunk for level meters
 
 ### APIs
 
@@ -277,6 +277,9 @@ You are incarnating Nao, a fun and witty robot from the company Aldebaran. You c
 - **`expressive_reaction`**: Make Nao react expressively to a specific emotion/situation
 - **`get_body_actions_list`**: Get the list of available body actions, needed before calling the body_action tool
 - **`body_action`**: Make Nao perform an action with its body
+- **`get_app_list`**: Get the list of installed apps, needed before calling the run_app and stop_app tools
+- **`run_app`**: Make Nao run an installed app
+- **`stop_app`**: Stop a running app
 
 ## Nao websocket server
 

@@ -84,7 +84,7 @@ The callbacks (`on_touch`, `on_joints`, `on_audio`) are **removed**. The config 
 
 ### `NaoBridge` construction
 
-- `NaoBridge(config: NaoBridgeConfig | Backend = NaoBridgeConfig())`. A bare backend string is shorthand for `NaoBridgeConfig(backend=...)`, so `NaoBridge("fake")` stays the one-liner. `NaoBridge("real")` alone is a `ConfigError` (no IP).
+- `NaoBridge(config: NaoBridgeConfig | Backend | None = None)`; with no argument it uses `NaoBridgeConfig()`. A bare backend string is shorthand for `NaoBridgeConfig(backend=...)`, so `NaoBridge("fake")` stays the one-liner. `NaoBridge("real")` alone is a `ConfigError` (no IP).
 - `NaoBridge.from_dict(data)`, `from_json(text)` and `from_json_file(path)` build the config, then the bridge.
 - The `ip=` / `port=` / `on_*=` keyword arguments are **removed**.
 - `bridge.config` exposes the config, read-only.

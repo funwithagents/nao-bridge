@@ -24,7 +24,7 @@ tests:
 - **`await stop()`** cancels the joints task and publishes `None` on `joints`. It then stops the mic feed (which ends every `audio_input()` subscriber), unsubscribes touch, closes the robot, and clears the running-item tracking. It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it.
 - **`async with NaoBridge(...) as bridge:`** is shorthand for the pair, and runs `stop()` on every way out.
 - `running: bool`. `config` and `backend` (read-only).
-- **Escape hatch:** `bridge.robot` (alias `bridge.raw`) is the `NaoRobot` — the `FakeNaoRobot` on `fake`, which tests use to assert on recorded commands. It raises `BridgeError` when the bridge isn't running.
+- **Escape hatch:** `bridge.robot` is the `NaoRobot` — the `FakeNaoRobot` on `fake`, which tests use to assert on recorded commands. It raises `BridgeError` when the bridge isn't running.
 
 ### Action verb contract
 

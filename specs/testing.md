@@ -44,7 +44,7 @@ The fake's behaviors last `FakeNaoRobot.DEFAULT_BEHAVIOR_DURATION_S` (5 s) so th
 
 ## Test isolation
 
-If the package holds process-global or singleton state, both tiers carry an identical autouse fixture (in each tier's `conftest.py`) that resets it before and after every test, so no state — or background timers/threads — leaks across tests. The fixture is duplicated rather than shared because `tests-e2e/` isn't a package that imports from `tests/`, and it's only a few lines.
+The package holds no process-global or singleton state, so neither tier has a reset fixture today. If one appears, both tiers carry an identical autouse fixture (in each tier's `conftest.py`) that resets it before and after every test, duplicated rather than shared because `tests-e2e/` isn't a package that imports from `tests/`. The fast tier's one autouse fixture, the instant fake behaviors above, is deliberately not mirrored: the live tier has no fake.
 
 ## Live tier: skip without credentials
 

@@ -17,8 +17,8 @@ from typing import Any, Literal, Self
 
 from mcp.server.fastmcp import FastMCP
 
-from nao_bridge.bridge import NaoBridge
-from nao_bridge.config import (
+from .bridge import NaoBridge
+from .config import (
     ConfigError,
     JsonConfig,
     NaoBridgeConfig,
@@ -28,7 +28,7 @@ from nao_bridge.config import (
     read_choice,
     read_object,
 )
-from nao_bridge.robot import RobotConnectionError
+from .robot import RobotConnectionError
 
 logger = logging.getLogger(__name__)
 

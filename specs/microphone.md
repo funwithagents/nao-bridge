@@ -59,7 +59,7 @@ MicFeed()
 ```
 
 - **Publishing.** `start()` subscribes to the robot's audio (`robot.subscribe_audio(self._publish)`). `_publish(channels, samples_per_channel, buffer)` runs on Naoqi's thread. Under the feed's lock it stamps the chunk (`seq`, `ts`), writes it into the ring and advances `head`. Outside the lock it wakes the waiting subscribers. The lock is held for the write only.
-- **The ring.** The feed keeps the last `MIC_RING_CHUNKS = 200` chunks in a fixed array: chunk `seq` lives in slot `seq % MIC_RING_CHUNKS`. That's at least 2 s whatever the chunk size; open question 1 covers the actual size.
+- **The ring.** The feed keeps the last `MIC_RING_CHUNKS = 200` chunks in a fixed array: chunk `seq` lives in slot `seq % MIC_RING_CHUNKS`. Its span in seconds is 200 chunk durations — about 17 s with the fake's 85 ms chunks — so it is sized in chunks, not seconds; open question 1 covers Naoqi's real chunk size.
 - **Bound per session, alive per bridge.** `bridge.mic` exists from construction, with `latest()` returning `None`. `start()` / `stop()` are the bridge's to call: `NaoBridge.start()` starts the feed when `streams.audio.enabled` ([config.md](config.md)), and `NaoBridge.stop()` stops it before closing the robot. Stopping unsubscribes from the robot, ends every subscriber, and resets `latest()` to `None`.
 
 ### Subscribers — `audio_input()`

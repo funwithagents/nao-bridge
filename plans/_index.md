@@ -17,6 +17,7 @@ Implementation plans for Nao Bridge — each plan turns a settled part of a spec
 | [202610081713_fake-behaviors-take-time.md](202610081713_fake-behaviors-take-time.md) | Fake behaviors last 5 s by default (stoppable), so running/stopping is observable offline; the fast tier sets them to 0 | Done |
 | [202610081816_robot-backends-in-their-own-modules.md](202610081816_robot-backends-in-their-own-modules.md) | `QiNaoRobot` → `RealNaoRobot` in `real_robot.py`, `FakeNaoRobot` in `fake_robot.py`; `robot.py` keeps the Protocol and `build_robot` | Done |
 | [202610081830_websocket-server-fixes.md](202610081830_websocket-server-fixes.md) | WebSocket server: a bad message no longer closes the session, a client swap logs no spurious error, every `CommandEnded` carries `data` | Done |
+| [202610081835_spec-and-doc-drift.md](202610081835_spec-and-doc-drift.md) | Editorial spec/README gaps closed (MCP tool list, constructor signature, ring wording, testing/import sentences); the unused `raw` alias removed; relative imports in the servers | Done |
 
 ## Status legend
 

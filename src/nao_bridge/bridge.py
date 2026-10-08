@@ -266,10 +266,6 @@ class NaoBridge:
             raise BridgeError("the bridge is not running; call start() first")
         return self._robot
 
-    @property
-    def raw(self) -> NaoRobot:
-        return self.robot
-
     async def start(self) -> None:
         if self._robot is not None:
             raise BridgeError("the bridge is already running")
