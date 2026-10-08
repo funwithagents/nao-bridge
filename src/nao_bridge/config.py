@@ -5,16 +5,18 @@ in code or loaded with the ``from_dict`` / ``from_json`` / ``from_json_file`` tr
 Invalid input raises ``ConfigError`` naming the offending key path. Each block checks
 its own ranges on construction; the loaders also check shape, types and unknown keys.
 
-The field readers (``read_*``) and the ``JsonConfig`` base are public so configs that
-wrap a ``NaoBridgeConfig`` (the servers') validate the same way. This module imports
-neither ``qi`` nor ``mcp`` nor ``websockets``.
+A default is declared once, on the dataclass field: ``parse_block`` reads only the
+keys present in the JSON and lets the dataclass apply its defaults for the rest. The
+value readers (``as_*``), ``parse_block`` and the ``JsonConfig`` base are public so
+configs that wrap a ``NaoBridgeConfig`` (the servers') validate the same way. This
+module imports neither ``qi`` nor ``mcp`` nor ``websockets``.
 """
 
 from __future__ import annotations
 
 import json
 import math
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Self
@@ -29,18 +31,17 @@ __all__ = [
     "JointsStream",
     "JsonConfig",
     "NaoBridgeConfig",
+    "Reader",
     "RobotSettings",
     "StreamSettings",
     "TouchStream",
-    "build",
-    "check_keys",
+    "as_bool",
+    "as_choice",
+    "as_int",
+    "as_number",
+    "as_str",
     "key_path",
-    "read_bool",
-    "read_choice",
-    "read_int",
-    "read_number",
-    "read_object",
-    "read_str",
+    "parse_block",
 ]
 
 type Backend = Literal["real", "fake"]
@@ -48,85 +49,97 @@ type AudioChannel = Literal["front", "rear", "left", "right"]
 BACKENDS: tuple[Backend, ...] = ("real", "fake")
 AUDIO_CHANNELS: tuple[AudioChannel, ...] = ("front", "rear", "left", "right")
 
+# Turns a raw JSON value found at a key path into a field's value, or raises
+# ``ConfigError``. A block's ``parse`` classmethod is one too.
+type Reader[T] = Callable[[Any, str], T]
+
 
 class ConfigError(ValueError):
-    """A malformed configuration; the message names the offending key path."""
+    """A malformed configuration. ``key`` is the offending key path (empty when the
+    error isn't about one key) and ``detail`` the complaint; ``str()`` joins them."""
 
-
-# region Field readers
+    def __init__(self, detail: str, *, key: str = "") -> None:
+        super().__init__(f"{key} {detail}" if key else detail)
+        self.key = key
+        self.detail = detail
 
 
 def key_path(path: str, key: str) -> str:
     return f"{path}.{key}" if path else key
 
 
-def read_object(data: Any, path: str) -> dict[str, Any]:
-    if not isinstance(data, dict):
-        raise ConfigError(
-            f"{path or 'config'} must be an object, got {type(data).__name__}"
-        )
-    return data  # pyright: ignore[reportUnknownVariableType]
+# region Value readers
 
 
-def check_keys(data: dict[str, Any], allowed: Iterable[str], path: str) -> None:
-    allowed = tuple(allowed)
-    for key in data:
-        if key not in allowed:
-            raise ConfigError(
-                f"unknown key {key_path(path, key)!r}; expected one of: {', '.join(allowed)}"
-            )
-
-
-def read_bool(data: dict[str, Any], key: str, default: bool, path: str) -> bool:
-    value = data.get(key, default)
+def as_bool(value: Any, key: str) -> bool:
     if not isinstance(value, bool):
-        raise ConfigError(f"{key_path(path, key)} must be a boolean, got {value!r}")
+        raise ConfigError(f"must be a boolean, got {value!r}", key=key)
     return value
 
 
-def read_int(data: dict[str, Any], key: str, default: int, path: str) -> int:
-    value = data.get(key, default)
+def as_int(value: Any, key: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ConfigError(f"{key_path(path, key)} must be an integer, got {value!r}")
+        raise ConfigError(f"must be an integer, got {value!r}", key=key)
     return value
 
 
-def read_number(data: dict[str, Any], key: str, default: float, path: str) -> float:
-    value = data.get(key, default)
+def as_number(value: Any, key: str) -> float:
     if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ConfigError(f"{key_path(path, key)} must be a number, got {value!r}")
+        raise ConfigError(f"must be a number, got {value!r}", key=key)
     return float(value)
 
 
-def read_str(data: dict[str, Any], key: str, default: str, path: str) -> str:
-    value = data.get(key, default)
+def as_str(value: Any, key: str) -> str:
     if not isinstance(value, str):
-        raise ConfigError(f"{key_path(path, key)} must be a string, got {value!r}")
+        raise ConfigError(f"must be a string, got {value!r}", key=key)
     return value
 
 
-def read_choice[C: str](
-    data: dict[str, Any], key: str, default: C, choices: tuple[C, ...], path: str
-) -> C:
-    value = data.get(key, default)
-    for choice in choices:
-        if value == choice:
-            return choice
-    expected = ", ".join(repr(c) for c in choices)
-    raise ConfigError(f"{key_path(path, key)} must be one of {expected}, got {value!r}")
+def as_choice[C: str](choices: tuple[C, ...]) -> Reader[C]:
+    def read(value: Any, key: str) -> C:
+        for choice in choices:
+            if value == choice:
+                return choice
+        expected = ", ".join(repr(c) for c in choices)
+        raise ConfigError(f"must be one of {expected}, got {value!r}", key=key)
+
+    return read
 
 
-def build[T](factory: Callable[..., T], path: str, **kwargs: Any) -> T:
-    """Construct a config block, prefixing its own validation errors with ``path``."""
+def parse_block[T](
+    factory: Callable[..., T], data: Any, path: str, **readers: Reader[Any]
+) -> T:
+    """Build the block ``factory`` from the JSON object ``data`` found at ``path``.
+
+    ``readers`` names the allowed keys and how to read each; a key that's absent is
+    left to the dataclass default, an unknown one is an error. The block's own
+    validation errors (``__post_init__``) are prefixed with ``path``.
+    """
+    if not isinstance(data, dict):
+        raise ConfigError(
+            f"must be an object, got {type(data).__name__}", key=path or "config"
+        )
+    obj: dict[str, Any] = data
+    for key in obj:
+        if key not in readers:
+            raise ConfigError(
+                f"unknown key {key_path(path, key)!r}; expected one of: "
+                + ", ".join(readers)
+            )
+    kwargs = {
+        name: reader(obj[name], key_path(path, name))
+        for name, reader in readers.items()
+        if name in obj
+    }
     try:
         return factory(**kwargs)
     except ConfigError as e:
-        raise ConfigError(key_path(path, str(e)) if path else str(e)) from None
+        raise ConfigError(e.detail, key=key_path(path, e.key)) from None
 
 
-def _require(condition: bool, message: str) -> None:
+def _require(condition: bool, key: str, detail: str) -> None:
     if not condition:
-        raise ConfigError(message)
+        raise ConfigError(detail, key=key)
 
 
 # endregion
@@ -179,27 +192,28 @@ class RobotSettings(JsonConfig):
     connect_timeout_s: float = 5.0
 
     def __post_init__(self) -> None:
-        _require(self.port > 0, f"port must be a positive integer, got {self.port}")
+        _require(self.port > 0, "port", f"must be a positive integer, got {self.port}")
         _require(
             self.connect_tries > 0,
-            f"connect_tries must be a positive integer, got {self.connect_tries}",
+            "connect_tries",
+            f"must be a positive integer, got {self.connect_tries}",
         )
         _require(
             math.isfinite(self.connect_timeout_s) and self.connect_timeout_s > 0,
-            f"connect_timeout_s must be a positive, finite number, got {self.connect_timeout_s}",
+            "connect_timeout_s",
+            f"must be a positive, finite number, got {self.connect_timeout_s}",
         )
 
     @classmethod
     def parse(cls, data: Any, path: str) -> Self:
-        obj = read_object(data, path)
-        check_keys(obj, ("ip", "port", "connect_tries", "connect_timeout_s"), path)
-        return build(
+        return parse_block(
             cls,
+            data,
             path,
-            ip=read_str(obj, "ip", "", path),
-            port=read_int(obj, "port", 9559, path),
-            connect_tries=read_int(obj, "connect_tries", 10, path),
-            connect_timeout_s=read_number(obj, "connect_timeout_s", 5.0, path),
+            ip=as_str,
+            port=as_int,
+            connect_tries=as_int,
+            connect_timeout_s=as_number,
         )
 
 
@@ -209,9 +223,7 @@ class TouchStream(JsonConfig):
 
     @classmethod
     def parse(cls, data: Any, path: str) -> Self:
-        obj = read_object(data, path)
-        check_keys(obj, ("enabled",), path)
-        return build(cls, path, enabled=read_bool(obj, "enabled", False, path))
+        return parse_block(cls, data, path, enabled=as_bool)
 
 
 @dataclass(frozen=True)
@@ -222,19 +234,13 @@ class JointsStream(JsonConfig):
     def __post_init__(self) -> None:
         _require(
             math.isfinite(self.period_s) and self.period_s > 0,
-            f"period_s must be a positive, finite number, got {self.period_s}",
+            "period_s",
+            f"must be a positive, finite number, got {self.period_s}",
         )
 
     @classmethod
     def parse(cls, data: Any, path: str) -> Self:
-        obj = read_object(data, path)
-        check_keys(obj, ("enabled", "period_s"), path)
-        return build(
-            cls,
-            path,
-            enabled=read_bool(obj, "enabled", False, path),
-            period_s=read_number(obj, "period_s", 0.2, path),
-        )
+        return parse_block(cls, data, path, enabled=as_bool, period_s=as_number)
 
 
 @dataclass(frozen=True)
@@ -245,19 +251,15 @@ class AudioStream(JsonConfig):
     def __post_init__(self) -> None:
         _require(
             self.channel in AUDIO_CHANNELS,
-            f"channel must be one of {', '.join(map(repr, AUDIO_CHANNELS))}, "
+            "channel",
+            f"must be one of {', '.join(map(repr, AUDIO_CHANNELS))}, "
             f"got {self.channel!r}",
         )
 
     @classmethod
     def parse(cls, data: Any, path: str) -> Self:
-        obj = read_object(data, path)
-        check_keys(obj, ("enabled", "channel"), path)
-        return build(
-            cls,
-            path,
-            enabled=read_bool(obj, "enabled", False, path),
-            channel=read_choice(obj, "channel", "front", AUDIO_CHANNELS, path),
+        return parse_block(
+            cls, data, path, enabled=as_bool, channel=as_choice(AUDIO_CHANNELS)
         )
 
 
@@ -271,14 +273,13 @@ class StreamSettings(JsonConfig):
 
     @classmethod
     def parse(cls, data: Any, path: str) -> Self:
-        obj = read_object(data, path)
-        check_keys(obj, ("touch", "joints", "audio"), path)
-        return build(
+        return parse_block(
             cls,
+            data,
             path,
-            touch=TouchStream.parse(obj.get("touch", {}), key_path(path, "touch")),
-            joints=JointsStream.parse(obj.get("joints", {}), key_path(path, "joints")),
-            audio=AudioStream.parse(obj.get("audio", {}), key_path(path, "audio")),
+            touch=TouchStream.parse,
+            joints=JointsStream.parse,
+            audio=AudioStream.parse,
         )
 
 
@@ -293,23 +294,22 @@ class NaoBridgeConfig(JsonConfig):
     def __post_init__(self) -> None:
         _require(
             self.backend in BACKENDS,
-            f"backend must be one of {', '.join(map(repr, BACKENDS))}, got {self.backend!r}",
+            "backend",
+            f"must be one of {', '.join(map(repr, BACKENDS))}, got {self.backend!r}",
         )
         _require(
             self.backend != "real" or bool(self.robot.ip),
-            "robot.ip is required for the real backend",
+            "robot.ip",
+            "is required for the real backend",
         )
 
     @classmethod
     def parse(cls, data: Any, path: str) -> Self:
-        obj = read_object(data, path)
-        check_keys(obj, ("backend", "robot", "streams"), path)
-        return build(
+        return parse_block(
             cls,
+            data,
             path,
-            backend=read_choice(obj, "backend", "fake", BACKENDS, path),
-            robot=RobotSettings.parse(obj.get("robot", {}), key_path(path, "robot")),
-            streams=StreamSettings.parse(
-                obj.get("streams", {}), key_path(path, "streams")
-            ),
+            backend=as_choice(BACKENDS),
+            robot=RobotSettings.parse,
+            streams=StreamSettings.parse,
         )

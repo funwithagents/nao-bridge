@@ -56,13 +56,13 @@ class StreamSettings:
     audio: AudioStream = field(default_factory=AudioStream)     # enabled: bool = False, channel: "front" | "rear" | "left" | "right" = "front"
 ```
 
-- Every block is optional. Missing blocks and fields take the defaults above.
+- Every block is optional. Missing blocks and fields take the defaults above. **A default is declared once**, on the dataclass field; the loaders read it from there (`dataclasses.fields`), so a default can't drift between direct construction and JSON.
 - **The default backend is `fake`.** A real Nao has no usable default address, so `NaoBridgeConfig()` is valid and offline. A real robot always means an explicit config with `robot.ip`.
 
 ### Constructors and validation
 
 - Every config class has the same three constructors: `from_dict(data)`, `from_json(text)` (parses, then calls `from_dict`), and `from_json_file(path)` (reads, then calls `from_json`; an invalid-JSON error names the path). All three share one validation path.
-- Errors raise `ConfigError(ValueError)`, with a message that names the offending key path (e.g. `streams.joints.period_s`).
+- Errors raise `ConfigError(ValueError)`, with a message that names the offending key path (e.g. `streams.joints.period_s`). A block's own checks raise `ConfigError(message, key=<field>)`, and each enclosing loader prefixes `key` with its own path; the message is never parsed to find the key.
 - **Unknown keys are errors**, so a typo fails when the config loads.
 - **Type and range checks:** `backend` ∈ `{"real", "fake"}`; `robot.port` and `connect_tries` are positive integers; `connect_timeout_s` and `period_s` are positive, finite numbers; `channel` is one of the four values.
 - **`real` needs `robot.ip`.** An empty IP is a `ConfigError` when the config loads.

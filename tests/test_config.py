@@ -10,11 +10,17 @@ from nao_bridge.config import (
     AudioStream,
     ConfigError,
     JointsStream,
+    JsonConfig,
     NaoBridgeConfig,
     RobotSettings,
+    StreamSettings,
+    TouchStream,
 )
-from nao_bridge.nao_mcp_server import NaoMcpServerConfig
-from nao_bridge.nao_websocket_server import NaoWebsocketServerConfig
+from nao_bridge.nao_mcp_server import McpServerSettings, NaoMcpServerConfig
+from nao_bridge.nao_websocket_server import (
+    NaoWebsocketServerConfig,
+    WebsocketServerSettings,
+)
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples" / "configs"
 
@@ -28,6 +34,26 @@ def test_the_default_config_is_the_offline_fake_with_no_streams():
         or config.streams.audio.enabled
     )
     assert NaoBridgeConfig.from_dict({}) == config
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        RobotSettings,
+        TouchStream,
+        JointsStream,
+        AudioStream,
+        StreamSettings,
+        NaoBridgeConfig,
+        McpServerSettings,
+        WebsocketServerSettings,
+        NaoMcpServerConfig,
+        NaoWebsocketServerConfig,
+    ],
+)
+def test_an_empty_object_loads_as_the_blocks_own_defaults(block: type[JsonConfig]):
+    # The loader has no defaults of its own: an absent key is the dataclass's default.
+    assert block.from_dict({}) == block()
 
 
 def test_a_full_config_loads_every_field():
@@ -94,6 +120,16 @@ def test_a_full_config_loads_every_field():
 def test_invalid_configs_name_the_offending_key(data: object, message: str):
     with pytest.raises(ConfigError, match=message):
         NaoBridgeConfig.from_dict(data)
+
+
+def test_a_config_error_carries_its_key_path():
+    with pytest.raises(ConfigError) as caught:
+        NaoWebsocketServerConfig.from_dict(
+            {"bridge": {"streams": {"joints": {"period_s": 0}}}}
+        )
+    assert caught.value.key == "bridge.streams.joints.period_s"
+    assert caught.value.detail.startswith("must be a positive")
+    assert str(caught.value) == f"{caught.value.key} {caught.value.detail}"
 
 
 def test_direct_construction_validates_too():

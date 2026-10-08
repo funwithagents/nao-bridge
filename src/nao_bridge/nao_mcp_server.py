@@ -18,16 +18,7 @@ from typing import Any, Literal, Self
 from mcp.server.fastmcp import FastMCP
 
 from .bridge import NaoBridge
-from .config import (
-    ConfigError,
-    JsonConfig,
-    NaoBridgeConfig,
-    build,
-    check_keys,
-    key_path,
-    read_choice,
-    read_object,
-)
+from .config import ConfigError, JsonConfig, NaoBridgeConfig, as_choice, parse_block
 from .robot import RobotConnectionError
 
 logger = logging.getLogger(__name__)
@@ -44,13 +35,7 @@ class McpServerSettings(JsonConfig):
 
     @classmethod
     def parse(cls, data: Any, path: str) -> Self:
-        obj = read_object(data, path)
-        check_keys(obj, ("transport",), path)
-        return build(
-            cls,
-            path,
-            transport=read_choice(obj, "transport", "stdio", TRANSPORTS, path),
-        )
+        return parse_block(cls, data, path, transport=as_choice(TRANSPORTS))
 
 
 @dataclass(frozen=True)
@@ -62,17 +47,12 @@ class NaoMcpServerConfig(JsonConfig):
 
     @classmethod
     def parse(cls, data: Any, path: str) -> Self:
-        obj = read_object(data, path)
-        check_keys(obj, ("bridge", "server"), path)
-        return build(
+        return parse_block(
             cls,
+            data,
             path,
-            bridge=NaoBridgeConfig.parse(
-                obj.get("bridge", {}), key_path(path, "bridge")
-            ),
-            server=McpServerSettings.parse(
-                obj.get("server", {}), key_path(path, "server")
-            ),
+            bridge=NaoBridgeConfig.parse,
+            server=McpServerSettings.parse,
         )
 
 

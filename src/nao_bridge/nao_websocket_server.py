@@ -27,12 +27,9 @@ from .config import (
     ConfigError,
     JsonConfig,
     NaoBridgeConfig,
-    build,
-    check_keys,
-    key_path,
-    read_int,
-    read_object,
-    read_str,
+    as_int,
+    as_str,
+    parse_block,
 )
 from .robot import RobotConnectionError
 
@@ -66,18 +63,13 @@ class WebsocketServerSettings(JsonConfig):
 
     def __post_init__(self) -> None:
         if not 0 <= self.port < 65536:
-            raise ConfigError(f"port must be between 0 and 65535, got {self.port}")
+            raise ConfigError(
+                f"must be between 0 and 65535, got {self.port}", key="port"
+            )
 
     @classmethod
     def parse(cls, data: Any, path: str) -> Self:
-        obj = read_object(data, path)
-        check_keys(obj, ("host", "port"), path)
-        return build(
-            cls,
-            path,
-            host=read_str(obj, "host", "", path),
-            port=read_int(obj, "port", 8002, path),
-        )
+        return parse_block(cls, data, path, host=as_str, port=as_int)
 
 
 @dataclass(frozen=True)
@@ -89,17 +81,12 @@ class NaoWebsocketServerConfig(JsonConfig):
 
     @classmethod
     def parse(cls, data: Any, path: str) -> Self:
-        obj = read_object(data, path)
-        check_keys(obj, ("bridge", "server"), path)
-        return build(
+        return parse_block(
             cls,
+            data,
             path,
-            bridge=NaoBridgeConfig.parse(
-                obj.get("bridge", {}), key_path(path, "bridge")
-            ),
-            server=WebsocketServerSettings.parse(
-                obj.get("server", {}), key_path(path, "server")
-            ),
+            bridge=NaoBridgeConfig.parse,
+            server=WebsocketServerSettings.parse,
         )
 
 
