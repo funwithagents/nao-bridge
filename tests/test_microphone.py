@@ -150,10 +150,9 @@ def test_stopping_ends_subscribers_and_sessions_do_not_leak():
         await push_paced(robot, range(3))
         assert feed.latest() is not None
         await feed.stop()
-        ended: list[int] = []
         async with asyncio.timeout(1.0):
-            async for chunk in session_one:  # ends at once: its session is over
-                ended.append(index_of(chunk))
+            # Ends at once: its session is over.
+            ended = [index_of(chunk) async for chunk in session_one]
         stopped_latest_is_none = feed.latest() is None and latest_before is None
 
         await feed.start(robot, "front")

@@ -106,7 +106,9 @@ def stdout_reserved_for_protocol() -> Iterator[None]:
 
 
 class NaoMcpServer:
-    def __init__(self, config: NaoMcpServerConfig | None = None):
+    """``NaoBridge`` as MCP tools: one FastMCP server over one bridge session."""
+
+    def __init__(self, config: NaoMcpServerConfig | None = None) -> None:
         """Build the server and its bridge from ``config`` (default: the fake robot)."""
         self.config = config or NaoMcpServerConfig()
         self.nao_bridge = NaoBridge(self.config.bridge)

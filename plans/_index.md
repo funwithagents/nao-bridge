@@ -19,6 +19,7 @@ Implementation plans for Nao Bridge — each plan turns a settled part of a spec
 | [202610081830_websocket-server-fixes.md](202610081830_websocket-server-fixes.md) | WebSocket server: a bad message no longer closes the session, a client swap logs no spurious error, every `CommandEnded` carries `data` | Done |
 | [202610081835_spec-and-doc-drift.md](202610081835_spec-and-doc-drift.md) | Editorial spec/README gaps closed (MCP tool list, constructor signature, ring wording, testing/import sentences); the unused `raw` alias removed; relative imports in the servers | Done |
 | [202610081840_websocket-server-restructure.md](202610081840_websocket-server-restructure.md) | `ClientSession` (protocol over a connection-like object) split from `NaoWebsocketServer` (bridge + listener); command table; typed; `server.host` | Done |
+| [202610081845_broader-ruff-rules.md](202610081845_broader-ruff-rules.md) | Ruff's defaults extended with pycodestyle, perf and annotations (ANN on `src/` only), and the fixes they flag | Done |
 
 ## Status legend
 

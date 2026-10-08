@@ -108,9 +108,11 @@ def test_spec_frontmatter_paths_all_exist():
     stale: list[str] = []
     for spec in _spec_files():
         front = _parse_frontmatter(spec)
-        for rel in front.get("code", []) + front.get("tests", []):
-            if not (_REPO_ROOT / rel).exists():
-                stale.append(f"{spec.name} -> {rel}")
+        stale.extend(
+            f"{spec.name} -> {rel}"
+            for rel in front.get("code", []) + front.get("tests", [])
+            if not (_REPO_ROOT / rel).exists()
+        )
     assert not stale, (
         f"spec frontmatter points at paths that no longer exist: {sorted(stale)}. "
         "Update the `code:`/`tests:` lists when files are renamed or removed."
