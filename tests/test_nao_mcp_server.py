@@ -6,8 +6,12 @@ No robot needed. Async runs via ``asyncio.run``.
 
 import asyncio
 import json
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
+import pytest
 from mcp.types import TextContent
 
 from nao_bridge.nao_mcp_server import NaoMcpServer
@@ -87,3 +91,76 @@ def test_list_tools_return_json_the_model_can_feed_back():
     assert set(dances[0]["localized_name"]) == {"en_US", "fr_FR"}
     assert reactions == ["Happy", "Proud", "Laugh", "Sad", "HeadTouched"]
     assert len(actions) == 6
+
+
+# --- stdout belongs to the protocol ------------------------------------------
+
+
+def run_cli(
+    config: dict[str, Any], tmp_path: Path, stdin: str = ""
+) -> subprocess.CompletedProcess[str]:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(config))
+    return subprocess.run(
+        [sys.executable, "-m", "nao_bridge.nao_mcp_server", "--config", str(path)],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+
+def test_native_writes_to_fd_1_go_to_stderr_while_reserved():
+    script = (
+        "import os, sys\n"
+        "from nao_bridge.nao_mcp_server import stdout_reserved_for_protocol\n"
+        "with stdout_reserved_for_protocol():\n"
+        "    os.write(1, b'native\\n')\n"
+        "    sys.stdout.write('protocol\\n')\n"
+        "print('after')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "protocol\nafter\n"
+    assert "native" in result.stderr
+
+
+def test_libqi_logs_never_reach_the_mcp_client(tmp_path: Path):
+    pytest.importorskip("qi")
+    # A real backend at a closed local port: libqi creates its session (and logs
+    # on its console handler), fails to connect, and the server exits.
+    config = {
+        "bridge": {
+            "backend": "real",
+            "robot": {"ip": "127.0.0.1", "port": 1, "connect_tries": 1},
+        }
+    }
+    result = run_cli(config, tmp_path)
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "qi.path.sdklayout" in result.stderr  # still visible, on stderr
+
+
+def test_the_fake_server_writes_only_json_rpc_to_stdout(tmp_path: Path):
+    initialize = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"},
+        },
+    }
+    result = run_cli({}, tmp_path, stdin=json.dumps(initialize) + "\n")
+    assert result.returncode == 0, result.stderr
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert lines
+    assert all(json.loads(line)["jsonrpc"] == "2.0" for line in lines)

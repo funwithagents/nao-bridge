@@ -18,6 +18,12 @@ Lets an LLM agent (Claude Desktop, HuggingFace Tiny Agents, any MCP client) driv
 - **Config:** `NaoMcpServerConfig` is `{"bridge": NaoBridgeConfig, "server": McpServerSettings}`, with `McpServerSettings(transport: "stdio" | "sse" = "stdio")`. Both blocks are optional and share the loaders and `ConfigError` rules of [config.md](config.md). MCP is request/response, so its bridge normally enables no stream.
 - **Runtime:** `NaoMcpServer(config=None)` (default: `NaoMcpServerConfig()`, the fake over stdio) builds a `NaoBridge(config.bridge)` and a `mcp.server.fastmcp.FastMCP("Nao")` server. It requires the **v1** `mcp` SDK (`mcp<2`; v2 renamed FastMCP).
 - **One event loop, one session:** `serve()` runs `async with bridge:` around `run_stdio_async()` (or `run_sse_async()`, per `server.transport`). The bridge connects before serving and stops when the client leaves. `run()` wraps it in `asyncio.run`. If the robot can't be reached (`RobotConnectionError`), it logs the error and returns `False` without serving.
+- **stdout belongs to the protocol.** Over stdio, fd 1 is the JSON-RPC channel, and native code writes to it directly: libqi's console log handler does from the first `qi.Session()` on (`[W] … qi.path.sdklayout: No Application was created…`), and `qi.logging` can't redirect it. So `serve()` enters `stdout_reserved_for_protocol()` *before* the bridge starts and leaves it after the bridge stops:
+  - fd 1 points at stderr, so native writes land there and stay visible in the server's log;
+  - `sys.stdout`, which the stdio transport wraps when it starts, is a private duplicate of the real stdout;
+  - on exit, fd 1 and `sys.stdout` are restored.
+
+  Only JSON-RPC reaches the client. The bridge library itself never touches process file descriptors; this is the stdio server's concern.
 - **Tool registration:** each tool is a server method passed to `FastMCP.add_tool(fn)`, which takes the tool's **name from the method and its description from the docstring**. The tool title stays unset. (The earlier code passed the docstring positionally into the `title` slot.) Docstrings are the prompt the model sees, so they encode usage order ("call `wake_up` first", "call `get_dance_list` before `dance`").
 - **Tool surface:**
 
@@ -43,4 +49,3 @@ Lets an LLM agent (Claude Desktop, HuggingFace Tiny Agents, any MCP client) driv
 ## Open questions
 
 1. **Long-running tools.** `dance`/`run_app`/`body_action` hold the tool call until the behavior ends; `stop_app` only helps if the client issues calls concurrently. Should there be stop tools for dances and body actions, or should these tools return immediately?
-2. **libqi startup log** on stdout can make Claude Desktop show a spurious parse error (README warning). Redirect it to stderr?

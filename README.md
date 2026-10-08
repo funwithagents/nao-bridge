@@ -258,9 +258,6 @@ For the fake backend:
 ```
 
 - start Claude Desktop
-> [!WARNING]
-> Due to a log displayed at the start of the MCP server (in LibQi), Claude Desktop may show an error message ("MCP nao-mcp: Unexpected token ...").
-> This log is harmless and the MCP server is running properly.
 - start a new conversation with a prompt like this one
 ```
 You are incarnating Nao, a fun and witty robot from the company Aldebaran. You can only answer using the nao-mcp tools, no text output.  And when Nao speaks, use short answers.

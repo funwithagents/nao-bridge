@@ -6,8 +6,12 @@ built from a ``NaoMcpServerConfig``: the bridge's config plus the server's own.
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
+import os
+import sys
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Self
 
@@ -72,6 +76,35 @@ class NaoMcpServerConfig(JsonConfig):
         )
 
 
+@contextlib.contextmanager
+def stdout_reserved_for_protocol() -> Iterator[None]:
+    """Keep the real stdout for the MCP stdio transport only.
+
+    Native code writes to file descriptor 1 directly: libqi's console log handler
+    does from the first ``qi.Session()`` on, and Python's ``sys.stdout`` can't
+    intercept it. Inside this block fd 1 points at stderr, so such writes land
+    there, while ``sys.stdout`` (which the stdio transport wraps when it starts) is a
+    private duplicate of the real stdout. Both are restored on exit.
+    """
+    sys.stdout.flush()
+    real_stdout_fd = os.dup(1)  # kept here to restore fd 1 on exit
+    os.dup2(2, 1)
+    saved_stdout = sys.stdout
+    # The transport gets its own duplicate: it closes its stream when it ends, which
+    # must not take ``real_stdout_fd`` with it.
+    protocol = open(os.dup(real_stdout_fd), "w", encoding="utf-8")  # noqa: SIM115 - closed below
+    sys.stdout = protocol
+    try:
+        yield
+    finally:
+        if not protocol.closed:
+            protocol.flush()
+            protocol.close()
+        sys.stdout = saved_stdout
+        os.dup2(real_stdout_fd, 1)
+        os.close(real_stdout_fd)
+
+
 class NaoMcpServer:
     def __init__(self, config: NaoMcpServerConfig | None = None):
         """Build the server and its bridge from ``config`` (default: the fake robot)."""
@@ -100,11 +133,17 @@ class NaoMcpServer:
             self.mcp.add_tool(tool)
 
     async def serve(self) -> None:
-        """Connect to Nao, serve MCP until the client leaves, then disconnect."""
-        async with self.nao_bridge:
-            if self.config.server.transport == "sse":
+        """Connect to Nao, serve MCP until the client leaves, then disconnect.
+
+        Over stdio, stdout is reserved for the protocol before the bridge starts, so
+        nothing libqi logs while connecting or serving reaches the client.
+        """
+        if self.config.server.transport == "sse":
+            async with self.nao_bridge:
                 await self.mcp.run_sse_async()
-            else:
+            return
+        with stdout_reserved_for_protocol():
+            async with self.nao_bridge:
                 await self.mcp.run_stdio_async()
 
     def run(self) -> bool:
