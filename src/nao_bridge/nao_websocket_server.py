@@ -299,18 +299,19 @@ class NaoWebsocketServer:
         try:
             async for message in websocket:
                 logger.info(f"Received message: {message}")
-                data = json.loads(message)
-                message_id = data["id"]
-                if message_id == "Command":
-                    task = asyncio.create_task(
-                        self._command_callback(websocket, data["data"])
-                    )
-                    self._command_tasks.add(task)
-                    task.add_done_callback(self._command_tasks.discard)
-                else:
-                    self._log(logging.ERROR, "Unknown id = " + message_id)
-        except Exception as e:  # noqa: BLE001 - a bad message must not kill the connection
-            self._log(logging.ERROR, f"Error in websocket handler: {e}")
+                try:
+                    data = json.loads(message)
+                    message_id = data["id"]
+                    if message_id == "Command":
+                        task = asyncio.create_task(
+                            self._command_callback(websocket, data["data"])
+                        )
+                        self._command_tasks.add(task)
+                        task.add_done_callback(self._command_tasks.discard)
+                    else:
+                        self._log(logging.ERROR, "Unknown id = " + str(message_id))
+                except Exception as e:  # noqa: BLE001 - reported to the client, never fatal
+                    self._log(logging.ERROR, f"Bad message ignored: {e!r}")
         finally:
             if not self.websocket_closing:
                 logger.info("websocket closing from the client")
@@ -325,8 +326,7 @@ class NaoWebsocketServer:
                 logging.INFO,
                 "Received connection from another client, disconnecting previous one",
             )
-            await self._stop_streams()
-            await self.websocket_client.close()
+            await self._websocket_disconnection(self.websocket_client)
 
         self.websocket_client = websocket
         if self.nao_connected:
@@ -341,18 +341,9 @@ class NaoWebsocketServer:
             self._start_streams()
 
     async def _websocket_disconnection(self, websocket):
-        if not self.websocket_client:
-            self._log(
-                logging.ERROR,
-                "received disconnection message BUT was not connected, should not happen",
-            )
-            return
-
         if websocket != self.websocket_client:
-            self._log(
-                logging.ERROR,
-                "received disconnection message from another client, should not happen",
-            )
+            # Already disconnected (e.g. replaced by a newer client): nothing to do.
+            logger.debug("disconnection of a client that is no longer attached")
             return
 
         await self._stop_streams()
@@ -381,9 +372,13 @@ class NaoWebsocketServer:
 
     # region Command messages execution
     async def _command_callback(self, websocket, data):
-        command_uuid = str(data["commandUuid"])
-        command_id = str(data["commandId"])
-        command_data = data["commandData"]
+        try:
+            command_uuid = str(data["commandUuid"])
+            command_id = str(data["commandId"])
+            command_data = data["commandData"]
+        except (KeyError, TypeError) as e:
+            self._log(logging.ERROR, f"Bad command ignored: missing {e}")
+            return
         logger.info("received command " + command_id)
 
         if not command_id in self.command_mapping:
@@ -393,6 +388,7 @@ class NaoWebsocketServer:
                 "commandUuid": command_uuid,
                 "resultType": "Error",
                 "message": error,
+                "data": None,
             }
             await self._send_to_websocket_client("CommandEnded", message_data)
             return

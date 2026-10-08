@@ -16,6 +16,7 @@ Implementation plans for Nao Bridge — each plan turns a settled part of a spec
 | [202610081700_bounded-connection-attempts.md](202610081700_bounded-connection-attempts.md) | `robot.connect_timeout_s` (5 s): each qi connection attempt is bounded instead of waiting ~76 s on a silent host | Done |
 | [202610081713_fake-behaviors-take-time.md](202610081713_fake-behaviors-take-time.md) | Fake behaviors last 5 s by default (stoppable), so running/stopping is observable offline; the fast tier sets them to 0 | Done |
 | [202610081816_robot-backends-in-their-own-modules.md](202610081816_robot-backends-in-their-own-modules.md) | `QiNaoRobot` → `RealNaoRobot` in `real_robot.py`, `FakeNaoRobot` in `fake_robot.py`; `robot.py` keeps the Protocol and `build_robot` | Done |
+| [202610081830_websocket-server-fixes.md](202610081830_websocket-server-fixes.md) | WebSocket server: a bad message no longer closes the session, a client swap logs no spurious error, every `CommandEnded` carries `data` | Done |
 
 ## Status legend
 

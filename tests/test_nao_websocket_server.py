@@ -7,8 +7,11 @@ No robot or network needed. Async runs via ``asyncio.run``.
 import asyncio
 import base64
 import json
-from collections.abc import AsyncIterator, Callable
+import logging
+from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any
+
+import pytest
 
 from nao_bridge.config import (
     AudioStream,
@@ -47,7 +50,7 @@ class MemorySocket:
 
     def __init__(
         self,
-        incoming: list[dict[str, Any]],
+        incoming: Sequence[dict[str, Any] | str],
         answers: int = 0,
         until: Callable[["MemorySocket"], bool] = lambda _: True,
     ) -> None:
@@ -68,7 +71,7 @@ class MemorySocket:
 
     async def _messages(self) -> AsyncIterator[str]:
         for message in self.incoming:
-            yield json.dumps(message)
+            yield message if isinstance(message, str) else json.dumps(message)
         await wait_until(
             lambda: len(self.of("CommandEnded")) >= self.answers and self.until(self)
         )
@@ -97,7 +100,7 @@ async def started_server(
 
 
 def session(
-    incoming: list[dict[str, Any]], answers: int
+    incoming: Sequence[dict[str, Any] | str], answers: int
 ) -> tuple[MemorySocket, list[str]]:
     socket = MemorySocket(incoming, answers)
 
@@ -146,6 +149,49 @@ def test_an_unknown_command_is_an_error_naming_it():
     [ended] = socket.of("CommandEnded")
     assert ended["resultType"] == "Error"
     assert "Fly" in ended["message"]
+    assert set(ended) == {"commandUuid", "resultType", "message", "data"}
+
+
+def test_bad_messages_are_reported_and_the_session_goes_on():
+    socket, robot_calls = session(
+        [
+            "not json",
+            {"id": "Telemetry", "data": {}},
+            {"id": "Command", "data": {"commandId": "Say"}},  # no uuid / data
+            command("c1", "Say", text="still here"),
+        ],
+        answers=1,
+    )
+    [ended] = socket.of("CommandEnded")
+    assert (ended["commandUuid"], ended["resultType"]) == ("c1", "Success")
+    assert "say" in robot_calls
+    errors = [m for m in socket.of("Log") if m["logLevel"] == "ERROR"]
+    assert len(errors) == 3
+
+
+def test_a_second_client_replaces_the_first_one_cleanly(
+    caplog: pytest.LogCaptureFixture,
+):
+    async def run() -> tuple[MemorySocket, MemorySocket, list[str]]:
+        server, robot = await started_server()
+        first = MemorySocket([], until=lambda s: s.closed)
+        first_handler = asyncio.create_task(server._websocket_handler(first))
+        await wait_until(lambda: server.websocket_client is first)
+        robot.commands.clear()
+        second = MemorySocket([])
+        await server._websocket_handler(second)
+        async with asyncio.timeout(2.0):
+            await first_handler
+        await server.nao_bridge.stop()
+        return first, second, [name for name, _ in robot.commands]
+
+    first, second, robot_calls = asyncio.run(run())
+    assert first.closed and second.closed
+    # The first client is reset (rest) before the second is readied (wake_up).
+    assert robot_calls.index("rest") < robot_calls.index("wake_up")
+    assert robot_calls.count("rest") == 2
+    assert second.of("NaoState") == [{"connected": True, "fakeRobot": True}]
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
 
 
 def test_catalog_commands_use_camel_case_payloads():
