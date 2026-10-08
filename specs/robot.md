@@ -68,7 +68,7 @@ Sensor callbacks are invoked **on Naoqi's threads**; marshalling onto an event l
 
 ### `QiNaoRobot`
 
-- **`qi` is imported lazily in `connect()`** (via `importlib`), so importing `nao_bridge` never needs it. If it's missing, `connect()` raises `RobotConnectionError` and names the wheel to install. **There is no silent fallback to fake** — that was the old behavior, and it let an agent believe a real robot was moving. Ask for the fake explicitly.
+- **`qi` is imported lazily in `connect()`** (via `importlib`), so importing `nao_bridge` never needs it. `qi` is a dependency on the platforms with a wheel and absent elsewhere ([project.md](project.md)). If it's missing, `connect()` raises `RobotConnectionError`: the message names the platforms that ship `qi` (macOS arm64, Linux x86_64, CPython 3.12 / 3.13), says to run `uv sync` there, and says the platform otherwise runs the `fake` backend only. **There is no silent fallback to fake** — that was the old behavior, and it let an agent believe a real robot was moving. Ask for the fake explicitly.
 - `connect()` with an empty IP or a non-positive port raises `RobotConnectionError` before trying.
 - `connect()` retries the session up to `connect_tries` times (default 10, from the config), then raises `RobotConnectionError`, chained to the last `qi` error.
 - Services are acquired lazily on first use and cached for the session; `close()` drops them.

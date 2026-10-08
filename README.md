@@ -15,7 +15,7 @@ Design docs live in [specs/](specs/_index.md); contributor and agent instruction
 > While the Qi package should work fine with more recent versions of Naoqi, the Naoqi API used here might have evolved since version 2.1.4.13. To test and add compatibility, we would need a Nao v6 robot (or even a Pepper robot) ! 🙂
 
 > [!NOTE]
-> No Nao robot? No worries! 😅 If you don't have a Nao or if your setup isn't supported by the qi package builds (like Windows users), use the `fake` backend (the default; `examples/configs/*-fake.json` for the servers): the API and servers run without actual hardware.
+> No Nao robot? No worries! 😅 If you don't have a Nao or if your platform has no `qi` wheel (like Windows), use the `fake` backend (the default; `examples/configs/*-fake.json` for the servers): the API and servers run without actual hardware.
 > See usage details below.
 
 ## Installation
@@ -30,14 +30,18 @@ This installs the package and the `nao-mcp-server` / `nao-websocket-server` comm
 
 ## Dependency with qi python package
 
-The communication with a real Nao robot relies on the `qi` python package, which is not on PyPI:
-- find the built package for your setup (MacOS or Linux, and Python version) in the [latest Release](https://github.com/funwithagents/libqi-python/releases) of our [fork](https://github.com/funwithagents/libqi-python) of the [official libqi-python repository](https://github.com/aldebaran/libqi-python) (which is no longer maintained)
-- currently compatible with MacOS arm64 and Linux architectures
-- download the matching .whl file
-- install it in the project environment: `uv pip install path/to/download/wheel.whl`
+Communicating with a real Nao relies on the `qi` Python package. It comes from the GitHub releases of our [fork](https://github.com/funwithagents/libqi-python) of the [official libqi-python repository](https://github.com/aldebaran/libqi-python), which is no longer maintained. It is a declared dependency, so **`uv sync` installs it** on the platforms that have a wheel:
+
+| Platform | `qi` | What runs |
+|---|---|---|
+| macOS arm64, Linux x86_64 (Python 3.12 or 3.13) | installed by `uv sync` | real robot and fake |
+| Windows, macOS Intel, Linux arm64 | not available | fake only |
 
 > [!WARNING]
-> Without `qi`, the `real` backend fails to connect with an explicit error. It no longer silently switches to fake mode: ask for the fake backend explicitly.
+> Without `qi`, the `real` backend fails to connect with an explicit error; it never silently switches to the fake. On a platform without a wheel, use the `fake` backend.
+
+> [!NOTE]
+> Install with `uv`: the wheel locations are uv settings (`[tool.uv.sources]`), which `pip` ignores.
 
 ## NaoBridge
 

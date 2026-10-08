@@ -135,9 +135,9 @@ class QiNaoRobot:
             qi = importlib.import_module("qi")
         except ImportError as e:
             raise RobotConnectionError(
-                "the real backend needs the `qi` package: install the wheel for your "
-                "platform from https://github.com/funwithagents/libqi-python/releases "
-                "(or use the fake backend)"
+                "the real backend needs the `qi` package, which nao-bridge installs on "
+                "macOS arm64 and Linux x86_64 with CPython 3.12 / 3.13 (run `uv sync`); "
+                "there is no qi wheel for other platforms, which run the fake backend only"
             ) from e
 
         url = f"tcp://{self.ip}:{self.port}"
