@@ -2,42 +2,47 @@
 
 Specified by [specs/bridge.md](../../specs/bridge.md). ``NaoBridge`` owns the
 ``start()`` / ``stop()`` lifecycle (``async with`` over it) and exposes intent-level
-async verbs returning ``bool``, the behavior catalog, and the touch / joints / audio
-streams, over the robot seam in [robot.py](robot.py) — a real Nao or the fake.
+async verbs returning ``bool``, the behavior catalog, and the robot's streams — touch
+as an ``Event``, joints as an ``Observable``, the microphone as ``audio_input()``
+subscribers over the mic feed — over the robot seam in [robot.py](robot.py), a real
+Nao or the fake, as the ``NaoBridgeConfig`` says.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import random
-from collections.abc import Callable, Coroutine
+import time
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Self
 
-from .robot import AUDIO_SAMPLE_RATE, Backend, NaoRobot, build_robot
+from .config import Backend, NaoBridgeConfig
+from .errors import BridgeError
+from .events import Event
+from .microphone import MicFeed
+from .observable import Observable
+from .robot import NaoRobot, build_robot
 
 __all__ = [
     "REACTION_TYPES",
     "BehaviorCatalog",
     "BehaviorInfos",
     "BridgeError",
+    "JointsState",
     "LocalizedString",
     "NaoBehavior",
     "NaoBridge",
+    "TouchEvent",
     "build_catalog",
 ]
 
 logger = logging.getLogger(__name__)
 
-type OnTouch = Callable[[str, float], Coroutine[Any, Any, None]]
-type OnJoints = Callable[[list[str], list[float]], Coroutine[Any, Any, None]]
-type OnAudio = Callable[[int, int, int, str], Coroutine[Any, Any, None]]
-
 POSTURE_SPEED = 0.8
 POSTURE_MAX_TRIES = 3
-JOINTS_PERIOD_S = 0.2
 
 REACTION_TYPES = ("Happy", "Proud", "Laugh", "Sad", "HeadTouched")
 _SYSTEM_PACKAGES = frozenset(
@@ -53,8 +58,21 @@ _BODY_ACTION_WORDS = {
 }
 
 
-class BridgeError(RuntimeError):
-    """Lifecycle misuse: starting a running bridge, reaching the robot while stopped."""
+@dataclass(frozen=True)
+class TouchEvent:
+    """A tactile head sensor changed: ``part`` is its Naoqi key."""
+
+    part: str  # FrontTactilTouched | MiddleTactilTouched | RearTactilTouched
+    touched: bool
+
+
+@dataclass(frozen=True)
+class JointsState:
+    """One joints sample: angles in radians, ``ts`` on the monotonic clock."""
+
+    names: tuple[str, ...]
+    angles: tuple[float, ...]
+    ts: float
 
 
 @dataclass
@@ -188,31 +206,26 @@ def build_catalog(packages: list[dict[str, Any]]) -> BehaviorCatalog:
 class NaoBridge:
     """Drive a Nao robot (``real``) or its offline stand-in (``fake``).
 
-    Use ``async with NaoBridge("fake") as bridge:`` or the ``start()`` / ``stop()`` pair.
+    Built from a ``NaoBridgeConfig`` (or a bare backend string). Use
+    ``async with NaoBridge("fake") as bridge:`` or the ``start()`` / ``stop()`` pair.
     Action verbs return ``True`` on success and never raise.
     """
 
-    def __init__(
-        self,
-        backend: Backend = "real",
-        *,
-        ip: str = "",
-        port: int = 9559,
-        on_touch: OnTouch | None = None,
-        on_joints: OnJoints | None = None,
-        on_audio: OnAudio | None = None,
-    ) -> None:
-        self._backend: Backend = backend
-        self._ip = ip
-        self._port = port
-        self._on_touch = on_touch
-        self._on_joints = on_joints
-        self._on_audio = on_audio
+    def __init__(self, config: NaoBridgeConfig | Backend | None = None) -> None:
+        if config is None:
+            config = NaoBridgeConfig()
+        elif isinstance(config, str):
+            config = NaoBridgeConfig(backend=config)
+        self._config = config
 
         self._robot: NaoRobot | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._joints_task: asyncio.Task[None] | None = None
         self._catalog = BehaviorCatalog()
+
+        self.on_touch: Event[TouchEvent] = Event()
+        self._joints: Observable[JointsState | None] = Observable(None)
+        self._mic = MicFeed()
 
         self.current_dances: list[str] = []
         self.current_expressive_reactions: dict[str, str] = {}
@@ -220,11 +233,27 @@ class NaoBridge:
         self.current_apps: list[str] = []
         self.current_behaviors: list[str] = []
 
+    @classmethod
+    def from_dict(cls, data: Any) -> Self:
+        return cls(NaoBridgeConfig.from_dict(data))
+
+    @classmethod
+    def from_json(cls, text: str) -> Self:
+        return cls(NaoBridgeConfig.from_json(text))
+
+    @classmethod
+    def from_json_file(cls, path: str | Path) -> Self:
+        return cls(NaoBridgeConfig.from_json_file(path))
+
     # region Lifecycle
 
     @property
+    def config(self) -> NaoBridgeConfig:
+        return self._config
+
+    @property
     def backend(self) -> Backend:
-        return self._backend
+        return self._config.backend
 
     @property
     def running(self) -> bool:
@@ -244,22 +273,23 @@ class NaoBridge:
     async def start(self) -> None:
         if self._robot is not None:
             raise BridgeError("the bridge is already running")
-        robot = build_robot(self._backend, ip=self._ip, port=self._port)
+        streams = self._config.streams
+        robot = build_robot(self._config)
         await asyncio.to_thread(robot.connect)
         self._loop = asyncio.get_running_loop()
         try:
-            if self._on_touch is not None:
+            if streams.touch.enabled:
                 await asyncio.to_thread(robot.subscribe_touch, self._forward_touch)
-            if self._on_audio is not None:
-                await asyncio.to_thread(robot.subscribe_audio, self._forward_audio)
+            if streams.audio.enabled:
+                await self._mic.start(robot, streams.audio.channel)
             self._catalog = build_catalog(await asyncio.to_thread(robot.list_packages))
         except BaseException:
             await self._teardown(robot)
             raise
         self._robot = robot
-        if self._on_joints is not None:
+        if streams.joints.enabled:
             self._joints_task = asyncio.create_task(
-                self._joints_loop(robot, self._on_joints)
+                self._joints_loop(robot, streams.joints.period_s)
             )
 
     async def stop(self) -> None:
@@ -271,6 +301,7 @@ class NaoBridge:
             self._joints_task.cancel()
             await asyncio.gather(self._joints_task, return_exceptions=True)
             self._joints_task = None
+            self._joints.set(None)
         await self._teardown(robot)
         self.current_dances.clear()
         self.current_expressive_reactions.clear()
@@ -279,11 +310,10 @@ class NaoBridge:
         self.current_behaviors.clear()
 
     async def _teardown(self, robot: NaoRobot) -> None:
+        await self._mic.stop()
         steps: list[Callable[[], None]] = []
-        if self._on_touch is not None:
+        if self._config.streams.touch.enabled:
             steps.append(robot.unsubscribe_touch)
-        if self._on_audio is not None:
-            steps.append(robot.unsubscribe_audio)
         steps.append(robot.close)
         for step in steps:
             try:
@@ -302,28 +332,50 @@ class NaoBridge:
 
     # region Streams
 
+    @property
+    def joints(self) -> Observable[JointsState | None]:
+        """The latest joints sample (``None`` outside a session); ``BridgeError`` when
+        the joints stream is disabled."""
+        if not self._config.streams.joints.enabled:
+            raise BridgeError("the joints stream is disabled (streams.joints.enabled)")
+        return self._joints
+
+    @property
+    def mic(self) -> MicFeed:
+        """The mic feed: ``latest()`` and ``published_count`` for samplers."""
+        return self._mic
+
+    def audio_input(self, *, preroll_s: float = 0.0) -> AsyncIterator[bytes]:
+        """A new subscriber to the microphone: int16 LE mono ``bytes`` per chunk at
+        ``mic.sample_rate``, every chunk in order. ``BridgeError`` when the audio stream
+        is disabled or the bridge is not running."""
+        if not self._config.streams.audio.enabled:
+            raise BridgeError("the audio stream is disabled (streams.audio.enabled)")
+        if self._robot is None:
+            raise BridgeError("the bridge is not running; call start() first")
+        return self._mic.subscribe(preroll_s=preroll_s)
+
     def _forward_touch(self, key: str, value: float) -> None:
-        if self._on_touch is not None and self._loop is not None:
-            asyncio.run_coroutine_threadsafe(self._on_touch(key, value), self._loop)
+        """Naoqi's touch callback, on Naoqi's thread: emit on the bridge's loop."""
+        loop = self._loop
+        if loop is None:
+            return
+        event = TouchEvent(part=key, touched=int(value) == 1)
+        try:
+            loop.call_soon_threadsafe(self.on_touch.emit, event)
+        except RuntimeError:  # the loop is closed: the session is over
+            pass
 
-    def _forward_audio(
-        self, channels: int, samples_per_channel: int, buffer: bytes
-    ) -> None:
-        if self._on_audio is not None and self._loop is not None:
-            data = base64.b64encode(buffer).decode("ascii")
-            asyncio.run_coroutine_threadsafe(
-                self._on_audio(AUDIO_SAMPLE_RATE, channels, samples_per_channel, data),
-                self._loop,
-            )
-
-    async def _joints_loop(self, robot: NaoRobot, on_joints: OnJoints) -> None:
+    async def _joints_loop(self, robot: NaoRobot, period_s: float) -> None:
         while True:
             try:
                 names, angles = await asyncio.to_thread(robot.get_joints)
-                await on_joints(names, angles)
+                self._joints.set(
+                    JointsState(tuple(names), tuple(angles), time.monotonic())
+                )
             except Exception:
                 logger.exception("Joints read failed")
-            await asyncio.sleep(JOINTS_PERIOD_S)
+            await asyncio.sleep(period_s)
 
     # endregion
 

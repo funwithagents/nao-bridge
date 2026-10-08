@@ -15,7 +15,7 @@ Design docs live in [specs/](specs/_index.md); contributor and agent instruction
 > While the Qi package should work fine with more recent versions of Naoqi, the Naoqi API used here might have evolved since version 2.1.4.13. To test and add compatibility, we would need a Nao v6 robot (or even a Pepper robot) ! 🙂
 
 > [!NOTE]
-> No Nao robot? No worries! 😅 If you don't have a Nao or if your setup isn't supported by the qi package builds (like Windows users), use the `fake` backend (`--fake-robot` on the servers): the API and servers run without actual hardware.
+> No Nao robot? No worries! 😅 If you don't have a Nao or if your setup isn't supported by the qi package builds (like Windows users), use the `fake` backend (the default; `examples/configs/*-fake.json` for the servers): the API and servers run without actual hardware.
 > See usage details below.
 
 ## Installation
@@ -51,7 +51,9 @@ from nao_bridge import NaoBridge
 
 
 async def main():
-    async with NaoBridge("real", ip="<nao-ip>") as bridge:  # or NaoBridge("fake")
+    # NaoBridge("fake") for the offline robot
+    bridge = NaoBridge.from_dict({"backend": "real", "robot": {"ip": "<nao-ip>"}})
+    async with bridge:
         await bridge.wake_up()
         await bridge.say("Hello!")
         dances = bridge.get_dance_behaviors()
@@ -62,14 +64,56 @@ async def main():
 asyncio.run(main())
 ```
 
-`NaoBridge(backend="real", *, ip="", port=9559, on_touch=None, on_joints=None, on_audio=None)`:
-- **`backend`**: `"real"` for a robot (needs `qi`), `"fake"` for the offline stand-in
-- **`ip`** / **`port`**: the robot's address (default port 9559)
-- **`on_touch`**: if set, called when Nao is touched: `async def on_touch(key, value)`, where `key` is the part touched (`FrontTactilTouched`, `MiddleTactilTouched`, `RearTactilTouched`) and `value` is 0 or 1
-- **`on_joints`**: if set, called every 0.2 s with the robot's joints: `async def on_joints(joints_names, joints_angles)` (angles in radians)
-- **`on_audio`**: if set, called with each microphone buffer: `async def on_audio(rate, nbOfChannels, nbOfSamplesByChannel, bufferData)`, where `bufferData` is a base64 encoded string of 16 bits little endian samples
+### Configuration
+
+The bridge is built from a `NaoBridgeConfig`, in code or from JSON (`NaoBridge.from_dict` / `from_json` / `from_json_file`). Every block is optional; the default is the offline fake with no streams:
+
+```json
+{
+  "backend": "real",
+  "robot": { "ip": "192.168.1.42", "port": 9559, "connect_tries": 10 },
+  "streams": {
+    "touch": { "enabled": true },
+    "joints": { "enabled": true, "period_s": 0.2 },
+    "audio": { "enabled": true, "channel": "front" }
+  }
+}
+```
+
+- **`backend`**: `"fake"` (default, offline stand-in) or `"real"` (needs `qi` and `robot.ip`)
+- **`robot`**: the robot's address; validated but ignored on `fake`, so switching backend is a one-word change
+- **`streams`**: which robot streams the bridge subscribes to; `channel` picks the microphone (`front`, `rear`, `left`, `right`)
+
+A malformed config raises `ConfigError` naming the key (e.g. `streams.joints.period_s must be a positive, finite number`). Full reference: [specs/config.md](specs/config.md).
 
 `async with` connects on entry and disconnects on exit; `await bridge.start()` / `await bridge.stop()` do the same for hosts with their own lifecycle hooks. `bridge.robot` gives access to the underlying robot object while running.
+
+### Streams
+
+Each enabled stream has its own API, open to any number of consumers:
+
+```python
+streams = {
+    "touch": {"enabled": True},
+    "joints": {"enabled": True},
+    "audio": {"enabled": True},
+}
+async with NaoBridge.from_dict({"streams": streams}) as bridge:
+    # touch events
+    bridge.on_touch.subscribe(lambda event: print(event.part, event.touched))
+
+    # the latest joints state
+    pose = await bridge.joints.wait_for(lambda s: s is not None)
+    print(dict(zip(pose.names, pose.angles)))
+
+    # the microphone: int16 LE mono at 16 kHz, every chunk in order
+    async for chunk in bridge.audio_input():
+        ...  # feed your ASR
+```
+
+- **Touch**: `bridge.on_touch` is an event; handlers receive a `TouchEvent(part, touched)` on the event loop
+- **Joints**: `bridge.joints` holds the latest `JointsState(names, angles, ts)` (radians): read `.value`, iterate `.changes()` (a slow reader skips to the latest), or `await .wait_for(predicate)`
+- **Audio**: every `bridge.audio_input()` call is its own subscriber receiving every chunk; `preroll_s=` starts it up to 2 s in the past (e.g. to hear the sentence that woke a wake-word detector); `bridge.mic.latest()` gives the newest chunk for level meters
 
 ### APIs
 
@@ -110,11 +154,14 @@ A MCP server linked to NaoBridge.
 - run the MCP server with a real Nao robot
     - connect your Nao to your network
     - retrieve its IP address (by pressing its torso button) ⇒ `<nao-ip>`
-    - run the server: `uv run nao-mcp-server --ip <nao-ip>`
+    - put it in a copy of [examples/configs/mcp-real.json](examples/configs/mcp-real.json) (`bridge.robot.ip`)
+    - run the server: `uv run nao-mcp-server --config path/to/mcp-real.json`
 
 - run the server on the fake backend
-  - if you don't have a Nao robot or if your current setup is not compatible with the available qi packages, you can run the MCP server with `--fake-robot` ⇒ all the MCP tools will be available for execution, they will just do nothing real
-  - `uv run nao-mcp-server --fake-robot`
+  - if you don't have a Nao robot or if your current setup is not compatible with the available qi packages, you can run the MCP server on the fake ⇒ all the MCP tools will be available for execution, they will just do nothing real
+  - `uv run nao-mcp-server` (no config means the fake), or `--config examples/configs/mcp-fake.json`
+
+A server config has a `bridge` block (the bridge's config above) and a `server` block (`transport`: `stdio` or `sse`).
 
 ### Usage with HuggingFace Tiny Agents
 
@@ -128,7 +175,7 @@ I will not see your answers except when using Nao tools. So always make sure to 
 ```
 - add a `agent.json` file with your configuration
 
-For a real robot:
+For a real robot (with your copy of `mcp-real.json`):
 ```json
 {
     "model": "Qwen/Qwen2.5-72B-Instruct",
@@ -140,7 +187,7 @@ For a real robot:
           "command": "uv",
           "args": [
             "--directory", "path/to/repo", "run", "nao-mcp-server",
-            "--ip", "<nao-ip>"
+            "--config", "path/to/mcp-real.json"
           ]
         }
       }
@@ -160,7 +207,7 @@ For the fake backend:
           "command": "uv",
           "args": [
             "--directory", "path/to/repo", "run", "nao-mcp-server",
-            "--fake-robot"
+            "--config", "path/to/repo/examples/configs/mcp-fake.json"
           ]
         }
       }
@@ -180,14 +227,14 @@ For the fake backend:
 
 - Add to your `claude_desktop_config.json`
 
-For a real robot:
+For a real robot (with your copy of `mcp-real.json`):
 ```json
 "mcpServers": {
   "nao-mcp": {
     "command": "uv",
     "args": [
       "--directory", "path/to/repo", "run", "nao-mcp-server",
-      "--ip", "<nao-ip>"
+      "--config", "path/to/mcp-real.json"
     ]
   }
 }
@@ -200,7 +247,7 @@ For the fake backend:
     "command": "uv",
     "args": [
       "--directory", "path/to/repo", "run", "nao-mcp-server",
-      "--fake-robot"
+      "--config", "path/to/repo/examples/configs/mcp-fake.json"
     ]
   }
 }
@@ -240,11 +287,14 @@ It provides access to all NaoBridge features through websocket messages in JSON 
 - run the server with a real Nao robot
     - connect your Nao to your network
     - retrieve its IP address (by pressing its torso button) ⇒ `<nao-ip>`
-    - run the server: `uv run nao-websocket-server --ip <nao-ip> (--with-joints-data) (--with-audio-data)`
+    - put it in a copy of [examples/configs/websocket-real.json](examples/configs/websocket-real.json) (`bridge.robot.ip`), and choose the streams sent to the client in `bridge.streams`
+    - run the server: `uv run nao-websocket-server --config path/to/websocket-real.json`
 
 - run the server on the fake backend
-  - if you don't have a Nao robot or if your current setup is not compatible with the available qi packages, you can run the server with `--fake-robot` ⇒ all communication with the server will work but will just do nothing real
-  - `uv run nao-websocket-server --fake-robot`
+  - if you don't have a Nao robot or if your current setup is not compatible with the available qi packages, you can run the server on the fake ⇒ all communication with the server will work but will just do nothing real
+  - `uv run nao-websocket-server --config examples/configs/websocket-fake.json` (every stream on, the fake streams silent audio)
+
+The `server` block sets the WebSocket `port` (default 8002).
 
 ### Messages
 

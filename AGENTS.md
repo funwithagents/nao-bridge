@@ -15,6 +15,7 @@ Where things live. This is a coarse, module-level map — for the full file inve
 | `plans/` | Implementation plans turning settled specs into buildable steps — indexed by [plans/_index.md](plans/_index.md) |
 | `tests/` | Fast, deterministic, no-network tests; mirrors the `src/nao_bridge/` module structure |
 | `tests-e2e/` | Opt-in live tests that call real external services (not collected by default `pytest`) |
+| `examples/configs/` | Ready-to-use server config files (fake and real, MCP and WebSocket), kept in sync with [config.md](specs/config.md) |
 
 ### `src/nao_bridge/` modules
 
@@ -22,11 +23,16 @@ Where things live. This is a coarse, module-level map — for the full file inve
 
 | Module | Role | Spec |
 |---|---|---|
-| [`src/nao_bridge/__init__.py`](src/nao_bridge/__init__.py) | Front door: re-exports `NaoBridge`, `BridgeError`, `BehaviorInfos`, `LocalizedString`, `RobotConnectionError`, `Backend` | [bridge.md](specs/bridge.md) |
+| [`src/nao_bridge/__init__.py`](src/nao_bridge/__init__.py) | Front door: re-exports what a caller needs — `NaoBridge`, the config classes, the stream values (`TouchEvent`, `JointsState`, `MicChunk`), `Event` / `Observable`, the errors | [bridge.md](specs/bridge.md) |
+| [`src/nao_bridge/config.py`](src/nao_bridge/config.py) | `NaoBridgeConfig` (backend, robot, streams), the `from_dict` / `from_json` / `from_json_file` loaders, `ConfigError`, field readers reused by server configs | [config.md](specs/config.md) |
+| [`src/nao_bridge/errors.py`](src/nao_bridge/errors.py) | `BridgeError`, shared by the bridge's modules | [bridge.md](specs/bridge.md) |
+| [`src/nao_bridge/events.py`](src/nao_bridge/events.py) | `Event[T]`: synchronous pub/sub primitive (`bridge.on_touch`) | [events.md](specs/events.md) |
+| [`src/nao_bridge/observable.py`](src/nao_bridge/observable.py) | `Observable[T]`: readable, subscribable state (`bridge.joints`) | [observable.md](specs/observable.md) |
+| [`src/nao_bridge/microphone.py`](src/nao_bridge/microphone.py) | `MicFeed` / `MicChunk`: the one subscription to Naoqi's pushed audio, a ring, any number of `audio_input()` subscribers | [microphone.md](specs/microphone.md) |
 | [`src/nao_bridge/robot.py`](src/nao_bridge/robot.py) | Connection seam: the `NaoRobot` Protocol, `QiNaoRobot` (real, over `qi`), `FakeNaoRobot` (offline, records commands), `build_robot(backend)` | [robot.md](specs/robot.md) |
-| [`src/nao_bridge/bridge.py`](src/nao_bridge/bridge.py) | `NaoBridge`: `start()`/`stop()` lifecycle, intent-level verbs, behavior catalog, touch/joints/audio streams over the robot seam | [bridge.md](specs/bridge.md) |
-| [`src/nao_bridge/nao_mcp_server.py`](src/nao_bridge/nao_mcp_server.py) | `NaoMcpServer`: exposes `NaoBridge` actions as MCP tools for LLM agents (stdio) | [nao-mcp-server.md](specs/nao-mcp-server.md) |
-| [`src/nao_bridge/nao_websocket_server.py`](src/nao_bridge/nao_websocket_server.py) | `NaoWebsocketServer`: single-client JSON WebSocket protocol over `NaoBridge`, plus streamed touch/joints/audio/log events | [nao-websocket-server.md](specs/nao-websocket-server.md) |
+| [`src/nao_bridge/bridge.py`](src/nao_bridge/bridge.py) | `NaoBridge`: built from a `NaoBridgeConfig`; `start()`/`stop()` lifecycle, intent-level verbs, behavior catalog, stream APIs (`on_touch`, `joints`, `mic` / `audio_input()`) over the robot seam | [bridge.md](specs/bridge.md) |
+| [`src/nao_bridge/nao_mcp_server.py`](src/nao_bridge/nao_mcp_server.py) | `NaoMcpServer` + `NaoMcpServerConfig`: exposes `NaoBridge` actions as MCP tools for LLM agents (`--config`) | [nao-mcp-server.md](specs/nao-mcp-server.md) |
+| [`src/nao_bridge/nao_websocket_server.py`](src/nao_bridge/nao_websocket_server.py) | `NaoWebsocketServer` + `NaoWebsocketServerConfig`: single-client JSON WebSocket protocol over `NaoBridge`, plus streamed touch/joints/audio/log events (`--config`) | [nao-websocket-server.md](specs/nao-websocket-server.md) |
 
 **Keep this map current:** when you add, rename, or remove a top-level `src/nao_bridge/` module or a root directory, update the map in the same change — same discipline as keeping spec/plan statuses honest (below). A test (`tests/test_project_map.py`) enforces that every `src/nao_bridge/*.py` module appears here and vice-versa — and that the spec frontmatter (see below) stays honest too.
 

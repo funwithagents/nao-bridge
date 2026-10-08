@@ -8,8 +8,9 @@ Implementation plans for Nao Bridge — each plan turns a settled part of a spec
 
 | Plan | Description | Status |
 |---|---|---|
-| [202610071900_existing-code-to-green.md](202610071900_existing-code-to-green.md) | Bring pre-SDD code through lint/type-check/tests, package imports + entry points, fix `stop_expressive_reaction` (delivered by the robot/bridge split) | Done |
-| [202610072000_robot-bridge-split.md](202610072000_robot-bridge-split.md) | Reachy-style architecture: `robot.py` seam (`real`/`fake`) + `NaoBridge` in `bridge.py`; servers ported; fast-tier tests | Done |
+| [202610071850_existing-code-to-green.md](202610071850_existing-code-to-green.md) | Bring pre-SDD code through lint/type-check/tests, package imports + entry points, fix `stop_expressive_reaction` (delivered by the robot/bridge split) | Done |
+| [202610071906_robot-bridge-split.md](202610071906_robot-bridge-split.md) | Robot seam / bridge architecture: `robot.py` seam (`real`/`fake`) + `NaoBridge` in `bridge.py`; servers ported; fast-tier tests | Done |
+| [202610081509_config-and-stream-apis.md](202610081509_config-and-stream-apis.md) | `NaoBridgeConfig` + server configs + `--config` CLIs; stream APIs replacing callbacks (touch `Event`, joints `Observable`, mic feed with `audio_input()` subscribers) | Done |
 
 ## Status legend
 

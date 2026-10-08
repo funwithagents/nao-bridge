@@ -10,8 +10,29 @@ from typing import Any
 
 import pytest
 
-from nao_bridge.bridge import BridgeError, NaoBridge, build_catalog
+from nao_bridge.bridge import (
+    BridgeError,
+    JointsState,
+    NaoBridge,
+    TouchEvent,
+    build_catalog,
+)
+from nao_bridge.config import (
+    AudioStream,
+    JointsStream,
+    NaoBridgeConfig,
+    StreamSettings,
+    TouchStream,
+)
 from nao_bridge.robot import FakeNaoRobot
+
+ALL_STREAMS = NaoBridgeConfig(
+    streams=StreamSettings(
+        touch=TouchStream(enabled=True),
+        joints=JointsStream(enabled=True, period_s=0.02),
+        audio=AudioStream(enabled=True, channel="left"),
+    )
+)
 
 
 def fake(bridge: NaoBridge) -> FakeNaoRobot:
@@ -251,54 +272,109 @@ def test_stop_releases_long_running_behaviors_and_clears_tracking():
     assert asyncio.run(run()) == (False, [])
 
 
+# --- Config -------------------------------------------------------------------
+
+
+def test_construction_from_a_config_a_backend_string_or_nothing():
+    assert NaoBridge().backend == "fake"
+    assert NaoBridge("fake").config == NaoBridgeConfig()
+    from_dict = NaoBridge.from_dict({"streams": {"touch": {"enabled": True}}})
+    assert from_dict.config.streams.touch.enabled
+    assert NaoBridge.from_json('{"backend": "fake"}').backend == "fake"
+
+
 # --- Streams ------------------------------------------------------------------
 
 
-def test_touch_and_audio_events_reach_the_callbacks():
-    touches: list[tuple[str, float]] = []
-    audio: list[tuple[int, int, int, str]] = []
-
-    async def on_touch(key: str, value: float) -> None:
-        touches.append((key, value))
-
-    async def on_audio(rate: int, channels: int, samples: int, data: str) -> None:
-        audio.append((rate, channels, samples, data))
-
-    async def run() -> list[tuple[str, dict[str, Any]]]:
-        async with NaoBridge("fake", on_touch=on_touch, on_audio=on_audio) as bridge:
-            robot = fake(bridge)
-            robot.touch("FrontTactilTouched", 1.0)
-            robot.emit_audio(1, 2, b"\x01\x00\x02\x00")
-            await wait_until(lambda: bool(touches and audio))
-        return robot.commands
-
-    commands = asyncio.run(run())
-    assert touches == [("FrontTactilTouched", 1.0)]
-    assert audio == [(16000, 1, 2, "AQACAA==")]
-    assert ("unsubscribe_touch", {}) in commands
-    assert ("unsubscribe_audio", {}) in commands
-
-
-def test_streams_without_callbacks_are_not_subscribed():
+def test_disabled_streams_are_not_subscribed_and_their_apis_refuse():
     async def run() -> list[str]:
         async with NaoBridge("fake") as bridge:
+            with pytest.raises(BridgeError, match="joints"):
+                _ = bridge.joints
+            with pytest.raises(BridgeError, match="audio"):
+                bridge.audio_input()
             return [name for name, _ in fake(bridge).commands]
 
     assert asyncio.run(run()) == ["connect"]
 
 
-def test_joints_are_polled_while_running():
-    joints: list[tuple[list[str], list[float]]] = []
+def test_enabled_streams_are_subscribed_at_start_and_released_at_stop():
+    async def run() -> list[tuple[str, dict[str, Any]]]:
+        async with NaoBridge(ALL_STREAMS) as bridge:
+            robot = fake(bridge)
+        return robot.commands
 
-    async def on_joints(names: list[str], angles: list[float]) -> None:
-        joints.append((names, angles))
+    commands = asyncio.run(run())
+    assert ("subscribe_touch", {}) in commands
+    assert ("subscribe_audio", {"channel": "left"}) in commands
+    assert commands[-3:] == [
+        ("unsubscribe_audio", {}),
+        ("unsubscribe_touch", {}),
+        ("close", {}),
+    ]
 
-    async def run() -> int:
-        async with NaoBridge("fake", on_joints=on_joints):
-            await wait_until(lambda: len(joints) >= 2)
-        count = len(joints)
-        await asyncio.sleep(0.3)
-        return len(joints) - count
 
-    assert asyncio.run(run()) == 0  # nothing polled after stop
-    assert joints[0] == (["HeadYaw", "HeadPitch"], [0.0, 0.1])
+def test_touch_events_are_emitted_on_the_event_loop():
+    async def run() -> list[tuple[TouchEvent, bool]]:
+        received: list[tuple[TouchEvent, bool]] = []
+        async with NaoBridge(ALL_STREAMS) as bridge:
+            loop = asyncio.get_running_loop()
+
+            def on_touch(event: TouchEvent) -> None:
+                received.append((event, asyncio.get_running_loop() is loop))
+
+            bridge.on_touch.subscribe(on_touch)
+            fake(bridge).touch("FrontTactilTouched", 1.0)
+            fake(bridge).touch("FrontTactilTouched", 0.0)
+            await wait_until(lambda: len(received) == 2)
+        return received
+
+    assert asyncio.run(run()) == [
+        (TouchEvent("FrontTactilTouched", True), True),
+        (TouchEvent("FrontTactilTouched", False), True),
+    ]
+
+
+def test_joints_are_published_while_running_and_reset_at_stop():
+    async def run() -> tuple[
+        JointsState | None, JointsState | None, JointsState | None
+    ]:
+        bridge = NaoBridge(ALL_STREAMS)
+        before = bridge.joints.value
+        await bridge.start()
+        sample = await asyncio.wait_for(
+            bridge.joints.wait_for(lambda s: s is not None), 1.0
+        )
+        await bridge.stop()
+        return before, sample, bridge.joints.value
+
+    before, sample, after = asyncio.run(run())
+    assert before is None and after is None
+    assert sample is not None
+    assert (sample.names, sample.angles) == (("HeadYaw", "HeadPitch"), (0.0, 0.1))
+
+
+def test_audio_input_streams_the_robot_microphone_to_several_subscribers():
+    async def run() -> tuple[int, int, bool, bool]:
+        async with NaoBridge(ALL_STREAMS) as bridge:
+            fake(bridge).audio_chunk_s = 0.01
+
+            async def count(n: int) -> int:
+                got = 0
+                async for chunk in bridge.audio_input():
+                    # silence, int16 mono (the first chunks may predate the 10 ms pace)
+                    assert chunk and chunk == bytes(len(chunk))
+                    got += 1
+                    if got == n:
+                        break
+                return got
+
+            first, second = await asyncio.wait_for(
+                asyncio.gather(count(5), count(5)), 2.0
+            )
+            live = bridge.mic.latest() is not None
+        with pytest.raises(BridgeError, match="not running"):
+            bridge.audio_input()
+        return first, second, live, bridge.mic.latest() is None
+
+    assert asyncio.run(run()) == (5, 5, True, True)

@@ -25,7 +25,7 @@ async def call(server: NaoMcpServer, tool: str, **arguments: Any) -> str:
 
 def test_tools_are_described_by_their_docstrings():
     async def run() -> dict[str, Any]:
-        server = NaoMcpServer("fake", "", 9559)
+        server = NaoMcpServer()
         return {tool.name: tool for tool in await server.mcp.list_tools()}
 
     tools = asyncio.run(run())
@@ -53,7 +53,7 @@ def test_tools_are_described_by_their_docstrings():
 
 def test_action_tools_report_success_and_failure_as_text():
     async def run() -> list[str]:
-        server = NaoMcpServer("fake", "", 9559)
+        server = NaoMcpServer()
         async with server.nao_bridge:
             return [
                 await call(server, "say", text="Hello"),
@@ -70,7 +70,7 @@ def test_action_tools_report_success_and_failure_as_text():
 
 def test_list_tools_return_json_the_model_can_feed_back():
     async def run() -> tuple[list[dict[str, Any]], list[str], list[dict[str, Any]]]:
-        server = NaoMcpServer("fake", "", 9559)
+        server = NaoMcpServer()
         async with server.nao_bridge:
             dances = json.loads(await call(server, "get_dance_list"))
             reactions = json.loads(await call(server, "get_expressive_reaction_types"))

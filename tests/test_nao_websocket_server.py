@@ -5,12 +5,33 @@ No robot or network needed. Async runs via ``asyncio.run``.
 """
 
 import asyncio
+import base64
 import json
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
-from nao_bridge.nao_websocket_server import NaoWebsocketServer
+from nao_bridge.config import (
+    AudioStream,
+    JointsStream,
+    NaoBridgeConfig,
+    StreamSettings,
+    TouchStream,
+)
+from nao_bridge.nao_websocket_server import NaoWebsocketServer, NaoWebsocketServerConfig
 from nao_bridge.robot import FakeNaoRobot
+
+TOUCH_ONLY = NaoWebsocketServerConfig(
+    bridge=NaoBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True)))
+)
+ALL_STREAMS = NaoWebsocketServerConfig(
+    bridge=NaoBridgeConfig(
+        streams=StreamSettings(
+            touch=TouchStream(enabled=True),
+            joints=JointsStream(enabled=True, period_s=0.02),
+            audio=AudioStream(enabled=True),
+        )
+    )
+)
 
 
 async def wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> None:
@@ -21,11 +42,18 @@ async def wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> Non
 
 class MemorySocket:
     """A client connection: yields ``incoming`` messages, then stays open until the
-    server has answered ``answers`` commands; records what the server sends."""
+    server has answered ``answers`` commands and ``until`` holds; records what the
+    server sends."""
 
-    def __init__(self, incoming: list[dict[str, Any]], answers: int = 0) -> None:
+    def __init__(
+        self,
+        incoming: list[dict[str, Any]],
+        answers: int = 0,
+        until: Callable[["MemorySocket"], bool] = lambda _: True,
+    ) -> None:
         self.incoming = incoming
         self.answers = answers
+        self.until = until
         self.sent: list[dict[str, Any]] = []
         self.closed = False
 
@@ -41,7 +69,9 @@ class MemorySocket:
     async def _messages(self) -> AsyncIterator[str]:
         for message in self.incoming:
             yield json.dumps(message)
-        await wait_until(lambda: len(self.of("CommandEnded")) >= self.answers)
+        await wait_until(
+            lambda: len(self.of("CommandEnded")) >= self.answers and self.until(self)
+        )
 
     def __aiter__(self) -> AsyncIterator[str]:
         return self._messages()
@@ -54,12 +84,13 @@ def command(uuid: str, command_id: str, **data: Any) -> dict[str, Any]:
     }
 
 
-async def started_server() -> tuple[NaoWebsocketServer, FakeNaoRobot]:
+async def started_server(
+    config: NaoWebsocketServerConfig = TOUCH_ONLY,
+) -> tuple[NaoWebsocketServer, FakeNaoRobot]:
     """A server with its bridge up on the fake, without opening a network listener."""
-    server = NaoWebsocketServer("fake", False, False, "", 9559, 0)
+    server = NaoWebsocketServer(config)
     server.async_loop = asyncio.get_running_loop()
-    await server.nao_bridge.start()
-    server.nao_connected = True
+    assert await server._start_bridge()
     robot = server.nao_bridge.robot
     assert isinstance(robot, FakeNaoRobot)
     return server, robot
@@ -169,3 +200,33 @@ def test_touch_events_are_streamed_to_the_client():
     assert asyncio.run(run()).of("Touch") == [
         {"part": "MiddleTactilTouched", "touched": True}
     ]
+
+
+def test_joints_and_audio_stream_to_the_client_during_its_session():
+    async def run() -> tuple[MemorySocket, int]:
+        server, robot = await started_server(ALL_STREAMS)
+        robot.audio_chunk_s = 0.01
+        socket = MemorySocket(
+            [], until=lambda s: len(s.of("Joints")) >= 2 and len(s.of("Audio")) >= 3
+        )
+        await server._websocket_handler(socket)
+        sent_at_close = len(socket.sent)
+        await asyncio.sleep(0.1)  # the client is gone: its streams must have stopped
+        late = len(socket.sent) - sent_at_close
+        await server.nao_bridge.stop()
+        return socket, late
+
+    socket, late = asyncio.run(run())
+    assert late == 0
+    assert socket.of("Joints")[0] == {
+        "jointsNames": ["HeadYaw", "HeadPitch"],
+        "jointsAngles": [0.0, 0.1],
+    }
+    audio = socket.of("Audio")[-1]
+    assert (audio["rate"], audio["channels"]) == (16000, 1)
+    assert len(base64.b64decode(audio["data"])) == 2 * audio["nbSamplesPerChannel"]
+
+
+def test_disabled_streams_send_nothing():
+    socket, _ = session([command("c1", "WakeUp")], answers=1)
+    assert socket.of("Joints") == [] and socket.of("Audio") == []

@@ -1,0 +1,4 @@
+{
+  "bridge": { "backend": "fake" },
+  "server": { "transport": "stdio" }
+}

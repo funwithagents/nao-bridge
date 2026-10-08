@@ -2,6 +2,7 @@
 code:
   - src/nao_bridge/__init__.py
   - src/nao_bridge/bridge.py
+  - src/nao_bridge/errors.py
 tests:
   - tests/test_bridge.py
 ---
@@ -12,17 +13,17 @@ tests:
 
 ## Purpose
 
-`NaoBridge` is the object a caller holds to drive Nao: intent-level async verbs (say, stand up, dance, react, run an installed app) plus the robot's touch, joint and audio streams. It sits on top of the [robot.md](robot.md) seam, so it runs unchanged on a real robot or the fake. Every client — the [MCP server](nao-mcp-server.md), the [WebSocket server](nao-websocket-server.md), or a Python caller — shares this one implementation. It replaces the earlier `NaoAPI` class and mirrors the sibling reachy-mini-bridge project's `ReachyMiniBridge`.
+`NaoBridge` is the object a caller holds to drive Nao: intent-level async verbs (say, stand up, dance, react, run an installed app) plus the robot's touch, joint and audio streams. It is built from a [config](config.md) and sits on top of the [robot.md](robot.md) seam, so it runs unchanged on a real robot or the fake. Every client — the [MCP server](nao-mcp-server.md), the [WebSocket server](nao-websocket-server.md), or a Python caller — shares this one implementation. It replaces the earlier `NaoAPI` class.
 
 ## Core concepts / Decided
 
 ### Construction and lifecycle
 
-- `NaoBridge(backend="real", *, ip="", port=9559, on_touch=None, on_joints=None, on_audio=None)`. `backend` is `"real"` or `"fake"` ([robot.md](robot.md)). Constructing the bridge does nothing else: no connection, no task.
-- **`await start()`** builds the robot with `build_robot(backend, ip=ip, port=port)`, connects it off the event loop, and subscribes the streams that have a callback (touch, audio). It then loads the behavior catalog and starts the joints task when `on_joints` is set. If any step fails, what already started is torn down (the robot closed) and the error propagates (`RobotConnectionError` for an unreachable robot). Calling `start()` on a running bridge raises `BridgeError`.
-- **`await stop()`** cancels the joints task, unsubscribes the streams, closes the robot, and clears the running-item tracking. It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it.
+- `NaoBridge(config: NaoBridgeConfig | Backend | None = None)` ([config.md](config.md)). With no argument it uses `NaoBridgeConfig()`, the offline fake. A bare backend string is shorthand for `NaoBridgeConfig(backend=...)`. `NaoBridge.from_dict` / `from_json` / `from_json_file` load the config, then build the bridge. Constructing the bridge does nothing else: no connection, no task.
+- **`await start()`** builds the robot with `build_robot(config)` ([robot.md](robot.md)) and connects it off the event loop. It subscribes the streams the config enables (touch; audio through the mic feed, [microphone.md](microphone.md)), loads the behavior catalog, and starts the joints task when joints are enabled. If any step fails, what already started is torn down (the robot closed) and the error propagates (`RobotConnectionError` for an unreachable robot). Calling `start()` on a running bridge raises `BridgeError`.
+- **`await stop()`** cancels the joints task and publishes `None` on `joints`. It then stops the mic feed (which ends every `audio_input()` subscriber), unsubscribes touch, closes the robot, and clears the running-item tracking. It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it.
 - **`async with NaoBridge(...) as bridge:`** is shorthand for the pair, and runs `stop()` on every way out.
-- `running: bool`. `backend` (read-only).
+- `running: bool`. `config` and `backend` (read-only).
 - **Escape hatch:** `bridge.robot` (alias `bridge.raw`) is the `NaoRobot` — the `FakeNaoRobot` on `fake`, which tests use to assert on recorded commands. It raises `BridgeError` when the bridge isn't running.
 
 ### Action verb contract
@@ -62,22 +63,27 @@ The classifier doesn't mutate the parsed behaviors. Getters return an empty list
 
 ### Streams
 
-Callbacks are optional `async` functions, scheduled on the event loop that called `start()`. Robot events arrive on robot threads and are marshalled with `run_coroutine_threadsafe`.
+The config's `streams` block decides what `start()` subscribes to on the robot ([config.md](config.md)). Each stream is consumed through its own API, open to any number of consumers. The objects below belong to the bridge and outlive its sessions.
 
-- `on_touch(key, value)`: `key` ∈ `FrontTactilTouched` / `MiddleTactilTouched` / `RearTactilTouched`, `value` 0/1.
-- `on_joints(names, angles)`: every 0.2 s from a bridge task, angles in radians. A failing read is logged and the loop continues.
-- `on_audio(rate, channels, samples_per_channel, data)`: `rate` 16000, `data` base64 of 16-bit little-endian PCM.
+| Stream | API | Contract |
+|---|---|---|
+| touch | `bridge.on_touch: Event[TouchEvent]` ([events.md](events.md)) | `TouchEvent(part, touched: bool)`; `part` ∈ `FrontTactilTouched` / `MiddleTactilTouched` / `RearTactilTouched`. Naoqi fires on its own thread, and the bridge re-emits on its event loop (`call_soon_threadsafe`), so handlers run on the loop. Disabled: it simply never emits. |
+| joints | `bridge.joints: Observable[JointsState \| None]` ([observable.md](observable.md)) | `JointsState(names, angles, ts)`, angles in radians, `ts` on the monotonic clock, `set` every `streams.joints.period_s` by a bridge task. `None` outside a session. A failing read is logged and the loop continues. Disabled: reading `joints` raises `BridgeError`. |
+| audio | `bridge.audio_input(preroll_s=0.0)`, `bridge.mic` ([microphone.md](microphone.md)) | Each call is a subscriber yielding int16 LE mono `bytes` at `mic.sample_rate` (16000). `mic.latest()` and `published_count` are for samplers. Disabled, or bridge not running: `audio_input()` raises `BridgeError` at the call. |
 
 ### Errors
 
-`BridgeError(RuntimeError)`: lifecycle misuse (double `start()`, `robot` while stopped). `RobotConnectionError` from [robot.md](robot.md) propagates out of `start()`. Verbs return `False` rather than raising.
+`BridgeError(RuntimeError)` (in `errors.py`, so the bridge's modules share it): lifecycle and stream misuse (double `start()`, `robot` while stopped, a disabled stream's API). `ConfigError` comes from [config.md](config.md). `RobotConnectionError` from [robot.md](robot.md) propagates out of `start()`. Verbs return `False` rather than raising.
 
 ### Front door and logging
 
-`from nao_bridge import NaoBridge` re-exports `NaoBridge`, `BridgeError`, `BehaviorInfos`, `LocalizedString`, `RobotConnectionError`, `Backend`. Library modules only use `logging.getLogger(__name__)`; `logging.basicConfig` belongs to the CLIs.
+`from nao_bridge import NaoBridge` re-exports what a caller needs:
+- `NaoBridge`;
+- the config classes (`NaoBridgeConfig`, `RobotSettings`, `StreamSettings`, `TouchStream`, `JointsStream`, `AudioStream`, `Backend`);
+- the stream values (`TouchEvent`, `JointsState`, `MicChunk`) and the `Event` / `Observable` types;
+- `BehaviorInfos`, `LocalizedString`;
+- the errors (`BridgeError`, `ConfigError`, `RobotConnectionError`). Library modules only use `logging.getLogger(__name__)`; `logging.basicConfig` belongs to the CLIs.
 
 ## Open questions
 
-1. **Raise instead of `bool`?** `ReachyMiniBridge` raises (`ValueError`, `BridgeError` subclasses), which carries *why* a verb failed. Switching would also change both servers' result mapping. This is a deferral: `bool` works today.
-2. **Callbacks vs observables.** Reachy exposes streams as `Observable`s that any number of consumers can subscribe to. Nao's three single-consumer callbacks are enough for the two servers today.
-3. **Config object.** A `NaoBridgeConfig` (from dict/JSON) like reachy's only pays off once there are more knobs than backend/ip/port/streams.
+1. **Raise instead of `bool`?** Raising (`ValueError` for bad input, `BridgeError` subclasses for state errors) would tell the caller *why* a verb failed. Switching would also change both servers' result mapping. This is a deferral: `bool` works today.

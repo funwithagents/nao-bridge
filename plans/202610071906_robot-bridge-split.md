@@ -2,7 +2,7 @@
 
 **Status:** Done
 
-Implements `specs/robot.md` (new) and `specs/bridge.md` (formerly `nao-api.md`), and updates `specs/nao-mcp-server.md` and `specs/nao-websocket-server.md` to sit on top of them. This follows the sibling reachy-mini-bridge architecture: a robot seam with `real` / `fake` backends, plus a bridge that owns the lifecycle and verbs. It also delivers every step of [202610071900_existing-code-to-green.md](202610071900_existing-code-to-green.md), since every module was being rewritten anyway.
+Implements `specs/robot.md` (new) and `specs/bridge.md` (formerly `nao-api.md`), and updates `specs/nao-mcp-server.md` and `specs/nao-websocket-server.md` to sit on top of them. The architecture is a robot seam with `real` / `fake` backends, plus a bridge that owns the lifecycle and verbs. It also delivers every step of [202610071850_existing-code-to-green.md](202610071850_existing-code-to-green.md), since every module was being rewritten anyway.
 
 ## Scope
 

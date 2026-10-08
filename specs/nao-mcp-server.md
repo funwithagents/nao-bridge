@@ -15,8 +15,9 @@ Lets an LLM agent (Claude Desktop, HuggingFace Tiny Agents, any MCP client) driv
 
 ## Core concepts / Decided
 
-- **Runtime:** `NaoMcpServer(backend, nao_ip, nao_port)` builds a `NaoBridge` with **no** stream callbacks (MCP is request/response) and a `mcp.server.fastmcp.FastMCP("Nao")` server. It requires the **v1** `mcp` SDK (`mcp<2`; v2 renamed FastMCP).
-- **One event loop, one session:** `serve(transport)` runs `async with bridge:` around `run_stdio_async()` (or `run_sse_async()`). The bridge connects before serving and stops when the client leaves. `run(transport="stdio")` wraps it in `asyncio.run`. If the robot can't be reached (`RobotConnectionError`), it logs the error and returns `False` without serving.
+- **Config:** `NaoMcpServerConfig` is `{"bridge": NaoBridgeConfig, "server": McpServerSettings}`, with `McpServerSettings(transport: "stdio" | "sse" = "stdio")`. Both blocks are optional and share the loaders and `ConfigError` rules of [config.md](config.md). MCP is request/response, so its bridge normally enables no stream.
+- **Runtime:** `NaoMcpServer(config=None)` (default: `NaoMcpServerConfig()`, the fake over stdio) builds a `NaoBridge(config.bridge)` and a `mcp.server.fastmcp.FastMCP("Nao")` server. It requires the **v1** `mcp` SDK (`mcp<2`; v2 renamed FastMCP).
+- **One event loop, one session:** `serve()` runs `async with bridge:` around `run_stdio_async()` (or `run_sse_async()`, per `server.transport`). The bridge connects before serving and stops when the client leaves. `run()` wraps it in `asyncio.run`. If the robot can't be reached (`RobotConnectionError`), it logs the error and returns `False` without serving.
 - **Tool registration:** each tool is a server method passed to `FastMCP.add_tool(fn)`, which takes the tool's **name from the method and its description from the docstring**. The tool title stays unset. (The earlier code passed the docstring positionally into the `title` slot.) Docstrings are the prompt the model sees, so they encode usage order ("call `wake_up` first", "call `get_dance_list` before `dance`").
 - **Tool surface:**
 
@@ -37,7 +38,7 @@ Lets an LLM agent (Claude Desktop, HuggingFace Tiny Agents, any MCP client) driv
 
   Deliberately **not** exposed: `stop_say`, eyes color, basic awareness, breathing, raw `run_behavior`/`stop_behavior`, and stop-variants for dances/reactions/body actions.
 - **Failure reporting:** tools never raise; a `False` from the bridge becomes a "Nao failed to …" string.
-- **CLI:** the `nao-mcp-server` console script (also `python -m nao_bridge.nao_mcp_server`) takes `--fake-robot` (→ backend `fake`), `--ip`, `--port` (default 9559). It configures logging (stderr, since stdout carries the stdio transport) and exits 1 if the robot is unreachable.
+- **CLI:** the `nao-mcp-server` console script (also `python -m nao_bridge.nao_mcp_server`) takes `--config path.json` only; without it the server runs on its default config (the fake). An invalid config exits 2 with the `ConfigError` message. It configures logging (stderr, since stdout carries the stdio transport) and exits 1 if the robot is unreachable. Ready-made files: `examples/configs/mcp-fake.json`, `mcp-real.json`.
 
 ## Open questions
 

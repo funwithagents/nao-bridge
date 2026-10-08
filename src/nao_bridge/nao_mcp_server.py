@@ -1,34 +1,82 @@
 """Nao MCP Server Module.
 
-This module provides a server implementation for controlling a Nao robot through MCP.
-It supports both real and fake robot modes, with comprehensive error handling and logging.
+Exposes NaoBridge actions as MCP tools for LLM agents (specs/nao-mcp-server.md),
+built from a ``NaoMcpServerConfig``: the bridge's config plus the server's own.
 """
 
 import argparse
 import asyncio
 import json
 import logging
-from dataclasses import asdict
-from typing import Literal
+from dataclasses import asdict, dataclass, field
+from typing import Any, Literal, Self
 
 from mcp.server.fastmcp import FastMCP
 
 from nao_bridge.bridge import NaoBridge
-from nao_bridge.robot import Backend, RobotConnectionError
+from nao_bridge.config import (
+    ConfigError,
+    JsonConfig,
+    NaoBridgeConfig,
+    build,
+    check_keys,
+    key_path,
+    read_choice,
+    read_object,
+)
+from nao_bridge.robot import RobotConnectionError
 
 logger = logging.getLogger(__name__)
 
+type Transport = Literal["stdio", "sse"]
+TRANSPORTS: tuple[Transport, ...] = ("stdio", "sse")
+
+
+@dataclass(frozen=True)
+class McpServerSettings(JsonConfig):
+    """The MCP server's own settings: the ``server`` block."""
+
+    transport: Transport = "stdio"
+
+    @classmethod
+    def parse(cls, data: Any, path: str) -> Self:
+        obj = read_object(data, path)
+        check_keys(obj, ("transport",), path)
+        return build(
+            cls,
+            path,
+            transport=read_choice(obj, "transport", "stdio", TRANSPORTS, path),
+        )
+
+
+@dataclass(frozen=True)
+class NaoMcpServerConfig(JsonConfig):
+    """``{"bridge": NaoBridgeConfig, "server": McpServerSettings}``; both optional."""
+
+    bridge: NaoBridgeConfig = field(default_factory=NaoBridgeConfig)
+    server: McpServerSettings = field(default_factory=McpServerSettings)
+
+    @classmethod
+    def parse(cls, data: Any, path: str) -> Self:
+        obj = read_object(data, path)
+        check_keys(obj, ("bridge", "server"), path)
+        return build(
+            cls,
+            path,
+            bridge=NaoBridgeConfig.parse(
+                obj.get("bridge", {}), key_path(path, "bridge")
+            ),
+            server=McpServerSettings.parse(
+                obj.get("server", {}), key_path(path, "server")
+            ),
+        )
+
 
 class NaoMcpServer:
-    def __init__(self, backend: Backend, nao_ip: str, nao_port: int):
-        """Initialize the NaoMcpServer instance.
-
-        Args:
-            backend: "real" for a robot, "fake" for the offline stand-in
-            nao_ip: Robot IP address
-            nao_port: Robot port number
-        """
-        self.nao_bridge = NaoBridge(backend, ip=nao_ip, port=nao_port)
+    def __init__(self, config: NaoMcpServerConfig | None = None):
+        """Build the server and its bridge from ``config`` (default: the fake robot)."""
+        self.config = config or NaoMcpServerConfig()
+        self.nao_bridge = NaoBridge(self.config.bridge)
         self.mcp = FastMCP("Nao")
 
         # Name and description come from each method's name and docstring.
@@ -51,22 +99,22 @@ class NaoMcpServer:
         ):
             self.mcp.add_tool(tool)
 
-    async def serve(self, transport: Literal["stdio", "sse"] = "stdio") -> None:
+    async def serve(self) -> None:
         """Connect to Nao, serve MCP until the client leaves, then disconnect."""
         async with self.nao_bridge:
-            if transport == "sse":
+            if self.config.server.transport == "sse":
                 await self.mcp.run_sse_async()
             else:
                 await self.mcp.run_stdio_async()
 
-    def run(self, transport: Literal["stdio", "sse"] = "stdio") -> bool:
+    def run(self) -> bool:
         """Run the NaoMcpServer.
 
         Returns:
             bool: False if Nao could not be reached, True once the server has ended
         """
         try:
-            asyncio.run(self.serve(transport))
+            asyncio.run(self.serve())
         except RobotConnectionError as e:
             logger.error("Could not connect to Nao: %s", e)
             return False
@@ -284,21 +332,25 @@ def main() -> None:
     """Main entry point for the application."""
     parser = argparse.ArgumentParser(description="Nao MCP Server")
     parser.add_argument(
-        "--fake-robot",
-        action="store_true",
-        help="To use the mcp server without a real robot, everything will be faked",
+        "--config",
+        help="Path to a JSON server config (default: the fake robot over stdio)",
     )
-    parser.add_argument("--ip", type=str, default="", help="Robot IP address")
-    parser.add_argument("--port", type=int, default=9559, help="Naoqi port number")
     args = parser.parse_args()
+    try:
+        config = (
+            NaoMcpServerConfig.from_json_file(args.config)
+            if args.config
+            else NaoMcpServerConfig()
+        )
+    except ConfigError as e:
+        parser.error(str(e))
 
     # Logs go to stderr: stdout is the MCP stdio transport.
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
-    backend: Backend = "fake" if args.fake_robot else "real"
-    if not NaoMcpServer(backend, args.ip, args.port).run():
+    if not NaoMcpServer(config).run():
         raise SystemExit(1)
 
 

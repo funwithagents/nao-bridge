@@ -6,11 +6,13 @@ No robot, network or real ``qi`` needed. Async runs via ``asyncio.run``.
 
 import sys
 import threading
+import time
 import types
 from typing import Any, ClassVar
 
 import pytest
 
+from nao_bridge.config import NaoBridgeConfig, RobotSettings
 from nao_bridge.robot import (
     FakeNaoRobot,
     QiNaoRobot,
@@ -19,16 +21,19 @@ from nao_bridge.robot import (
 )
 
 
-def test_build_robot_selects_the_backend():
-    assert isinstance(build_robot("fake"), FakeNaoRobot)
-    real = build_robot("real", ip="10.0.0.5", port=9600)
+def test_build_robot_follows_the_config():
+    assert isinstance(build_robot(NaoBridgeConfig()), FakeNaoRobot)
+    config = NaoBridgeConfig(
+        backend="real", robot=RobotSettings(ip="10.0.0.5", port=9600, connect_tries=3)
+    )
+    real = build_robot(config)
     assert isinstance(real, QiNaoRobot)
-    assert (real.ip, real.port) == ("10.0.0.5", 9600)
+    assert (real.ip, real.port, real.connect_tries) == ("10.0.0.5", 9600, 3)
 
 
-def test_build_robot_rejects_an_unknown_backend():
-    with pytest.raises(ValueError, match="sim"):
-        build_robot("sim")  # type: ignore[arg-type]
+def test_fake_ignores_the_robot_block():
+    config = NaoBridgeConfig(backend="fake", robot=RobotSettings(ip="10.0.0.5"))
+    assert isinstance(build_robot(config), FakeNaoRobot)
 
 
 # --- QiNaoRobot ---------------------------------------------------------------
@@ -67,6 +72,10 @@ class _StubSession:
     def close(self) -> None:
         pass
 
+    def registerService(self, name: str, service: Any) -> int:
+        type(self).calls.append(("session", "registerService", (name,)))
+        return 7
+
 
 @pytest.fixture
 def stub_qi(monkeypatch: pytest.MonkeyPatch) -> type[_StubSession]:
@@ -101,10 +110,27 @@ def test_real_backend_retries_then_connects(stub_qi: type[_StubSession]):
 
 
 def test_real_backend_gives_up_after_its_tries(stub_qi: type[_StubSession]):
-    stub_qi.failures = QiNaoRobot.CONNECT_TRIES
-    with pytest.raises(RobotConnectionError, match="after 10 tries") as caught:
-        QiNaoRobot("10.0.0.5").connect()
+    stub_qi.failures = 3
+    with pytest.raises(RobotConnectionError, match="after 3 tries") as caught:
+        QiNaoRobot("10.0.0.5", connect_tries=3).connect()
+    assert stub_qi.connects == 3
     assert isinstance(caught.value.__cause__, RuntimeError)
+
+
+@pytest.mark.parametrize(
+    ("channel", "code"), [("front", 3), ("rear", 4), ("left", 1), ("right", 2)]
+)
+def test_real_backend_subscribes_to_the_configured_microphone(
+    stub_qi: type[_StubSession], channel: Any, code: int
+):
+    robot = QiNaoRobot("10.0.0.5")
+    robot.connect()
+    robot.subscribe_audio(lambda *_: None, channel)
+    assert (
+        "ALAudioDevice",
+        "setClientPreferences",
+        ("NaoBridgeAudio", 16000, code, 0),
+    ) in (stub_qi.calls)
 
 
 def test_real_backend_sets_posture_retries_before_moving(stub_qi: type[_StubSession]):
@@ -160,3 +186,28 @@ def test_fake_package_list_is_a_fresh_copy():
     robot = FakeNaoRobot()
     robot.list_packages()[0]["uuid"] = "tampered"
     assert robot.list_packages()[0]["uuid"] != "tampered"
+
+
+def test_fake_pushes_paced_silence_while_audio_is_subscribed():
+    robot = FakeNaoRobot()
+    robot.audio_chunk_s = 0.01
+    chunks: list[tuple[int, int, bytes]] = []
+    robot.subscribe_audio(lambda *chunk: chunks.append(chunk), "front")
+    time.sleep(0.2)
+    robot.unsubscribe_audio()
+    count = len(chunks)
+    time.sleep(0.05)
+    assert len(chunks) == count  # nothing pushed after unsubscribing
+    assert 5 <= count <= 25  # about one per 10 ms
+    assert chunks[0] == (1, 160, bytes(320))
+
+
+def test_fake_audio_push_can_be_paused_for_injected_chunks():
+    robot = FakeNaoRobot()
+    robot.audio_chunk_s = None
+    chunks: list[bytes] = []
+    robot.subscribe_audio(lambda _c, _s, buffer: chunks.append(buffer), "front")
+    robot.emit_audio(1, 1, b"\x01\x00")
+    time.sleep(0.05)
+    robot.close()
+    assert chunks == [b"\x01\x00"]

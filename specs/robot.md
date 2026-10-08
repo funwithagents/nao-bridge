@@ -12,7 +12,7 @@ tests:
 
 ## Purpose
 
-The seam between Nao Bridge and a Naoqi robot. It lets the layer above ([bridge.md](bridge.md)) run unchanged against a real Nao (over a `qi` session) or a first-party fake, chosen by a backend string. It has the same shape as the robot seam in the sibling reachy-mini-bridge project, adapted to Naoqi.
+The seam between Nao Bridge and a Naoqi robot. It lets the layer above ([bridge.md](bridge.md)) run unchanged against a real Nao (over a `qi` session) or a first-party fake, chosen by a backend string.
 
 The seam delivers two things:
 
@@ -23,7 +23,7 @@ The seam delivers two things:
 
 ### A Protocol, not a union over the SDK object
 
-Reachy Mini's seam is a type union over the upstream `ReachyMini` class and its fake. That doesn't carry over: Naoqi has no single robot class. `qi.Session` is an untyped RPC session handing out services by name (`session.service("ALMotion")`). Also, `qi` isn't on PyPI, so pyright and CI can't see it.
+A seam can be a type union over an SDK's robot class and a fake, checked by pyright. That doesn't work for Naoqi: it has no single robot class. `qi.Session` is an untyped RPC session handing out services by name (`session.service("ALMotion")`). Also, `qi` isn't on PyPI, so pyright and CI can't see it.
 
 So the seam is a **first-party `NaoRobot` Protocol**, with two implementations:
 
@@ -32,11 +32,15 @@ So the seam is a **first-party `NaoRobot` Protocol**, with two implementations:
 | `real` (default) | `QiNaoRobot(ip, port=9559)` | Translates each Protocol method into the Naoqi service call(s) |
 | `fake` | `FakeNaoRobot()` | Records every command, serves a fixed package list, simulates behavior runs and sensor events |
 
-This is the "translating adapter / Protocol behind the same name" option that reachy's robot spec leaves open. Units and names at this layer are Naoqi's. Intent-level semantics (catalog, reactions, tracking what's running) belong to [bridge.md](bridge.md).
+The Protocol is the contract; each implementation translates it to its backend. Units and names at this layer are Naoqi's. Intent-level semantics (catalog, reactions, tracking what's running) belong to [bridge.md](bridge.md).
 
-### `build_robot(backend, *, ip="", port=9559) -> NaoRobot`
+### `build_robot(config: NaoBridgeConfig) -> NaoRobot`
 
-The one way in, used by `NaoBridge.start()`. `"fake"` → `FakeNaoRobot()` (ip/port ignored); `"real"` → `QiNaoRobot(ip, port)`. Any other string raises `ValueError`. `Backend = Literal["real", "fake"]`. Building does not connect.
+The one way in, used by `NaoBridge.start()`, driven by the [config](config.md):
+- `backend: "fake"` → `FakeNaoRobot()`; the `robot` block is ignored.
+- `backend: "real"` → `QiNaoRobot(robot.ip, robot.port, connect_tries=robot.connect_tries)`.
+
+The config has already rejected unknown backends and a `real` backend without an IP. Building does not connect.
 
 ### The consumed slice
 
@@ -58,7 +62,7 @@ Every method is **blocking** (the bridge calls them via `asyncio.to_thread`) and
 | `stop_behavior(name)` | `ALBehaviorManager.stopBehavior` |
 | `get_joints() -> (names, angles)` | `ALMotion.getBodyNames("Body")`, `getAngles("Body", False)` (radians) |
 | `subscribe_touch(cb)` / `unsubscribe_touch()` | `ALMemory` subscribers on `FrontTactilTouched`, `MiddleTactilTouched`, `RearTactilTouched`; `cb(key, value)` |
-| `subscribe_audio(cb)` / `unsubscribe_audio()` | registers an audio sink service, `ALAudioDevice.setClientPreferences(…, 16000, 3, 0)` + `subscribe`; `cb(channels, samples_per_channel, pcm16le_bytes)` |
+| `subscribe_audio(cb, channel)` / `unsubscribe_audio()` | registers an audio sink service, `ALAudioDevice.setClientPreferences(…, 16000, code, 0)` with `code` for the `channel` microphone (`left` 1, `right` 2, `front` 3, `rear` 4), + `subscribe`; `cb(channels, samples_per_channel, pcm16le_bytes)`. Its only caller is the mic feed ([microphone.md](microphone.md)). |
 
 Sensor callbacks are invoked **on Naoqi's threads**; marshalling onto an event loop is the bridge's job.
 
@@ -66,7 +70,7 @@ Sensor callbacks are invoked **on Naoqi's threads**; marshalling onto an event l
 
 - **`qi` is imported lazily in `connect()`** (via `importlib`), so importing `nao_bridge` never needs it. If it's missing, `connect()` raises `RobotConnectionError` and names the wheel to install. **There is no silent fallback to fake** — that was the old behavior, and it let an agent believe a real robot was moving. Ask for the fake explicitly.
 - `connect()` with an empty IP or a non-positive port raises `RobotConnectionError` before trying.
-- `connect()` retries the session up to 10 times, then raises `RobotConnectionError`, chained to the last `qi` error.
+- `connect()` retries the session up to `connect_tries` times (default 10, from the config), then raises `RobotConnectionError`, chained to the last `qi` error.
 - Services are acquired lazily on first use and cached for the session; `close()` drops them.
 - Naoqi requires the audio sink to expose a method named exactly `processRemote`. That lives on a small private sink object, so `QiNaoRobot`'s own surface stays the Protocol.
 
@@ -80,6 +84,7 @@ What the fake does is set by what the tests exercise:
 - **Posture:** `go_to_posture` returns `posture_succeeds` (default `True`).
 - **Joints:** `get_joints()` returns fixed `joint_names` / `joint_angles`.
 - **Sensor events:** test helpers `touch(key, value)` and `emit_audio(channels, samples_per_channel, buffer)` call the subscribed callback the way Naoqi's threads would. With nothing subscribed they do nothing.
+- **Paced audio:** Naoqi pushes buffers on its own, so the fake does too. While audio is subscribed, a thread pushes a silent mono chunk of `audio_chunk_s × 16000` samples every `audio_chunk_s` seconds (default 0.085). The push stops on `unsubscribe_audio()` / `close()`. Setting `audio_chunk_s` to `None` pauses it, so a test pushes only what it `emit_audio`s.
 
 ### Errors
 

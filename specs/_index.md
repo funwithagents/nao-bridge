@@ -10,8 +10,12 @@ Nao Bridge connects AI agents to Aldebaran's Nao robot (and, in principle, any r
 |---|---|---|
 | [project.md](project.md) | Project structure and tooling: Python version, packaging with uv, layout conventions | Implemented |
 | [testing.md](testing.md) | Testing strategy: two-tier `tests/`/`tests-e2e/` split, functional-test philosophy, skip-without-credentials live tier | Implemented |
-| [robot.md](robot.md) | Connection seam: the `NaoRobot` Protocol, `QiNaoRobot` over `qi` (lazy import, no silent fallback), `FakeNaoRobot` (records commands, fixed package list, simulated behavior runs and sensor events), `build_robot(backend)` | Implemented |
-| [bridge.md](bridge.md) | `NaoBridge`: `start()`/`stop()`/`async with` lifecycle, `bool` action verbs, the behavior catalog classifier, running-item tracking and stop semantics, touch/joints/audio streams, `bridge.robot` escape hatch | Implemented |
+| [config.md](config.md) | `NaoBridgeConfig` (backend — `fake` by default —, robot connection, streams) with the `from_dict` / `from_json` / `from_json_file` loaders and `ConfigError`; streams as switches for the bridge's stream APIs; `{"bridge", "server"}` server configs; `--config`-only CLIs; example files | Implemented |
+| [robot.md](robot.md) | Connection seam: the `NaoRobot` Protocol, `QiNaoRobot` over `qi` (lazy import, no silent fallback), `FakeNaoRobot` (records commands, fixed package list, simulated behavior runs and sensor events, paced audio push), `build_robot(config)` | Implemented |
+| [bridge.md](bridge.md) | `NaoBridge`: built from a config; `start()`/`stop()`/`async with` lifecycle, `bool` action verbs, the behavior catalog classifier, running-item tracking and stop semantics, stream APIs (`on_touch`, `joints`, `mic` / `audio_input()`), `bridge.robot` escape hatch | Implemented |
+| [events.md](events.md) | `Event[T]`: synchronous pub/sub, subscription-order dispatch, subscriber isolation — `bridge.on_touch` | Implemented |
+| [observable.md](observable.md) | `Observable[T]`: `value`, latest-wins `changes()`, `wait_for`, `set` vs `update` — `bridge.joints` | Implemented |
+| [microphone.md](microphone.md) | Mic feed: one subscription to Naoqi's pushed audio, a 2 s ring, any number of `audio_input()` subscribers each with its own cursor, lap warnings, `preroll_s`, `bridge.mic.latest()` | Implemented |
 | [nao-mcp-server.md](nao-mcp-server.md) | `NaoMcpServer`: the MCP tool surface over `NaoBridge`, one-loop serving, and the `nao-mcp-server` CLI | Implemented |
 | [nao-websocket-server.md](nao-websocket-server.md) | `NaoWebsocketServer`: single-client JSON WebSocket protocol, commands and streamed events | Implemented |
 

@@ -4,7 +4,7 @@ Specified by [specs/robot.md](../../specs/robot.md). ``NaoRobot`` is the Protoco
 the Naoqi capabilities the bridge consumes; ``QiNaoRobot`` implements it over a ``qi``
 session (imported lazily, so ``qi`` is only needed for the real backend) and
 ``FakeNaoRobot`` implements it offline, recording every command. ``build_robot``
-selects one from a backend string.
+selects one from the bridge config.
 """
 
 from __future__ import annotations
@@ -14,9 +14,12 @@ import importlib
 import logging
 import threading
 from collections.abc import Callable
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
+
+from .config import AudioChannel, Backend, NaoBridgeConfig
 
 __all__ = [
+    "AUDIO_CHANNEL_CODES",
     "AUDIO_SAMPLE_RATE",
     "TOUCH_KEYS",
     "AudioCallback",
@@ -31,7 +34,6 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-type Backend = Literal["real", "fake"]
 # Called on Naoqi's threads: (memory key, value 0/1).
 type TouchCallback = Callable[[str, float], None]
 # Called on Naoqi's threads: (channels, samples per channel, 16-bit LE PCM buffer).
@@ -39,6 +41,13 @@ type AudioCallback = Callable[[int, int, bytes], None]
 
 TOUCH_KEYS = ("FrontTactilTouched", "MiddleTactilTouched", "RearTactilTouched")
 AUDIO_SAMPLE_RATE = 16000
+# ALAudioDevice.setClientPreferences channel configurations for one microphone at 16 kHz.
+AUDIO_CHANNEL_CODES: dict[AudioChannel, int] = {
+    "left": 1,
+    "right": 2,
+    "front": 3,
+    "rear": 4,
+}
 
 
 class RobotConnectionError(RuntimeError):
@@ -67,19 +76,18 @@ class NaoRobot(Protocol):
     def get_joints(self) -> tuple[list[str], list[float]]: ...
     def subscribe_touch(self, callback: TouchCallback) -> None: ...
     def unsubscribe_touch(self) -> None: ...
-    def subscribe_audio(self, callback: AudioCallback) -> None: ...
+    def subscribe_audio(
+        self, callback: AudioCallback, channel: AudioChannel
+    ) -> None: ...
     def unsubscribe_audio(self) -> None: ...
 
 
-def build_robot(
-    backend: Backend = "real", *, ip: str = "", port: int = 9559
-) -> NaoRobot:
-    """Build (not connect) the robot for ``backend``: ``fake`` or ``real``."""
-    if backend == "fake":
+def build_robot(config: NaoBridgeConfig) -> NaoRobot:
+    """Build (not connect) the robot for ``config.backend``: ``fake`` or ``real``."""
+    if config.backend == "fake":
         return FakeNaoRobot()
-    if backend == "real":
-        return QiNaoRobot(ip, port)
-    raise ValueError(f"unknown backend {backend!r}; expected 'real' or 'fake'")
+    robot = config.robot
+    return QiNaoRobot(robot.ip, robot.port, connect_tries=robot.connect_tries)
 
 
 # region Real robot
@@ -107,12 +115,12 @@ class _AudioSink:
 class QiNaoRobot:
     """``NaoRobot`` over a ``qi`` session to a real (or Choregraphe-simulated) robot."""
 
-    CONNECT_TRIES = 10
     AUDIO_SERVICE_NAME = "NaoBridgeAudio"
 
-    def __init__(self, ip: str, port: int = 9559) -> None:
+    def __init__(self, ip: str, port: int = 9559, *, connect_tries: int = 10) -> None:
         self.ip = ip
         self.port = port
+        self.connect_tries = connect_tries
         self._session: Any = None
         self._services: dict[str, Any] = {}
         self._touch_links: list[tuple[Any, Any]] = []
@@ -134,7 +142,7 @@ class QiNaoRobot:
 
         url = f"tcp://{self.ip}:{self.port}"
         last_error: Exception | None = None
-        for attempt in range(1, self.CONNECT_TRIES + 1):
+        for attempt in range(1, self.connect_tries + 1):
             session = qi.Session()
             try:
                 session.connect(url)
@@ -148,7 +156,7 @@ class QiNaoRobot:
             logger.debug("Connected to %s", url)
             return
         raise RobotConnectionError(
-            f"could not connect to {url} after {self.CONNECT_TRIES} tries"
+            f"could not connect to {url} after {self.connect_tries} tries"
         ) from last_error
 
     def close(self) -> None:
@@ -229,13 +237,13 @@ class QiNaoRobot:
             subscriber.signal.disconnect(link)
         self._touch_links.clear()
 
-    def subscribe_audio(self, callback: AudioCallback) -> None:
+    def subscribe_audio(self, callback: AudioCallback, channel: AudioChannel) -> None:
         self._audio_service_id = self._session.registerService(
             self.AUDIO_SERVICE_NAME, _AudioSink(callback)
         )
         audio_device = self._service("ALAudioDevice")
         audio_device.setClientPreferences(
-            self.AUDIO_SERVICE_NAME, AUDIO_SAMPLE_RATE, 3, 0
+            self.AUDIO_SERVICE_NAME, AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_CODES[channel], 0
         )
         audio_device.subscribe(self.AUDIO_SERVICE_NAME)
 
@@ -368,7 +376,9 @@ class FakeNaoRobot:
 
     Tests reach it through ``bridge.robot`` to assert on ``commands``, tune
     ``behavior_duration_s`` / ``posture_succeeds``, and fire sensor events with
-    ``touch`` / ``emit_audio``.
+    ``touch`` / ``emit_audio``. While audio is subscribed, a thread pushes a silent
+    mono chunk every ``audio_chunk_s`` seconds, as Naoqi pushes its buffers; setting
+    ``audio_chunk_s`` to ``None`` pauses it, so a test pushes only what it emits.
     """
 
     def __init__(self) -> None:
@@ -382,6 +392,9 @@ class FakeNaoRobot:
         self._lock = threading.Lock()
         self._touch_callback: TouchCallback | None = None
         self._audio_callback: AudioCallback | None = None
+        self.audio_chunk_s: float | None = 0.085
+        self._audio_stop = threading.Event()
+        self._audio_thread: threading.Thread | None = None
 
     def _record(self, method: str, **args: Any) -> None:
         self.commands.append((method, args))
@@ -398,6 +411,7 @@ class FakeNaoRobot:
     def close(self) -> None:
         self._record("close")
         self.connected = False
+        self._stop_audio_push()
         with self._lock:
             for stop in self._running.values():
                 stop.set()
@@ -470,13 +484,38 @@ class FakeNaoRobot:
         self._record("unsubscribe_touch")
         self._touch_callback = None
 
-    def subscribe_audio(self, callback: AudioCallback) -> None:
-        self._record("subscribe_audio")
+    def subscribe_audio(self, callback: AudioCallback, channel: AudioChannel) -> None:
+        self._record("subscribe_audio", channel=channel)
         self._audio_callback = callback
+        self._audio_stop.clear()
+        self._audio_thread = threading.Thread(
+            target=self._push_audio, name="fake-nao-audio", daemon=True
+        )
+        self._audio_thread.start()
 
     def unsubscribe_audio(self) -> None:
         self._record("unsubscribe_audio")
+        self._stop_audio_push()
         self._audio_callback = None
+
+    def _stop_audio_push(self) -> None:
+        self._audio_stop.set()
+        thread, self._audio_thread = self._audio_thread, None
+        if thread is not None and thread is not threading.current_thread():
+            thread.join()
+
+    def _push_audio(self) -> None:
+        while not self._audio_stop.is_set():
+            period = self.audio_chunk_s
+            if period is None:
+                self._audio_stop.wait(0.01)
+                continue
+            if self._audio_stop.wait(period):
+                return
+            samples = round(period * AUDIO_SAMPLE_RATE)
+            callback = self._audio_callback
+            if callback is not None:
+                callback(1, samples, bytes(2 * samples))
 
     def touch(self, key: str, value: float) -> None:
         """Simulate a tactile sensor event, as Naoqi would fire it."""

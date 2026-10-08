@@ -7,47 +7,80 @@ robot events (touch, joints, audio, logs) out. Specified by
 
 import argparse
 import asyncio
+import base64
 import json
 import logging
 import socket
-from collections.abc import Awaitable, Callable
-from dataclasses import asdict
-from typing import Any
+from collections.abc import Awaitable, Callable, Coroutine
+from dataclasses import asdict, dataclass, field
+from typing import Any, Self
 
 import websockets
 
-from nao_bridge.bridge import BehaviorInfos, NaoBridge
-from nao_bridge.robot import Backend, RobotConnectionError
+from nao_bridge.bridge import BehaviorInfos, NaoBridge, TouchEvent
+from nao_bridge.config import (
+    ConfigError,
+    JsonConfig,
+    NaoBridgeConfig,
+    build,
+    check_keys,
+    key_path,
+    read_int,
+    read_object,
+)
+from nao_bridge.robot import RobotConnectionError
 
 logger = logging.getLogger(__name__)
 
 type CommandHandler = Callable[[Any], Awaitable[tuple[bool, Any]]]
 
 
-class NaoWebsocketServer:
-    def __init__(
-        self,
-        backend: Backend,
-        with_joints_data: bool,
-        with_audio_data: bool,
-        nao_ip: str,
-        nao_port: int,
-        websocket_port: int,
-    ):
-        """Initialize the NaoWebsocketServer instance.
+@dataclass(frozen=True)
+class WebsocketServerSettings(JsonConfig):
+    """The WebSocket server's own settings: the ``server`` block."""
 
-        Args:
-            backend: "real" for a robot, "fake" for the offline stand-in
-            with_joints_data: Whether to send joints data
-            with_audio_data: Whether to send audio data
-            nao_ip: Robot IP address
-            nao_port: Robot port number
-            websocket_port: WebSocket port number
-        """
-        self.backend: Backend = backend
-        self.with_joints_data = with_joints_data
-        self.with_audio_data = with_audio_data
-        self.websocket_port = websocket_port
+    port: int = 8002
+
+    def __post_init__(self) -> None:
+        if not 0 < self.port < 65536:
+            raise ConfigError(f"port must be between 1 and 65535, got {self.port}")
+
+    @classmethod
+    def parse(cls, data: Any, path: str) -> Self:
+        obj = read_object(data, path)
+        check_keys(obj, ("port",), path)
+        return build(cls, path, port=read_int(obj, "port", 8002, path))
+
+
+@dataclass(frozen=True)
+class NaoWebsocketServerConfig(JsonConfig):
+    """``{"bridge": NaoBridgeConfig, "server": WebsocketServerSettings}``; both optional."""
+
+    bridge: NaoBridgeConfig = field(default_factory=NaoBridgeConfig)
+    server: WebsocketServerSettings = field(default_factory=WebsocketServerSettings)
+
+    @classmethod
+    def parse(cls, data: Any, path: str) -> Self:
+        obj = read_object(data, path)
+        check_keys(obj, ("bridge", "server"), path)
+        return build(
+            cls,
+            path,
+            bridge=NaoBridgeConfig.parse(
+                obj.get("bridge", {}), key_path(path, "bridge")
+            ),
+            server=WebsocketServerSettings.parse(
+                obj.get("server", {}), key_path(path, "server")
+            ),
+        )
+
+
+class NaoWebsocketServer:
+    def __init__(self, config: NaoWebsocketServerConfig | None = None):
+        """Build the server and its bridge from ``config`` (default: the fake robot)."""
+        self.config = config or NaoWebsocketServerConfig()
+        self.backend = self.config.bridge.backend
+        self.websocket_port = self.config.server.port
 
         self.ip_self = ""
         self.async_loop: asyncio.AbstractEventLoop | None = None
@@ -59,17 +92,13 @@ class NaoWebsocketServer:
         self.websocket_client: Any = None
         self.websocket_closing = False
 
-        self.nao_bridge = NaoBridge(
-            backend,
-            ip=nao_ip,
-            port=nao_port,
-            on_touch=self._memory_callback_touch,
-            on_joints=self._joints_callback if with_joints_data else None,
-            on_audio=self._audio_callback if with_audio_data else None,
-        )
+        self.nao_bridge = NaoBridge(self.config.bridge)
         self.nao_connected = False
-        # Strong references so running commands aren't garbage-collected mid-flight.
+        # Strong references so running tasks aren't garbage-collected mid-flight.
         self._command_tasks: set[asyncio.Task[None]] = set()
+        self._send_tasks: set[asyncio.Task[None]] = set()
+        # The current client's joints / audio streams, cancelled when it leaves.
+        self._stream_tasks: set[asyncio.Task[None]] = set()
 
         self.command_mapping = dict[str, CommandHandler]()
         self.command_mapping["GenericNao"] = self._apply_command_generic
@@ -113,32 +142,40 @@ class NaoWebsocketServer:
         self.command_mapping["RunBehavior"] = self._apply_command_runbehavior
         self.command_mapping["StopBehavior"] = self._apply_command_stopbehavior
 
-        self.joints_data_sync_activated = False
-
     # region Connection management
     async def start_connection(self) -> bool:
         self.async_loop = asyncio.get_running_loop()
 
         self._log(logging.INFO, "Starting nao connection")
-        try:
-            await self.nao_bridge.start()
-        except RobotConnectionError as e:
-            self._log(logging.ERROR, f"Could not connect to Nao: {e}")
+        if not await self._start_bridge():
             return False
-        self.nao_connected = True
 
         self.ip_self = self._get_local_ip_address()
         self._log(logging.INFO, "Local websocket server IP = " + self.ip_self)
         await self._start_websocket_communication()
         return True
 
+    async def _start_bridge(self) -> bool:
+        """Start the bridge and wire its touch events; False if Nao is unreachable."""
+        try:
+            await self.nao_bridge.start()
+        except RobotConnectionError as e:
+            self._log(logging.ERROR, f"Could not connect to Nao: {e}")
+            return False
+        self.nao_connected = True
+        if self.config.bridge.streams.touch.enabled:
+            self.nao_bridge.on_touch.subscribe(self._on_touch)
+        return True
+
     async def stop_connection(self):
         self._log(logging.INFO, "Stopping nao connection")
 
+        await self._stop_websocket_communication()
         if self.nao_connected:
+            if self.config.bridge.streams.touch.enabled:
+                self.nao_bridge.on_touch.unsubscribe(self._on_touch)
             await self.nao_bridge.stop()
             self.nao_connected = False
-        await self._stop_websocket_communication()
 
     # endregion
 
@@ -168,33 +205,58 @@ class NaoWebsocketServer:
         await self.nao_bridge.set_breathing_enabled(False, "Body")
         await self.nao_bridge.rest()
 
-    # region Joints data management
-    async def _joints_callback(self, joints_names, joints_angles):
-        message_data = {"jointsNames": joints_names, "jointsAngles": joints_angles}
-        await self._send_to_websocket_client("Joints", message_data)
+    # region Streams
+    def _spawn(
+        self, coro: Coroutine[Any, Any, None], tasks: set[asyncio.Task[None]]
+    ) -> None:
+        task = asyncio.create_task(coro)
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
 
-    # endregion
-
-    # Touch events management
-    async def _memory_callback_touch(self, key, value):
+    def _on_touch(self, event: TouchEvent) -> None:
+        """``bridge.on_touch`` handler, on the event loop: forward as a Touch message."""
         self._log(
             logging.INFO,
-            "Touch detected with key = " + key + ", value = " + str(int(value)),
+            f"Touch detected with key = {event.part}, touched = {event.touched}",
         )
-        message_data = {"part": key, "touched": int(value) == 1}
-        await self._send_to_websocket_client("Touch", message_data)
+        message_data = {"part": event.part, "touched": event.touched}
+        self._spawn(
+            self._send_to_websocket_client("Touch", message_data), self._send_tasks
+        )
 
-    # Audio buffers management
-    async def _audio_callback(
-        self, rate, nbOfChannels, nbOfSamplesByChannel, bufferData
-    ):
-        message_data = {
-            "rate": rate,
-            "channels": nbOfChannels,
-            "nbSamplesPerChannel": nbOfSamplesByChannel,
-            "data": bufferData,
-        }
-        await self._send_to_websocket_client("Audio", message_data)
+    async def _stream_joints(self) -> None:
+        async for state in self.nao_bridge.joints.changes():
+            if state is None:
+                continue
+            message_data = {
+                "jointsNames": list(state.names),
+                "jointsAngles": list(state.angles),
+            }
+            await self._send_to_websocket_client("Joints", message_data)
+
+    async def _stream_audio(self) -> None:
+        mic = self.nao_bridge.mic
+        async for chunk in self.nao_bridge.audio_input():
+            message_data = {
+                "rate": mic.sample_rate,
+                "channels": mic.channels,
+                "nbSamplesPerChannel": len(chunk) // (2 * mic.channels),
+                "data": base64.b64encode(chunk).decode("ascii"),
+            }
+            await self._send_to_websocket_client("Audio", message_data)
+
+    def _start_streams(self) -> None:
+        streams = self.config.bridge.streams
+        if streams.joints.enabled:
+            self._spawn(self._stream_joints(), self._stream_tasks)
+        if streams.audio.enabled:
+            self._spawn(self._stream_audio(), self._stream_tasks)
+
+    async def _stop_streams(self) -> None:
+        tasks = list(self._stream_tasks)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     # endregion
 
@@ -263,6 +325,7 @@ class NaoWebsocketServer:
                 logging.INFO,
                 "Received connection from another client, disconnecting previous one",
             )
+            await self._stop_streams()
             await self.websocket_client.close()
 
         self.websocket_client = websocket
@@ -274,6 +337,8 @@ class NaoWebsocketServer:
             "fakeRobot": self.backend == "fake",
         }
         await self._send_to_websocket_client("NaoState", message_data)
+        if self.nao_connected:
+            self._start_streams()
 
     async def _websocket_disconnection(self, websocket):
         if not self.websocket_client:
@@ -290,6 +355,7 @@ class NaoWebsocketServer:
             )
             return
 
+        await self._stop_streams()
         if self.nao_connected:
             await self._reset_nao_after_interaction()
 
@@ -593,44 +659,8 @@ class NaoWebsocketServer:
     # endregion
 
 
-async def _main() -> None:
-    parser = argparse.ArgumentParser(description="Nao WebSocket Server")
-    parser.add_argument(
-        "--fake-robot",
-        action="store_true",
-        help="To use this server without a real robot, everything will be faked",
-    )
-    parser.add_argument("--ip", type=str, default="", help="Robot IP address")
-    parser.add_argument(
-        "--port", type=int, default=9559, help="Naoqi port number, default is 9559"
-    )
-    parser.add_argument(
-        "--websocket-port",
-        type=int,
-        default=8002,
-        help="WebSocket port number, default is 8002",
-    )
-    parser.add_argument(
-        "--with-joints-data",
-        action="store_true",
-        help="To enable the sending of Nao joints data",
-    )
-    parser.add_argument(
-        "--with-audio-data",
-        action="store_true",
-        help="To enable the sending of the audio buffers from Nao microphones",
-    )
-    args = parser.parse_args()
-
-    backend: Backend = "fake" if args.fake_robot else "real"
-    nao_websocket_server = NaoWebsocketServer(
-        backend,
-        args.with_joints_data,
-        args.with_audio_data,
-        args.ip,
-        args.port,
-        args.websocket_port,
-    )
+async def _main(config: NaoWebsocketServerConfig) -> None:
+    nao_websocket_server = NaoWebsocketServer(config)
     if await nao_websocket_server.start_connection():
         await asyncio.to_thread(input, "Press Enter to end...\n")
         logger.info("Ending received")
@@ -642,11 +672,26 @@ async def _main() -> None:
 
 def main() -> None:
     """Main entry point for the application."""
+    parser = argparse.ArgumentParser(description="Nao WebSocket Server")
+    parser.add_argument(
+        "--config",
+        help="Path to a JSON server config (default: the fake robot on port 8002)",
+    )
+    args = parser.parse_args()
+    try:
+        config = (
+            NaoWebsocketServerConfig.from_json_file(args.config)
+            if args.config
+            else NaoWebsocketServerConfig()
+        )
+    except ConfigError as e:
+        parser.error(str(e))
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
-    asyncio.run(_main())
+    asyncio.run(_main(config))
 
 
 if __name__ == "__main__":

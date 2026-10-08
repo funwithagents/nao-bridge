@@ -10,7 +10,7 @@ import os
 import pytest
 from support import require_env
 
-from nao_bridge import NaoBridge
+from nao_bridge import NaoBridge, NaoBridgeConfig, RobotSettings
 
 pytest.importorskip("qi")
 
@@ -20,7 +20,8 @@ def test_connects_and_reads_a_catalog():
     port = int(os.environ.get("NAO_PORT", "9559"))
 
     async def run() -> tuple[int, bool, bool]:
-        async with NaoBridge("real", ip=ip, port=port) as bridge:
+        config = NaoBridgeConfig(backend="real", robot=RobotSettings(ip=ip, port=port))
+        async with NaoBridge(config) as bridge:
             colored = await bridge.change_eyes_color("blue")
             restored = await bridge.change_eyes_color("white")
             return len(bridge.get_body_action_behaviors()), colored, restored
