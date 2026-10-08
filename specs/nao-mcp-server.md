@@ -2,23 +2,22 @@
 code:
   - src/nao_bridge/nao_mcp_server.py
 tests:
+  - tests/test_nao_mcp_server.py
 ---
 
 # Nao MCP server
 
 **Status:** Implemented
 
-> Retro-documented from existing code when the SDD workflow was adopted.
-
 ## Purpose
 
-Lets an LLM agent (Claude Desktop, HuggingFace Tiny Agents, any MCP client) drive Nao by calling tools. It is a thin adapter: every tool delegates to one [NaoAPI](nao-api.md) method and turns its result into a short natural-language status string the model can read.
+Lets an LLM agent (Claude Desktop, HuggingFace Tiny Agents, any MCP client) drive Nao by calling tools. It's a thin adapter: each tool delegates to one [NaoBridge](bridge.md) verb and turns the result into a short natural-language status string the model can read.
 
 ## Core concepts / Decided
 
-- **Runtime:** `NaoMcpServer(fake_robot, nao_ip, nao_port)` builds a `NaoAPI` with **no** touch/joints/audio callbacks (MCP is request/response; no streams) and a `mcp.server.fastmcp.FastMCP("Nao")` server. Requires the **v1** `mcp` SDK (`mcp<2`; v2 renamed FastMCP).
-- **Startup:** `run(transport="stdio")` first runs `NaoAPI.connect()` in its own event loop; if that fails, the server does not start and `run` returns `False`. Otherwise it serves on the given transport (`stdio` default, `sse` supported).
-- **Tool registration:** each tool is a server method registered under its own name with its docstring as the description. Docstrings are the prompt the model sees, so they encode usage order ("call `wake_up` first", "call `get_dance_list` before `dance`").
+- **Runtime:** `NaoMcpServer(backend, nao_ip, nao_port)` builds a `NaoBridge` with **no** stream callbacks (MCP is request/response) and a `mcp.server.fastmcp.FastMCP("Nao")` server. It requires the **v1** `mcp` SDK (`mcp<2`; v2 renamed FastMCP).
+- **One event loop, one session:** `serve(transport)` runs `async with bridge:` around `run_stdio_async()` (or `run_sse_async()`). The bridge connects before serving and stops when the client leaves. `run(transport="stdio")` wraps it in `asyncio.run`. If the robot can't be reached (`RobotConnectionError`), it logs the error and returns `False` without serving.
+- **Tool registration:** each tool is a server method passed to `FastMCP.add_tool(fn)`, which takes the tool's **name from the method and its description from the docstring**. The tool title stays unset. (The earlier code passed the docstring positionally into the `title` slot.) Docstrings are the prompt the model sees, so they encode usage order ("call `wake_up` first", "call `get_dance_list` before `dance`").
 - **Tool surface:**
 
 | Tool | Delegates to | Returns |
@@ -37,11 +36,10 @@ Lets an LLM agent (Claude Desktop, HuggingFace Tiny Agents, any MCP client) driv
 | `run_app(app_id)` / `stop_app(app_id)` | `run_app` / `stop_app` | status string |
 
   Deliberately **not** exposed: `stop_say`, eyes color, basic awareness, breathing, raw `run_behavior`/`stop_behavior`, and stop-variants for dances/reactions/body actions.
-- **Failure reporting:** tools never raise; a `False` from `NaoAPI` becomes a "Nao failed to …" string.
-- **CLI:** `main()` parses `--fake-robot`, `--ip`, `--port` (default 9559) and calls `run()` on stdio. Launched as a script (`python src/nao_bridge/nao_mcp_server.py …`) per the README.
+- **Failure reporting:** tools never raise; a `False` from the bridge becomes a "Nao failed to …" string.
+- **CLI:** the `nao-mcp-server` console script (also `python -m nao_bridge.nao_mcp_server`) takes `--fake-robot` (→ backend `fake`), `--ip`, `--port` (default 9559). It configures logging (stderr, since stdout carries the stdio transport) and exits 1 if the robot is unreachable.
 
 ## Open questions
 
-1. **Long-running tools.** `dance`/`run_app`/`body_action` block the tool call until the behavior ends; `stop_app` can only help if the client issues concurrent calls. Expose stop tools for dances/body actions, or return immediately?
-2. **Launch command.** Script-style launch relies on sibling imports (`from nao_api import …`); moving to package imports changes it to `python -m nao_bridge.nao_mcp_server` (see the cleanup plan).
-3. **libqi startup log** on stdout can make Claude Desktop show a spurious parse error (README warning) — redirect it to stderr?
+1. **Long-running tools.** `dance`/`run_app`/`body_action` hold the tool call until the behavior ends; `stop_app` only helps if the client issues calls concurrently. Should there be stop tools for dances and body actions, or should these tools return immediately?
+2. **libqi startup log** on stdout can make Claude Desktop show a spurious parse error (README warning). Redirect it to stderr?

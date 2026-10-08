@@ -1,6 +1,8 @@
 # Existing code to green
 
-**Status:** Todo
+**Status:** Done
+
+> Delivered by [202610072000_robot-bridge-split.md](202610072000_robot-bridge-split.md): it rewrote every module this plan touches, so each step below was carried out there and verified by that plan's gates. The file names below are from before the split (`nao_api.py` is now `bridge.py` + `robot.py`).
 
 Brings the pre-SDD code (retro-documented in `specs/nao-api.md`, `specs/nao-mcp-server.md`, `specs/nao-websocket-server.md`) through the Verification gate, and fixes the `stop_expressive_reaction` defect listed in `specs/nao-api.md` ("Known gaps" #1). Behavior otherwise stays as specced; no new features.
 

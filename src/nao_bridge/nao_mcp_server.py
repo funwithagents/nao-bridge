@@ -6,102 +6,97 @@ It supports both real and fake robot modes, with comprehensive error handling an
 
 import argparse
 import asyncio
-from dataclasses import asdict
 import json
 import logging
-from typing import Any, Callable, Literal
-from mcp.server.fastmcp import FastMCP
-from nao_api import NaoAPI
+from dataclasses import asdict
+from typing import Literal
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+from mcp.server.fastmcp import FastMCP
+
+from nao_bridge.bridge import NaoBridge
+from nao_bridge.robot import Backend, RobotConnectionError
+
 logger = logging.getLogger(__name__)
 
+
 class NaoMcpServer:
-    def __init__(self,
-                 fake_robot: bool,
-                 nao_ip: str, nao_port: int):
+    def __init__(self, backend: Backend, nao_ip: str, nao_port: int):
         """Initialize the NaoMcpServer instance.
 
         Args:
-            fake_robot: Whether to use fake robot mode
+            backend: "real" for a robot, "fake" for the offline stand-in
             nao_ip: Robot IP address
             nao_port: Robot port number
         """
-        self.nao_api = NaoAPI(fake_robot,
-                              None, None, None,
-                              nao_ip, nao_port)
+        self.nao_bridge = NaoBridge(backend, ip=nao_ip, port=nao_port)
         self.mcp = FastMCP("Nao")
 
-        self._quick_add_tool(self.set_tts_language)
-        self._quick_add_tool(self.say)
-        self._quick_add_tool(self.wake_up)
-        self._quick_add_tool(self.rest)
-        self._quick_add_tool(self.stand_up)
-        self._quick_add_tool(self.sit_down)
-        self._quick_add_tool(self.get_dance_list)
-        self._quick_add_tool(self.dance)
-        self._quick_add_tool(self.get_expressive_reaction_types)
-        self._quick_add_tool(self.expressive_reaction)
-        self._quick_add_tool(self.get_body_actions_list)
-        self._quick_add_tool(self.body_action)
-        self._quick_add_tool(self.get_app_list)
-        self._quick_add_tool(self.run_app)
-        self._quick_add_tool(self.stop_app)
+        # Name and description come from each method's name and docstring.
+        for tool in (
+            self.set_tts_language,
+            self.say,
+            self.wake_up,
+            self.rest,
+            self.stand_up,
+            self.sit_down,
+            self.get_dance_list,
+            self.dance,
+            self.get_expressive_reaction_types,
+            self.expressive_reaction,
+            self.get_body_actions_list,
+            self.body_action,
+            self.get_app_list,
+            self.run_app,
+            self.stop_app,
+        ):
+            self.mcp.add_tool(tool)
 
-    def _quick_add_tool(self, fn: Callable[..., Any]) -> None:
-        self.mcp.add_tool(fn, fn.__name__, fn.__doc__)
+    async def serve(self, transport: Literal["stdio", "sse"] = "stdio") -> None:
+        """Connect to Nao, serve MCP until the client leaves, then disconnect."""
+        async with self.nao_bridge:
+            if transport == "sse":
+                await self.mcp.run_sse_async()
+            else:
+                await self.mcp.run_stdio_async()
 
     def run(self, transport: Literal["stdio", "sse"] = "stdio") -> bool:
         """Run the NaoMcpServer.
 
-        Args:
-            transport: The transport to use (must be one of: stdio, sse)
-
         Returns:
-            bool: True if the server is running, False otherwise
+            bool: False if Nao could not be reached, True once the server has ended
         """
         try:
-            # Connect to Nao
-            connected = asyncio.run(self.nao_api.connect())
-        except Exception as e:
-            logger.error("Application error: %s", e)
+            asyncio.run(self.serve(transport))
+        except RobotConnectionError as e:
+            logger.error("Could not connect to Nao: %s", e)
             return False
-
-        if not connected:
-            return False
-
-        self.mcp.run(transport)
         return True
 
-    #region Tools
+    # region Tools
     async def set_tts_language(self, language: str) -> str:
         """Change the language of Nao text to speech.
-        
+
         Args:
             language: The language to set (must be one of: English, French)
-            
+
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_api.set_tts_language(language)
+        result = await self.nao_bridge.set_tts_language(language)
         if result:
             return f"Nao switched language to {language}"
         return f"Nao failed to switch language to {language}"
 
     async def say(self, text: str) -> str:
         """Make Nao say something.
-        
+
         Args:
             text: The text to say
-            
+
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_api.say(text)
+        result = await self.nao_bridge.say(text)
         if result:
             return f"Nao said {text}"
         return f"Nao failed to say {text}"
@@ -110,11 +105,11 @@ class NaoMcpServer:
         """Enable Nao motors for action.
         - to be called at the beginning of an interaction
         - needed before any call to other tools for movements
-        
+
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_api.wake_up()
+        result = await self.nao_bridge.wake_up()
         if result:
             return "Nao motors are enabled"
         return "Failed to enable Nao motors"
@@ -122,33 +117,33 @@ class NaoMcpServer:
     async def rest(self) -> str:
         """Disable Nao motors.
         - to be called at the end of an interaction
-        
+
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_api.rest()
+        result = await self.nao_bridge.rest()
         if result:
             return "Nao motors are disabled"
         return "Failed to disable Nao motors"
 
     async def stand_up(self) -> str:
         """Make Nao stand up.
-        
+
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_api.stand_up()
+        result = await self.nao_bridge.stand_up()
         if result:
             return "Nao stood up"
         return "Nao failed to stand up"
 
     async def sit_down(self) -> str:
         """Make Nao sit down.
-        
+
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_api.sit_down()
+        result = await self.nao_bridge.sit_down()
         if result:
             return "Nao sat down"
         return "Nao failed to sit down"
@@ -157,29 +152,29 @@ class NaoMcpServer:
         """Get the list of available dances.
         - to be called at the beginning of an interaction to know the list of available dances
         - needed before calling the dance tool
-        
+
         Returns:
             str: JSON string containing dance information with
                 - the id of the dance
                 - the name in different languages
                 - the name of the behavior to use to start the dance
-                - the description of the dance    
+                - the description of the dance
         """
-        logging.debug("Retrieving dance list")
-        dance_behaviors = self.nao_api.get_dance_behaviors()
+        logger.debug("Retrieving dance list")
+        dance_behaviors = self.nao_bridge.get_dance_behaviors()
         return json.dumps([asdict(b) for b in dance_behaviors])
 
     async def dance(self, dance_id: str) -> str:
         """Make Nao perform a dance.
         - you need to have called the get_dance_list tool before, to know the list of available dances
-        
+
         Args:
             dance_id: The id of the dance to perform
-            
+
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_api.dance(dance_id)
+        result = await self.nao_bridge.dance(dance_id)
         if result:
             return f"Nao has danced the dance with id '{dance_id}'"
         return f"Nao failed to dance the dance with id '{dance_id}'"
@@ -188,11 +183,11 @@ class NaoMcpServer:
         """Get the list of available reaction types.
         - to be called at the beginning of an interaction to know the list of available reactions
         - needed before calling the expressive_reaction tool
-        
+
         Returns:
             str: JSON string containing the list of reaction types
         """
-        return json.dumps(self.nao_api.get_expressive_reaction_types())
+        return json.dumps(self.nao_bridge.get_expressive_reaction_types())
 
     async def expressive_reaction(self, reaction_type: str) -> str:
         """Make Nao react to a specific emotion/situation.
@@ -200,11 +195,11 @@ class NaoMcpServer:
 
         Args:
             reaction_type: The type of reaction to make
-            
+
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_api.expressive_reaction(reaction_type)
+        result = await self.nao_bridge.expressive_reaction(reaction_type)
         if result:
             return f"Nao has reacted for type '{reaction_type}'"
         return f"Nao failed to react for type '{reaction_type}'"
@@ -217,8 +212,8 @@ class NaoMcpServer:
         Returns:
             str: JSON string containing the list of body actions
         """
-        logging.debug("Retrieving body actions list")
-        body_action_behaviors = self.nao_api.get_body_action_behaviors()
+        logger.debug("Retrieving body actions list")
+        body_action_behaviors = self.nao_bridge.get_body_action_behaviors()
         return json.dumps([asdict(b) for b in body_action_behaviors])
 
     async def body_action(self, body_action_id: str) -> str:
@@ -231,7 +226,7 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_api.body_action(body_action_id)
+        result = await self.nao_bridge.body_action(body_action_id)
         if result:
             return f"Nao has performed the body action with id '{body_action_id}'"
         return f"Nao failed to perform the body action with id '{body_action_id}'"
@@ -248,8 +243,8 @@ class NaoMcpServer:
                 - the name of the behavior to use to start the app
                 - the description of the app
         """
-        logging.debug("Retrieving app list")
-        app_behaviors = self.nao_api.get_app_behaviors()
+        logger.debug("Retrieving app list")
+        app_behaviors = self.nao_bridge.get_app_behaviors()
         return json.dumps([asdict(b) for b in app_behaviors])
 
     async def run_app(self, app_id: str) -> str:
@@ -262,7 +257,7 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_api.run_app(app_id)
+        result = await self.nao_bridge.run_app(app_id)
         if result:
             return f"Nao has run the app with id '{app_id}'"
         return f"Nao failed to run the app with id '{app_id}'"
@@ -277,26 +272,35 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_api.stop_app(app_id)
+        result = await self.nao_bridge.stop_app(app_id)
         if result:
             return f"Nao has stopped the app with id '{app_id}'"
         return f"Nao failed to stop the app with id '{app_id}'"
-    #endregion
+
+    # endregion
+
 
 def main() -> None:
     """Main entry point for the application."""
     parser = argparse.ArgumentParser(description="Nao MCP Server")
-    parser.add_argument("--fake-robot", action="store_true",
-                       help="To use the mcp server without a real robot, everything will be faked")
-    parser.add_argument("--ip", type=str, default="",
-                       help="Robot IP address")
-    parser.add_argument("--port", type=int, default=9559,
-                       help="Naoqi port number")
+    parser.add_argument(
+        "--fake-robot",
+        action="store_true",
+        help="To use the mcp server without a real robot, everything will be faked",
+    )
+    parser.add_argument("--ip", type=str, default="", help="Robot IP address")
+    parser.add_argument("--port", type=int, default=9559, help="Naoqi port number")
     args = parser.parse_args()
-    
-    nao_mcp_server = NaoMcpServer(args.fake_robot,
-                                  args.ip, args.port)
-    nao_mcp_server.run()
+
+    # Logs go to stderr: stdout is the MCP stdio transport.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    backend: Backend = "fake" if args.fake_robot else "real"
+    if not NaoMcpServer(backend, args.ip, args.port).run():
+        raise SystemExit(1)
+
 
 if __name__ == "__main__":
     main()

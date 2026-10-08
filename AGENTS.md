@@ -22,10 +22,11 @@ Where things live. This is a coarse, module-level map — for the full file inve
 
 | Module | Role | Spec |
 |---|---|---|
-| [`src/nao_bridge/__init__.py`](src/nao_bridge/__init__.py) | Package glue (empty) | — |
-| [`src/nao_bridge/nao_api.py`](src/nao_bridge/nao_api.py) | `NaoAPI`: async wrapper over a Naoqi `qi` session (speech, posture, LEDs, behaviors catalog, touch/joints/audio streams), with a fake-robot mode | [nao-api.md](specs/nao-api.md) |
-| [`src/nao_bridge/nao_mcp_server.py`](src/nao_bridge/nao_mcp_server.py) | `NaoMcpServer`: exposes `NaoAPI` actions as MCP tools for LLM agents (stdio) | [nao-mcp-server.md](specs/nao-mcp-server.md) |
-| [`src/nao_bridge/nao_websocket_server.py`](src/nao_bridge/nao_websocket_server.py) | `NaoWebsocketServer`: single-client JSON WebSocket protocol over `NaoAPI`, plus streamed touch/joints/audio/log events | [nao-websocket-server.md](specs/nao-websocket-server.md) |
+| [`src/nao_bridge/__init__.py`](src/nao_bridge/__init__.py) | Front door: re-exports `NaoBridge`, `BridgeError`, `BehaviorInfos`, `LocalizedString`, `RobotConnectionError`, `Backend` | [bridge.md](specs/bridge.md) |
+| [`src/nao_bridge/robot.py`](src/nao_bridge/robot.py) | Connection seam: the `NaoRobot` Protocol, `QiNaoRobot` (real, over `qi`), `FakeNaoRobot` (offline, records commands), `build_robot(backend)` | [robot.md](specs/robot.md) |
+| [`src/nao_bridge/bridge.py`](src/nao_bridge/bridge.py) | `NaoBridge`: `start()`/`stop()` lifecycle, intent-level verbs, behavior catalog, touch/joints/audio streams over the robot seam | [bridge.md](specs/bridge.md) |
+| [`src/nao_bridge/nao_mcp_server.py`](src/nao_bridge/nao_mcp_server.py) | `NaoMcpServer`: exposes `NaoBridge` actions as MCP tools for LLM agents (stdio) | [nao-mcp-server.md](specs/nao-mcp-server.md) |
+| [`src/nao_bridge/nao_websocket_server.py`](src/nao_bridge/nao_websocket_server.py) | `NaoWebsocketServer`: single-client JSON WebSocket protocol over `NaoBridge`, plus streamed touch/joints/audio/log events | [nao-websocket-server.md](specs/nao-websocket-server.md) |
 
 **Keep this map current:** when you add, rename, or remove a top-level `src/nao_bridge/` module or a root directory, update the map in the same change — same discipline as keeping spec/plan statuses honest (below). A test (`tests/test_project_map.py`) enforces that every `src/nao_bridge/*.py` module appears here and vice-versa — and that the spec frontmatter (see below) stays honest too.
 
@@ -70,7 +71,7 @@ The mapping is **many-to-many**: a file can be governed by several specs, so the
 
 Some tests call real external services over the network. They live in `tests-e2e/`, a directory separate from `tests/`, so the default `uv run pytest` never runs them — no network access or credentials are needed for the normal dev loop. Run them explicitly, and only when you actually want to verify against a live service. Tests that lack their required credentials should **skip**, not fail, so the tier is safe to run with only the keys you happen to have.
 
-Here the "live service" is a **real Nao robot**: e2e tests read its address with `require_env("NAO_IP")` (and need the `qi` wheel installed — see the README), and skip when it's unset. The fast tier uses `NaoAPI`'s fake-robot mode or test doubles for the `qi` services — never a real robot.
+Here the "live service" is a **real Nao robot**: e2e tests read its address with `require_env("NAO_IP")` (and need the `qi` wheel installed — see the README), and skip when it's unset. The fast tier runs on the `fake` backend (`FakeNaoRobot`, reached through `bridge.robot`) or a stub `qi` module — never a real robot.
 
 ## Implementation plans
 

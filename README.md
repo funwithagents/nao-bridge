@@ -1,68 +1,91 @@
-# Nao MCP - Robot Interaction API & Servers
+# Nao Bridge - Robot Interaction API & Servers
 
 This repository provides a set of tools to communicate with Nao robots and their API (it should work with any robot running Naoqi, the OS embedded in all Aldebaran robots).
 The focus is on providing interactive high-level APIs to enable AI agent-based interactions with the robot.
 
 It contains:
-- [NaoAPI](https://github.com/funwithagents/nao-mcp/src/nao_bridge/nao_api.py): a wrapper to simplify connection to Nao and access its API
-- [Nao MCP server](https://github.com/funwithagents/nao-mcp/src/nao_bridge/nao_websocket_server.py): a MCP server to communicate with NaoAPI
-- [Nao websocket server](https://github.com/funwithagents/nao-mcp/src/nao_bridge/nao_websocket_server.py): a websocket server to communicate with NaoAPI
+- [NaoBridge](src/nao_bridge/bridge.py): the high-level async API to drive Nao, on top of a [robot seam](src/nao_bridge/robot.py) with a `real` backend (a Nao over `qi`) and a `fake` one (no hardware)
+- [Nao MCP server](src/nao_bridge/nao_mcp_server.py): a MCP server exposing NaoBridge as tools for LLM agents
+- [Nao websocket server](src/nao_bridge/nao_websocket_server.py): a websocket server to communicate with NaoBridge over the network
+
+Design docs live in [specs/](specs/_index.md); contributor and agent instructions in [AGENTS.md](AGENTS.md).
 
 > [!IMPORTANT]
 > This has only been tested with Naoqi 2.1.4.13 on a Nao v5.
 > While the Qi package should work fine with more recent versions of Naoqi, the Naoqi API used here might have evolved since version 2.1.4.13. To test and add compatibility, we would need a Nao v6 robot (or even a Pepper robot) ! 🙂
 
 > [!NOTE]
-> No Nao robot? No worries! 😅 If you don't have a Nao or if your setup isn't supported by the qi package builds (like Windows users), all the provided classes include a "fake robot" mode that lets you use the API and servers without actual hardware. 
+> No Nao robot? No worries! 😅 If you don't have a Nao or if your setup isn't supported by the qi package builds (like Windows users), use the `fake` backend (`--fake-robot` on the servers): the API and servers run without actual hardware.
 > See usage details below.
+
+## Installation
+
+The project is managed with [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv sync --dev
+```
+
+This installs the package and the `nao-mcp-server` / `nao-websocket-server` commands in `.venv`.
 
 ## Dependency with qi python package
 
-The communication with a real Nao robot relies on the `qi` python package:
+The communication with a real Nao robot relies on the `qi` python package, which is not on PyPI:
 - find the built package for your setup (MacOS or Linux, and Python version) in the [latest Release](https://github.com/funwithagents/libqi-python/releases) of our [fork](https://github.com/funwithagents/libqi-python) of the [official libqi-python repository](https://github.com/aldebaran/libqi-python) (which is no longer maintained)
 - currently compatible with MacOS arm64 and Linux architectures
 - download the matching .whl file
-- install it in your Python environment: `pip install path/to/download/wheel.whl`
+- install it in the project environment: `uv pip install path/to/download/wheel.whl`
 
-## NaoAPI
+> [!WARNING]
+> Without `qi`, the `real` backend fails to connect with an explicit error. It no longer silently switches to fake mode: ask for the fake backend explicitly.
 
-A wrapper to simplify connection to Nao and access its API
+## NaoBridge
+
+The high-level async API to drive Nao.
 
 ### Usage
 
-The NaoAPI class allows you to connect with a Nao and communicate with its API.
-To do so:
-- create a NaoAPI object:
-  ```Python
-  nao_api = NaoAPI(fake_robot,
-                   memory_callback_touch,
-                   joints_callback,
-                   audio_callback,
-                   nao_ip, nao_port)
-  ```
-  - **`fake_robot`**: boolean, whether or not you want to connect in "fake robot" mode
-  - **`memory_callback_touch`**: if not None, this callback will be triggered when Nao is touched. Expected function definition is `async def memory_callback_touch(key, value)`, where `key` corresponds to the part touched and `value` is 0 or 1
-  - **`joints_callback`**: if not None, will enable the joints data retrieval from Nao and this callback will be triggered periodically with the joints data of the robot. Expected function definition is `async def joints_callback(joints_names, joints_angles)` where `joint_names` is an array of strings with the names of the joints and `joints_angles` is an array of floats with the corresponding angles (in radians)
-  - **`audio_callback`**: Callable[[str, float], None], if not None, will enable audio retrieval from Nao's microphone and this callback will be triggered with new audio buffer data. Expected function definition is `async def audio_callback(rate, nbOfChannels, nbOfSamplesByChannel, bufferData)` where `rate` is the frequency, `nbOfChannels` the number of channels, `nbOfSamplesByChannel` the number of samples per channel and `bufferData` a base64 encoded string from 16 bits little endian sound samples
-  - **`nao_ip`**: the IP of the robot
-  - **`nao_port`**: the port to communicate with the robot (default is 9559)
+```python
+import asyncio
+from nao_bridge import NaoBridge
 
-- initialize the connection with the robot (or fake robot)
-  ```Python
-  nao_connected = await self.nao_api.connect()
-  ```
+
+async def main():
+    async with NaoBridge("real", ip="<nao-ip>") as bridge:  # or NaoBridge("fake")
+        await bridge.wake_up()
+        await bridge.say("Hello!")
+        dances = bridge.get_dance_behaviors()
+        await bridge.dance(dances[0].id)
+        await bridge.rest()
+
+
+asyncio.run(main())
+```
+
+`NaoBridge(backend="real", *, ip="", port=9559, on_touch=None, on_joints=None, on_audio=None)`:
+- **`backend`**: `"real"` for a robot (needs `qi`), `"fake"` for the offline stand-in
+- **`ip`** / **`port`**: the robot's address (default port 9559)
+- **`on_touch`**: if set, called when Nao is touched: `async def on_touch(key, value)`, where `key` is the part touched (`FrontTactilTouched`, `MiddleTactilTouched`, `RearTactilTouched`) and `value` is 0 or 1
+- **`on_joints`**: if set, called every 0.2 s with the robot's joints: `async def on_joints(joints_names, joints_angles)` (angles in radians)
+- **`on_audio`**: if set, called with each microphone buffer: `async def on_audio(rate, nbOfChannels, nbOfSamplesByChannel, bufferData)`, where `bufferData` is a base64 encoded string of 16 bits little endian samples
+
+`async with` connects on entry and disconnects on exit; `await bridge.start()` / `await bridge.stop()` do the same for hosts with their own lifecycle hooks. `bridge.robot` gives access to the underlying robot object while running.
 
 ### APIs
+
+Every action is `async` and returns `True` on success, `False` otherwise (it never raises).
+
 - **`async def set_tts_language(self, language: str)`**: Set the text-to-speech language
 - **`async def say(self, text: str)`**: Make the robot say something
 - **`async def stop_say(self)`**: Stop the robot talking
 - **`async def wake_up(self)`**: Enable robot motors
-- **`sync def rest(self)`**: Disable robot motors
-- **`sync def stand_up(self)`**: Make the robot stand up
+- **`async def rest(self)`**: Disable robot motors
+- **`async def stand_up(self)`**: Make the robot stand up
 - **`async def sit_down(self)`**: Make the robot sit down
 - **`async def change_eyes_color(self, color: str)`**: Change the color of the robot's eyes
 - **`async def set_basic_awareness_state(self, enabled: bool, engagement_mode: str, tracking_mode: str)`**: Set the basic awareness state of the robot
 - **`async def set_breathing_enabled(self, enabled: bool, chain_name: str)`**: Enable or disable breathing for a specific chain
+- **`async def run_behavior(self, behavior_name: str)`** / **`stop_behavior`**: Run / stop any installed behavior by name
 - **`def get_dance_behaviors(self) -> list[BehaviorInfos]`**: Retrieve the list of available dances, needed to call `dance` with right info
 - **`async def dance(self, dance_id: str)`**: Make the robot execute a specific dance with given dance_id (from list of available dances)
 - **`async def stop_dance(self, dance_id: str)`**: Make the robot stop a running dance with given dance_id (from list of available dances)
@@ -72,24 +95,26 @@ To do so:
 - **`def get_body_action_behaviors(self) -> list[BehaviorInfos]`**: Retrieve the list of available body actions, needed to call `body_action` with right info
 - **`async def body_action(self, body_action_id: str)`**: Make the robot execute a specific action with its body for a given body_action_id (from list of available body actions)
 - **`async def stop_body_action(self, body_action_id: str)`**: Make the robot stop a running body action for a given body_action_id (from list of available body actions)
+- **`def get_app_behaviors(self) -> list[BehaviorInfos]`**: Retrieve the list of installed apps, needed to call `run_app` with right info
+- **`async def run_app(self, app_id: str)`** / **`stop_app`**: Run / stop an installed app
 
 > [!NOTE]
-> In fake robot mode, the functions `get_dance_behaviors`, `get_expressive_reaction_types` and `get_body_action_behaviors` return some (fake) data to be able to have the needed information to call the functions `dance`, `expressive_reaction` and `body_action`
+> On the `fake` backend, the robot serves a fixed set of dances, reactions, body actions and apps, so the getters return data you can pass to `dance`, `expressive_reaction`, `body_action` and `run_app`.
 
 ## Nao MCP server
 
-A MCP server linked to NaoAPI.
+A MCP server linked to NaoBridge.
 
 ### Usage
 
 - run the MCP server with a real Nao robot
     - connect your Nao to your network
     - retrieve its IP address (by pressing its torso button) ⇒ `<nao-ip>`
-    - run the server: `python nao_mcp_server.py --ip <nao-ip>`
+    - run the server: `uv run nao-mcp-server --ip <nao-ip>`
 
-- run the server in "fake robot" mode
-  - if you don't have a Nao robot or if your current setup is not compatible with the available qi packages, you can run the MCP server in "fake robot" mode ⇒ all the MCP tools will be available for execution, they will just do nothing real
-  - `python nao_mcp_server.py --fake-robot`
+- run the server on the fake backend
+  - if you don't have a Nao robot or if your current setup is not compatible with the available qi packages, you can run the MCP server with `--fake-robot` ⇒ all the MCP tools will be available for execution, they will just do nothing real
+  - `uv run nao-mcp-server --fake-robot`
 
 ### Usage with HuggingFace Tiny Agents
 
@@ -112,9 +137,9 @@ For a real robot:
       {
         "type": "stdio",
         "config": {
-          "command": "path/to/pythonvenv/bin/python",
+          "command": "uv",
           "args": [
-            "path/to/repo/src/nao_bridge/nao_mcp_server.py",
+            "--directory", "path/to/repo", "run", "nao-mcp-server",
             "--ip", "<nao-ip>"
           ]
         }
@@ -123,7 +148,7 @@ For a real robot:
 }
 ```
 
-For fake robot mode:
+For the fake backend:
 ```json
 {
     "model": "Qwen/Qwen2.5-72B-Instruct",
@@ -132,9 +157,9 @@ For fake robot mode:
       {
         "type": "stdio",
         "config": {
-          "command": "path/to/pythonvenv/bin/python",
+          "command": "uv",
           "args": [
-            "path/to/repo/src/nao_bridge/nao_mcp_server.py",
+            "--directory", "path/to/repo", "run", "nao-mcp-server",
             "--fake-robot"
           ]
         }
@@ -159,22 +184,22 @@ For a real robot:
 ```json
 "mcpServers": {
   "nao-mcp": {
-    "command": "path/to/pythonvenv/bin/python",
+    "command": "uv",
     "args": [
-      "path/to/repo/src/nao_bridge/nao_mcp_server.py",
+      "--directory", "path/to/repo", "run", "nao-mcp-server",
       "--ip", "<nao-ip>"
     ]
   }
 }
 ```
 
-For fake robot mode:
+For the fake backend:
 ```json
 "mcpServers": {
   "nao-mcp": {
-    "command": "path/to/pythonvenv/bin/python",
+    "command": "uv",
     "args": [
-      "path/to/repo/src/nao_bridge/nao_mcp_server.py",
+      "--directory", "path/to/repo", "run", "nao-mcp-server",
       "--fake-robot"
     ]
   }
@@ -207,22 +232,21 @@ You are incarnating Nao, a fun and witty robot from the company Aldebaran. You c
 
 ## Nao websocket server
 
-A server to communicate with NaoAPI over the network via websocket.
-It provides access to all NaoAPI features through websocket messages in JSON format.
+A server to communicate with NaoBridge over the network via websocket.
+It provides access to all NaoBridge features through websocket messages in JSON format.
 
 ### Usage
 
 - run the server with a real Nao robot
     - connect your Nao to your network
     - retrieve its IP address (by pressing its torso button) ⇒ `<nao-ip>`
-    - run the server: `python nao_websocket_server.py --ip <nao-ip> (--with-joints-data) (--with-audio-data)`
+    - run the server: `uv run nao-websocket-server --ip <nao-ip> (--with-joints-data) (--with-audio-data)`
 
-- run the server in "fake robot" mode
-  - if you don't have a Nao robot or if your current setup is not compatible with the available qi packages, you can run the server in "fake robot" mode ⇒ all communication with the server will work but will just do nothing real
-  - `python nao_websocket_server.py --fake-robot`
+- run the server on the fake backend
+  - if you don't have a Nao robot or if your current setup is not compatible with the available qi packages, you can run the server with `--fake-robot` ⇒ all communication with the server will work but will just do nothing real
+  - `uv run nao-websocket-server --fake-robot`
 
 ### Messages
 
-> [!WARNING]
-> Full description of the JSON for each message is still TODO.
-> For now, you can check the message parsing in the `_apply_command_xxx` functions in [nao_websocket_server.py](https://github.com/funwithagents/nao-mcp/src/nao_bridge/nao_websocket_server.py)
+> [!NOTE]
+> The full protocol (envelope, commands and their data, streamed events) is described in [specs/nao-websocket-server.md](specs/nao-websocket-server.md).
