@@ -132,7 +132,12 @@ def test_server_configs_nest_the_bridge_and_their_own_settings():
         {"bridge": {"streams": {"touch": {"enabled": True}}}, "server": {"port": 9000}}
     )
     assert config.server.port == 9000
+    assert config.server.host == ""  # the default: the LAN IP, found at start
     assert config.bridge.streams.touch.enabled
+    local = NaoWebsocketServerConfig.from_dict(
+        {"server": {"host": "127.0.0.1", "port": 0}}
+    )
+    assert (local.server.host, local.server.port) == ("127.0.0.1", 0)
     assert NaoMcpServerConfig.from_dict({}).server.transport == "stdio"
 
 
@@ -143,6 +148,11 @@ def test_server_configs_nest_the_bridge_and_their_own_settings():
             NaoWebsocketServerConfig,
             {"server": {"port": 70000}},
             "server.port must be between",
+        ),
+        (
+            NaoWebsocketServerConfig,
+            {"server": {"host": 1}},
+            "server.host must be a string",
         ),
         (
             NaoWebsocketServerConfig,

@@ -1,7 +1,8 @@
 """The WebSocket server (specs/nao-websocket-server.md) on the ``fake`` backend: the
-JSON protocol driven through the connection handler with an in-memory socket.
+JSON protocol through ``ClientSession`` over an in-memory connection, and the
+listener / single-client policy through ``NaoWebsocketServer`` on a loopback socket.
 
-No robot or network needed. Async runs via ``asyncio.run``.
+No robot or external network needed. Async runs via ``asyncio.run``.
 """
 
 import asyncio
@@ -12,7 +13,9 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any
 
 import pytest
+import websockets
 
+from nao_bridge.bridge import NaoBridge
 from nao_bridge.config import (
     AudioStream,
     JointsStream,
@@ -21,10 +24,17 @@ from nao_bridge.config import (
     TouchStream,
 )
 from nao_bridge.fake_robot import FakeNaoRobot
-from nao_bridge.nao_websocket_server import NaoWebsocketServer, NaoWebsocketServerConfig
+from nao_bridge.nao_websocket_server import (
+    ClientSession,
+    NaoWebsocketServer,
+    NaoWebsocketServerConfig,
+    WebsocketServerSettings,
+)
 
+LOOPBACK = WebsocketServerSettings(host="127.0.0.1", port=0)
 TOUCH_ONLY = NaoWebsocketServerConfig(
-    bridge=NaoBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True)))
+    bridge=NaoBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True))),
+    server=LOOPBACK,
 )
 ALL_STREAMS = NaoWebsocketServerConfig(
     bridge=NaoBridgeConfig(
@@ -33,7 +43,8 @@ ALL_STREAMS = NaoWebsocketServerConfig(
             joints=JointsStream(enabled=True, period_s=0.02),
             audio=AudioStream(enabled=True),
         )
-    )
+    ),
+    server=LOOPBACK,
 )
 
 
@@ -44,9 +55,9 @@ async def wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> Non
 
 
 class MemorySocket:
-    """A client connection: yields ``incoming`` messages, then stays open until the
-    server has answered ``answers`` commands and ``until`` holds; records what the
-    server sends."""
+    """A client connection: yields ``incoming`` messages (and whatever ``push`` adds
+    later), then stays open until the server has answered ``answers`` commands and
+    ``until`` holds; records what the server sends."""
 
     def __init__(
         self,
@@ -59,6 +70,11 @@ class MemorySocket:
         self.until = until
         self.sent: list[dict[str, Any]] = []
         self.closed = False
+        self._later: asyncio.Queue[str] = asyncio.Queue()
+
+    def push(self, message: dict[str, Any]) -> None:
+        """Send ``message`` from the client, mid-session."""
+        self._later.put_nowait(json.dumps(message))
 
     def of(self, message_id: str) -> list[dict[str, Any]]:
         return [m["data"] for m in self.sent if m["id"] == message_id]
@@ -72,9 +88,14 @@ class MemorySocket:
     async def _messages(self) -> AsyncIterator[str]:
         for message in self.incoming:
             yield message if isinstance(message, str) else json.dumps(message)
-        await wait_until(
-            lambda: len(self.of("CommandEnded")) >= self.answers and self.until(self)
-        )
+        async with asyncio.timeout(2.0):
+            while not (
+                len(self.of("CommandEnded")) >= self.answers and self.until(self)
+            ):
+                try:
+                    yield await asyncio.wait_for(self._later.get(), 0.01)
+                except TimeoutError:
+                    pass
 
     def __aiter__(self) -> AsyncIterator[str]:
         return self._messages()
@@ -87,30 +108,30 @@ def command(uuid: str, command_id: str, **data: Any) -> dict[str, Any]:
     }
 
 
-async def started_server(
-    config: NaoWebsocketServerConfig = TOUCH_ONLY,
-) -> tuple[NaoWebsocketServer, FakeNaoRobot]:
-    """A server with its bridge up on the fake, without opening a network listener."""
-    server = NaoWebsocketServer(config)
-    server.async_loop = asyncio.get_running_loop()
-    assert await server._start_bridge()
-    robot = server.nao_bridge.robot
+def fake(bridge: NaoBridge) -> FakeNaoRobot:
+    robot = bridge.robot
     assert isinstance(robot, FakeNaoRobot)
-    return server, robot
+    return robot
 
 
 def session(
-    incoming: Sequence[dict[str, Any] | str], answers: int
+    incoming: Sequence[dict[str, Any] | str],
+    answers: int,
+    config: NaoWebsocketServerConfig = TOUCH_ONLY,
 ) -> tuple[MemorySocket, list[str]]:
+    """Serve one in-memory client over a started bridge; the robot calls it made."""
     socket = MemorySocket(incoming, answers)
 
     async def run() -> list[str]:
-        server, robot = await started_server()
-        await server._websocket_handler(socket)
-        await server.nao_bridge.stop()
+        async with NaoBridge(config.bridge) as bridge:
+            robot = fake(bridge)
+            await ClientSession(bridge, config, socket).serve()
         return [name for name, _ in robot.commands]
 
     return socket, asyncio.run(run())
+
+
+# --- the protocol, over an in-memory connection -------------------------------
 
 
 def test_a_client_session_readies_then_rests_the_robot():
@@ -144,12 +165,18 @@ def test_commands_answer_with_their_uuid_and_result():
     assert "say" in robot_calls
 
 
-def test_an_unknown_command_is_an_error_naming_it():
-    socket, _ = session([command("c9", "Fly")], answers=1)
-    [ended] = socket.of("CommandEnded")
-    assert ended["resultType"] == "Error"
-    assert "Fly" in ended["message"]
-    assert set(ended) == {"commandUuid", "resultType", "message", "data"}
+def test_every_command_result_carries_the_four_keys():
+    socket, _ = session(
+        [command("c9", "Fly"), command("c8", "Say")],  # unknown; missing `text`
+        answers=2,
+    )
+    ended = {r["commandUuid"]: r for r in socket.of("CommandEnded")}
+    assert all(
+        set(r) == {"commandUuid", "resultType", "message", "data"}
+        for r in ended.values()
+    )
+    assert ended["c9"]["resultType"] == "Error" and "Fly" in ended["c9"]["message"]
+    assert ended["c8"]["resultType"] == "Error" and "text" in ended["c8"]["message"]
 
 
 def test_bad_messages_are_reported_and_the_session_goes_on():
@@ -167,31 +194,6 @@ def test_bad_messages_are_reported_and_the_session_goes_on():
     assert "say" in robot_calls
     errors = [m for m in socket.of("Log") if m["logLevel"] == "ERROR"]
     assert len(errors) == 3
-
-
-def test_a_second_client_replaces_the_first_one_cleanly(
-    caplog: pytest.LogCaptureFixture,
-):
-    async def run() -> tuple[MemorySocket, MemorySocket, list[str]]:
-        server, robot = await started_server()
-        first = MemorySocket([], until=lambda s: s.closed)
-        first_handler = asyncio.create_task(server._websocket_handler(first))
-        await wait_until(lambda: server.websocket_client is first)
-        robot.commands.clear()
-        second = MemorySocket([])
-        await server._websocket_handler(second)
-        async with asyncio.timeout(2.0):
-            await first_handler
-        await server.nao_bridge.stop()
-        return first, second, [name for name, _ in robot.commands]
-
-    first, second, robot_calls = asyncio.run(run())
-    assert first.closed and second.closed
-    # The first client is reset (rest) before the second is readied (wake_up).
-    assert robot_calls.index("rest") < robot_calls.index("wake_up")
-    assert robot_calls.count("rest") == 2
-    assert second.of("NaoState") == [{"connected": True, "fakeRobot": True}]
-    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
 
 
 def test_catalog_commands_use_camel_case_payloads():
@@ -212,20 +214,20 @@ def test_catalog_commands_use_camel_case_payloads():
 
 def test_a_stop_command_ends_a_running_dance():
     async def run() -> MemorySocket:
-        server, robot = await started_server()
-        robot.behavior_duration_s = 5.0
-        socket = MemorySocket(
-            [command("d1", "Dance", danceId="eagle-dance")],
-            answers=2,
-        )
-        handler = asyncio.create_task(server._websocket_handler(socket))
-        await wait_until(lambda: "eagle-dance" in robot.running_behaviors)
-        await server._command_callback(
-            socket, command("d2", "StopDance", danceId="eagle-dance")["data"]
-        )
-        async with asyncio.timeout(2.0):
-            await handler
-        await server.nao_bridge.stop()
+        async with NaoBridge(TOUCH_ONLY.bridge) as bridge:
+            robot = fake(bridge)
+            robot.behavior_duration_s = 5.0
+            socket = MemorySocket(
+                [command("d1", "Dance", danceId="eagle-dance")],
+                answers=2,
+            )
+            serving = asyncio.create_task(
+                ClientSession(bridge, TOUCH_ONLY, socket).serve()
+            )
+            await wait_until(lambda: "eagle-dance" in robot.running_behaviors)
+            socket.push(command("d2", "StopDance", danceId="eagle-dance"))
+            async with asyncio.timeout(2.0):
+                await serving
         return socket
 
     socket = asyncio.run(run())
@@ -233,33 +235,41 @@ def test_a_stop_command_ends_a_running_dance():
     assert results == {"d1": "Success", "d2": "Success"}
 
 
-def test_touch_events_are_streamed_to_the_client():
-    async def run() -> MemorySocket:
-        server, robot = await started_server()
-        socket = MemorySocket([])
-        server.websocket_client = socket
-        robot.touch("MiddleTactilTouched", 1.0)
-        await wait_until(lambda: bool(socket.of("Touch")))
-        await server.nao_bridge.stop()
-        return socket
+def test_touch_events_are_streamed_only_during_the_session():
+    async def run() -> tuple[MemorySocket, int]:
+        async with NaoBridge(TOUCH_ONLY.bridge) as bridge:
+            robot = fake(bridge)
+            socket = MemorySocket([], until=lambda s: bool(s.of("Touch")))
+            serving = asyncio.create_task(
+                ClientSession(bridge, TOUCH_ONLY, socket).serve()
+            )
+            await wait_until(lambda: bool(socket.of("NaoState")))
+            robot.touch("MiddleTactilTouched", 1.0)
+            async with asyncio.timeout(2.0):
+                await serving
+            robot.touch("MiddleTactilTouched", 0.0)  # the client is gone
+            await asyncio.sleep(0.05)
+        return socket, len(socket.of("Touch"))
 
-    assert asyncio.run(run()).of("Touch") == [
-        {"part": "MiddleTactilTouched", "touched": True}
-    ]
+    socket, touches = asyncio.run(run())
+    assert socket.of("Touch") == [{"part": "MiddleTactilTouched", "touched": True}]
+    assert touches == 1
 
 
 def test_joints_and_audio_stream_to_the_client_during_its_session():
     async def run() -> tuple[MemorySocket, int]:
-        server, robot = await started_server(ALL_STREAMS)
-        robot.audio_chunk_s = 0.01
-        socket = MemorySocket(
-            [], until=lambda s: len(s.of("Joints")) >= 2 and len(s.of("Audio")) >= 3
-        )
-        await server._websocket_handler(socket)
-        sent_at_close = len(socket.sent)
-        await asyncio.sleep(0.1)  # the client is gone: its streams must have stopped
-        late = len(socket.sent) - sent_at_close
-        await server.nao_bridge.stop()
+        async with NaoBridge(ALL_STREAMS.bridge) as bridge:
+            fake(bridge).audio_chunk_s = 0.01
+            socket = MemorySocket(
+                [],
+                until=lambda s: len(s.of("Joints")) >= 2 and len(s.of("Audio")) >= 3,
+            )
+            await ClientSession(bridge, ALL_STREAMS, socket).serve()
+            sent_at_close = len(socket.sent)
+            await asyncio.sleep(
+                0.1
+            )  # the client is gone: its streams must have stopped
+            late = len(socket.sent) - sent_at_close
         return socket, late
 
     socket, late = asyncio.run(run())
@@ -276,3 +286,93 @@ def test_joints_and_audio_stream_to_the_client_during_its_session():
 def test_disabled_streams_send_nothing():
     socket, _ = session([command("c1", "WakeUp")], answers=1)
     assert socket.of("Joints") == [] and socket.of("Audio") == []
+
+
+# --- the server: listener and single-client policy ----------------------------
+
+
+def test_a_second_client_replaces_the_first_one_cleanly(
+    caplog: pytest.LogCaptureFixture,
+):
+    async def run() -> tuple[MemorySocket, MemorySocket, list[str]]:
+        server = NaoWebsocketServer(TOUCH_ONLY)
+        assert await server.start_connection()
+        robot = fake(server.nao_bridge)
+        first = MemorySocket([], until=lambda s: s.closed)
+        first_serving = asyncio.create_task(server.attach(first))
+        await wait_until(lambda: bool(first.of("NaoState")))
+        robot.commands.clear()
+        second = MemorySocket([])
+        await server.attach(second)
+        async with asyncio.timeout(2.0):
+            await first_serving
+        await server.stop_connection()
+        return first, second, [name for name, _ in robot.commands]
+
+    first, second, robot_calls = asyncio.run(run())
+    assert first.closed and second.closed
+    # The first client is reset (rest) before the second is readied (wake_up).
+    assert robot_calls.index("rest") < robot_calls.index("wake_up")
+    assert robot_calls.count("rest") == 2
+    assert second.of("NaoState") == [{"connected": True, "fakeRobot": True}]
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+def test_the_listener_serves_a_real_websocket_client_on_the_configured_host():
+    async def run() -> tuple[tuple[str, int] | None, dict[str, Any], dict[str, Any]]:
+        server = NaoWebsocketServer(TOUCH_ONLY)
+        assert await server.start_connection()
+        address = server.address
+        assert address is not None
+        host, port = address
+        async with websockets.connect(f"ws://{host}:{port}") as client:
+
+            async def receive(message_id: str) -> dict[str, Any]:
+                async with asyncio.timeout(2.0):
+                    while True:  # Log lines are interleaved with everything else
+                        message = json.loads(await client.recv())
+                        if message["id"] == message_id:
+                            return message["data"]
+
+            state = await receive("NaoState")
+            await client.send(json.dumps(command("c1", "Say", text="over the wire")))
+            ended = await receive("CommandEnded")
+        await wait_until(lambda: server.session is None)
+        await server.stop_connection()
+        return address, state, ended
+
+    address, state, ended = asyncio.run(run())
+    assert address is not None and address[0] == "127.0.0.1" and address[1] > 0
+    assert state == {"connected": True, "fakeRobot": True}
+    assert (ended["commandUuid"], ended["resultType"]) == ("c1", "Success")
+
+
+def test_stopping_the_server_ends_the_client_and_the_bridge():
+    async def run() -> tuple[bool, bool, bool]:
+        server = NaoWebsocketServer(TOUCH_ONLY)
+        assert await server.start_connection()
+        socket = MemorySocket([], until=lambda s: s.closed)
+        serving = asyncio.create_task(server.attach(socket))
+        await wait_until(lambda: server.session is not None)
+        await server.stop_connection()
+        async with asyncio.timeout(2.0):
+            await serving
+        return socket.closed, server.address is None, server.nao_bridge.running
+
+    assert asyncio.run(run()) == (True, True, False)
+
+
+def test_an_unreachable_robot_is_reported_not_raised():
+    config = NaoWebsocketServerConfig(
+        bridge=NaoBridgeConfig.from_dict(
+            {
+                "backend": "real",
+                "robot": {"ip": "127.0.0.1", "port": 1, "connect_tries": 1},
+            }
+        ),
+        server=LOOPBACK,
+    )
+    pytest.importorskip("qi")
+    server = NaoWebsocketServer(config)
+    assert asyncio.run(server.start_connection()) is False
+    assert server.address is None

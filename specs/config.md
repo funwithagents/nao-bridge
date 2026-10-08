@@ -64,7 +64,7 @@ class StreamSettings:
 - Every config class has the same three constructors: `from_dict(data)`, `from_json(text)` (parses, then calls `from_dict`), and `from_json_file(path)` (reads, then calls `from_json`; an invalid-JSON error names the path). All three share one validation path.
 - Errors raise `ConfigError(ValueError)`, with a message that names the offending key path (e.g. `streams.joints.period_s`).
 - **Unknown keys are errors**, so a typo fails when the config loads.
-- **Type and range checks:** `backend` ∈ `{"real", "fake"}`; `port` and `connect_tries` are positive integers; `connect_timeout_s` and `period_s` are positive, finite numbers; `channel` is one of the four values.
+- **Type and range checks:** `backend` ∈ `{"real", "fake"}`; `robot.port` and `connect_tries` are positive integers; `connect_timeout_s` and `period_s` are positive, finite numbers; `channel` is one of the four values.
 - **`real` needs `robot.ip`.** An empty IP is a `ConfigError` when the config loads.
 - **On `fake`, `robot` is validated but not applied.** A config written for the robot runs offline by changing `backend` alone.
 - `config.py` imports neither `qi` nor `mcp` nor `websockets`.
@@ -102,7 +102,7 @@ Each server has its own config object, wrapping a `NaoBridgeConfig` under `bridg
     "robot": { "ip": "192.168.1.42" },
     "streams": { "touch": { "enabled": true }, "joints": { "enabled": true }, "audio": { "enabled": true } }
   },
-  "server": { "port": 8002 }
+  "server": { "host": "", "port": 8002 }
 }
 
 // NaoMcpServerConfig
@@ -112,7 +112,7 @@ Each server has its own config object, wrapping a `NaoBridgeConfig` under `bridg
 }
 ```
 
-- `NaoWebsocketServerConfig(bridge, server: WebsocketServerSettings(port=8002))`. Its bridge streams replace `--with-joints-data` / `--with-audio-data`. Touch is no longer forced on: it's on when the config says so. The server subscribes to `on_touch`, follows `bridge.joints.changes()`, and drains one `audio_input()` per client.
+- `NaoWebsocketServerConfig(bridge, server: WebsocketServerSettings(host="", port=8002))`. `host` is the bind address; empty (the default) means the host's LAN IP, found at start; `port` 0 means an OS-assigned port ([nao-websocket-server.md](nao-websocket-server.md)). Its bridge streams replace `--with-joints-data` / `--with-audio-data`. Touch is no longer forced on: it's on when the config says so. The server subscribes to `on_touch`, follows `bridge.joints.changes()`, and drains one `audio_input()` per client.
 - `NaoMcpServerConfig(bridge, server: McpServerSettings(transport="stdio" | "sse"))`.
 - The `bridge` block is exactly a `NaoBridgeConfig`, so it can be copied between files. Each server config class lives in its server module; `NaoBridgeConfig` and `ConfigError` live in `config.py`.
 

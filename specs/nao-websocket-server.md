@@ -17,24 +17,27 @@ Gives non-MCP clients (a game engine, a web app, a custom agent loop) network ac
 
 ### Lifecycle
 
-- **Config:** `NaoWebsocketServerConfig` is `{"bridge": NaoBridgeConfig, "server": WebsocketServerSettings}`, with `WebsocketServerSettings(port: int = 8002)` (1–65535). Both blocks are optional and share the loaders and `ConfigError` rules of [config.md](config.md). The bridge's `streams` decide which events the server streams to its client: none is forced on.
+- **Config:** `NaoWebsocketServerConfig` is `{"bridge": NaoBridgeConfig, "server": WebsocketServerSettings}`, with `WebsocketServerSettings(host: str = "", port: int = 8002)` (port 0–65535; `0` lets the OS pick a free port, which `address` then reports). `host` is the address to bind; empty means the host's **LAN IP** (found via a UDP socket towards 8.8.8.8, which needs a route out), `"0.0.0.0"` every interface, `"127.0.0.1"` local only. Both blocks are optional and share the loaders and `ConfigError` rules of [config.md](config.md). The bridge's `streams` decide which events the server streams to its client: none is forced on.
 - `NaoWebsocketServer(config=None)` (default: `NaoWebsocketServerConfig()`, the fake with no streams) builds a `NaoBridge(config.bridge)`.
-- `async start_connection()` starts the bridge and, when touch is enabled, subscribes its handler to `bridge.on_touch`. On `RobotConnectionError` it logs and returns `False`. Otherwise it serves on the host's **LAN IP** (found via a UDP socket towards 8.8.8.8) at `websocket_port`.
-- `async stop_connection()` stops the bridge, disconnects the client, and closes the server.
+- **Two objects.** `NaoWebsocketServer` owns the bridge and the listener; `ClientSession` is the protocol over one connection — it takes the bridge, the config and a *connection-like* object (anything with `send(str)`, `close()` and `async for` over incoming text, which is what `websockets` gives and what a test can fake in memory) and runs `serve()` until the connection ends. The server builds one session per accepted connection. So the protocol is tested through its public surface without a network listener.
+- `async start_connection()` starts the bridge. On `RobotConnectionError` it logs and returns `False`. Otherwise it listens on `server.host` (the LAN IP when empty) at `server.port`; `address` then gives the `(host, port)` actually bound. The listener is the `websockets` `Server` object, held by the server and closed with it. Each accepted connection goes to `attach(connection)`, which is public: a host with its own transport can hand the server any connection-like object and get the same single-client policy.
+- `async stop_connection()` ends the client's session, closes the listener, then stops the bridge.
 - CLI: the `nao-websocket-server` console script (also `python -m nao_bridge.nao_websocket_server`) takes `--config path.json` only; without it the server runs on its default config. An invalid config exits 2 with the `ConfigError` message. It runs until Enter is pressed and exits 1 if the robot is unreachable. Ready-made files: `examples/configs/websocket-fake.json`, `websocket-real.json` (every stream on).
 
 ### Single client
 
-Exactly one client at a time. A new connection closes the previous client (stopping its streams first).
+Exactly one client at a time. A new connection ends the previous session (its streams stop, the robot is reset as on a disconnect, its connection is closed) before the new one starts; the old session's own cleanup then finds nothing left to do and logs nothing.
 - On client **connect** (when the robot is connected): eyes cyan, `wake_up`, breathing on for `Body`; then a `NaoState` message is sent and the client's streams start.
 - On client **disconnect**: its streams stop, then eyes white, breathing off, `rest`.
 
 **Streams per client session** (each only when enabled in the bridge config):
-- **Touch:** the `bridge.on_touch` handler sends a `Touch` message for each event.
+- **Touch:** the session subscribes its handler to `bridge.on_touch` for its lifetime and sends a `Touch` message for each event.
 - **Joints:** a task follows `bridge.joints.changes()` and sends a `Joints` message per published sample. It is latest-wins, so a slow connection skips poses rather than lagging.
 - **Audio:** a task drains one `bridge.audio_input()` subscriber and sends an `Audio` message per chunk, base64-encoding it here, where the JSON transport needs it ([microphone.md](microphone.md)).
 
-The joints and audio tasks are cancelled when the client leaves, so nothing is sent after it.
+The joints and audio tasks are cancelled and the touch handler unsubscribed when the client leaves, so nothing is sent after it.
+
+**Bad input doesn't end the session.** A message that isn't JSON, isn't the envelope, or has an unknown `id` is answered with a `Log` message at `ERROR` level naming the problem, and the session keeps reading. Only the connection closing (by the client or by the server) ends a session.
 
 ### Message envelope
 
@@ -47,11 +50,11 @@ Every message, both directions, is `{"id": <string>, "data": <object>}`.
 | `id` | `data` |
 |---|---|
 | `NaoState` | `{connected, fakeRobot}` (`fakeRobot` is true on the `fake` backend) |
-| `CommandEnded` | `{commandUuid, resultType: "Success"\|"Error", message, data}` — unknown `commandId` or an exception yields `Error` |
+| `CommandEnded` | `{commandUuid, resultType: "Success"\|"Error", message, data}` — always all four keys (`data` is `null` when a command has no payload); an unknown `commandId`, a `commandData` missing a field, or an exception yields `Error` with the reason in `message` |
 | `Touch` | `{part, touched: bool}` |
 | `Joints` | `{jointsNames, jointsAngles}` (every `streams.joints.period_s`) |
 | `Audio` | `{rate, channels, nbSamplesPerChannel, data: base64 PCM16LE}`, one per mic chunk |
-| `Log` | `{log, logLevel}` — server log lines mirrored to the client |
+| `Log` | `{log, logLevel}` — the session's own log lines (connection, each command's start and result, bad input) mirrored to the client; the listener's and the library's logs aren't |
 
 ### Commands (`commandId` → `commandData` → `NaoBridge` verb)
 
@@ -76,6 +79,5 @@ The `bool` result from `NaoBridge` maps to `resultType`; payloads use **camelCas
 
 ## Open questions
 
-1. **Bind address.** Serving on the LAN IP only (not `0.0.0.0`/localhost) and discovering it via 8.8.8.8 fails offline — make the host configurable?
-2. **Protocol versioning / schema.** No version field and no published JSON schema (the README marks message docs as TODO); this table is now the reference.
-3. **No auth.** Anyone on the LAN can drive the robot; acceptable for a local tool, revisit if exposed further.
+1. **Protocol versioning / schema.** No version field and no published JSON schema (the README marks message docs as TODO); this table is now the reference.
+2. **No auth.** Anyone on the LAN can drive the robot; acceptable for a local tool, revisit if exposed further.
