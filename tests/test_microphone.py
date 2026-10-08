@@ -12,8 +12,8 @@ import pytest
 
 from nao_bridge import microphone
 from nao_bridge.errors import BridgeError
+from nao_bridge.fake_robot import FakeNaoRobot
 from nao_bridge.microphone import MicFeed
-from nao_bridge.robot import FakeNaoRobot
 
 
 def quiet_robot() -> FakeNaoRobot:

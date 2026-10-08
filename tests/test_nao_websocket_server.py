@@ -17,8 +17,8 @@ from nao_bridge.config import (
     StreamSettings,
     TouchStream,
 )
+from nao_bridge.fake_robot import FakeNaoRobot
 from nao_bridge.nao_websocket_server import NaoWebsocketServer, NaoWebsocketServerConfig
-from nao_bridge.robot import FakeNaoRobot
 
 TOUCH_ONLY = NaoWebsocketServerConfig(
     bridge=NaoBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True)))

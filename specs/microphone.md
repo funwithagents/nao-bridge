@@ -2,6 +2,7 @@
 code:
   - src/nao_bridge/microphone.py
   - src/nao_bridge/robot.py
+  - src/nao_bridge/fake_robot.py
   - src/nao_bridge/bridge.py
   - src/nao_bridge/nao_websocket_server.py
 tests:

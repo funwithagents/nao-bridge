@@ -25,7 +25,7 @@ from nao_bridge.config import (
     StreamSettings,
     TouchStream,
 )
-from nao_bridge.robot import FakeNaoRobot
+from nao_bridge.fake_robot import FakeNaoRobot
 
 ALL_STREAMS = NaoBridgeConfig(
     streams=StreamSettings(

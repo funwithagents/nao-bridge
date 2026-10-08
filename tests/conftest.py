@@ -8,7 +8,7 @@
 
 import pytest
 
-from nao_bridge.robot import FakeNaoRobot
+from nao_bridge.fake_robot import FakeNaoRobot
 
 
 @pytest.fixture(autouse=True)

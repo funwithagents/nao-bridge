@@ -1,9 +1,13 @@
 ---
 code:
   - src/nao_bridge/robot.py
+  - src/nao_bridge/real_robot.py
+  - src/nao_bridge/fake_robot.py
 tests:
   - tests/test_robot.py
-  - tests-e2e/test_real_robot.py
+  - tests/test_real_robot.py
+  - tests/test_fake_robot.py
+  - tests-e2e/test_live_robot.py
 ---
 
 # Robot (connection seam)
@@ -29,8 +33,10 @@ So the seam is a **first-party `NaoRobot` Protocol**, with two implementations:
 
 | Backend | Class | What it is |
 |---|---|---|
-| `real` (default) | `QiNaoRobot(ip, port=9559, *, connect_tries=10, connect_timeout_s=5.0)` | Translates each Protocol method into the Naoqi service call(s) |
+| `real` (default) | `RealNaoRobot(ip, port=9559, *, connect_tries=10, connect_timeout_s=5.0)` | Translates each Protocol method into the Naoqi service call(s) |
 | `fake` | `FakeNaoRobot()` | Records every command, serves a fixed package list, simulates behavior runs and sensor events |
+
+Each lives in its own module: `robot.py` holds what they share (the Protocol, the callback types, `TOUCH_KEYS` / `AUDIO_SAMPLE_RATE` / `AUDIO_CHANNEL_CODES`, `RobotConnectionError`) and `build_robot`; `real_robot.py` holds `RealNaoRobot`; `fake_robot.py` holds `FakeNaoRobot` and its package list. `build_robot` imports the two lazily, since both import `robot.py`.
 
 The Protocol is the contract; each implementation translates it to its backend. Units and names at this layer are Naoqi's. Intent-level semantics (catalog, reactions, tracking what's running) belong to [bridge.md](bridge.md).
 
@@ -38,7 +44,7 @@ The Protocol is the contract; each implementation translates it to its backend. 
 
 The one way in, used by `NaoBridge.start()`, driven by the [config](config.md):
 - `backend: "fake"` → `FakeNaoRobot()`; the `robot` block is ignored.
-- `backend: "real"` → `QiNaoRobot(robot.ip, robot.port, connect_tries=robot.connect_tries, connect_timeout_s=robot.connect_timeout_s)`.
+- `backend: "real"` → `RealNaoRobot(robot.ip, robot.port, connect_tries=robot.connect_tries, connect_timeout_s=robot.connect_timeout_s)`.
 
 The config has already rejected unknown backends and a `real` backend without an IP. Building does not connect.
 
@@ -46,7 +52,7 @@ The config has already rejected unknown backends and a `real` backend without an
 
 Every method is **blocking** (the bridge calls them via `asyncio.to_thread`) and **raises** on failure; the bridge turns failures into its own results.
 
-| Method | `QiNaoRobot` → Naoqi |
+| Method | `RealNaoRobot` → Naoqi |
 |---|---|
 | `connect()` / `close()` | open / close `tcp://<ip>:<port>` |
 | `set_language(language)` | `ALTextToSpeech.setLanguage` |
@@ -66,7 +72,7 @@ Every method is **blocking** (the bridge calls them via `asyncio.to_thread`) and
 
 Sensor callbacks are invoked **on Naoqi's threads**; marshalling onto an event loop is the bridge's job.
 
-### `QiNaoRobot`
+### `RealNaoRobot`
 
 - **`qi` is imported lazily in `connect()`** (via `importlib`), so importing `nao_bridge` never needs it. `qi` is a dependency on the platforms with a wheel and absent elsewhere ([project.md](project.md)). If it's missing, `connect()` raises `RobotConnectionError`: the message names the platforms that ship `qi` (macOS arm64, Linux x86_64, CPython 3.12 / 3.13), says to run `uv sync` there, and says the platform otherwise runs the `fake` backend only. **There is no silent fallback to fake** — that was the old behavior, and it let an agent believe a real robot was moving. Ask for the fake explicitly.
 - `connect()` with an empty IP or a non-positive port raises `RobotConnectionError` before trying.
@@ -77,14 +83,14 @@ Sensor callbacks are invoked **on Naoqi's threads**; marshalling onto an event l
 
   After the last attempt it raises `RobotConnectionError` naming the attempts, chained to the last error. A wrong IP therefore fails within `connect_tries × connect_timeout_s` (50 s by default).
 - Services are acquired lazily on first use and cached for the session; `close()` drops them.
-- Naoqi requires the audio sink to expose a method named exactly `processRemote`. That lives on a small private sink object, so `QiNaoRobot`'s own surface stays the Protocol.
+- Naoqi requires the audio sink to expose a method named exactly `processRemote`. That lives on a small private sink object, so `RealNaoRobot`'s own surface stays the Protocol.
 
 ### `FakeNaoRobot`
 
 What the fake does is set by what the tests exercise:
 
 - **Recording:** each Protocol call appends `(method_name, {args})` to `commands`; `connected` mirrors `connect()`/`close()`.
-- **Package list:** `list_packages()` returns a fixed `packages2`-shaped list. The bridge classifies it with the same code it uses for a real robot. It yields 4 dances, 4 apps, 6 arm actions, and reactions for every type (`Happy`, `Proud`, `Laugh`, `Sad`, `HeadTouched`), plus a `Sit/` emotion that the classifier must ignore.
+- **Package list:** `list_packages()` returns a fixed `packages2`-shaped list. The bridge classifies it with the same code it uses for a real robot. It yields 4 dances, 4 apps, 6 arm actions, and reactions for every type (`Happy`, `Proud`, `Laugh`, `Sad`, `HeadTouched`), plus a `Sit/` emotion that the classifier must ignore. Every package has an `en_US`/`fr_FR` name and an `en_US` description, and comes in one of two shapes: root packages (one behavior at `path == "."`, which takes the package's name and description, as dances and apps do) and sub-behavior packages (several behaviors at their own paths, as `animations`, `dialog_touch` and `dialog_move_arms` are).
 - **Behavior runs:** a behavior takes time, as on a robot. `run_behavior` blocks for `behavior_duration_s`, which defaults to `DEFAULT_BEHAVIOR_DURATION_S = 5.0` s, or until `stop_behavior(name)` (or `close()`) ends it. So on the fake, dances, body actions, apps and reactions can be seen running (`running_behaviors`, the bridge's `current_*` tracking) and stopped, and a long-running verb holds its caller, as it would on the robot. The fast tier makes them instant; [testing.md](testing.md) "Instant fake behaviors" explains how.
 - **Posture:** `go_to_posture` returns `posture_succeeds` (default `True`).
 - **Joints:** `get_joints()` returns fixed `joint_names` / `joint_angles`.
@@ -98,4 +104,4 @@ What the fake does is set by what the tests exercise:
 ## Open questions
 
 1. **Simulated Naoqi.** A Choregraphe virtual robot is already reachable as `real` at `127.0.0.1:<port>`. A dedicated `sim` backend name only becomes useful if something needs to tell it apart (e.g. skipping hardware-only calls).
-2. **Newer Naoqi / robots.** The slice is only verified on Naoqi 2.1.4.13 / Nao v5. Nao v6 or Pepper may need service calls adjusted inside `QiNaoRobot`; the Protocol shouldn't change.
+2. **Newer Naoqi / robots.** The slice is only verified on Naoqi 2.1.4.13 / Nao v5. Nao v6 or Pepper may need service calls adjusted inside `RealNaoRobot`; the Protocol shouldn't change.

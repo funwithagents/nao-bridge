@@ -88,7 +88,7 @@ The callbacks (`on_touch`, `on_joints`, `on_audio`) are **removed**. The config 
 - `NaoBridge.from_dict(data)`, `from_json(text)` and `from_json_file(path)` build the config, then the bridge.
 - The `ip=` / `port=` / `on_*=` keyword arguments are **removed**.
 - `bridge.config` exposes the config, read-only.
-- `build_robot(config)` replaces `build_robot(backend, ip=..., port=...)` ([robot.md](robot.md)), and `QiNaoRobot` takes `connect_tries` from it.
+- `build_robot(config)` replaces `build_robot(backend, ip=..., port=...)` ([robot.md](robot.md)), and `RealNaoRobot` takes `connect_tries` from it.
 
 ### Server configs: `{"bridge": …, "server": …}`
 
