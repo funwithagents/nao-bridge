@@ -418,10 +418,14 @@ class FakeNaoRobot:
     ``audio_chunk_s`` to ``None`` pauses it, so a test pushes only what it emits.
     """
 
+    # How long a behavior runs unless stopped: long enough to be seen running and
+    # stopped, as on a robot. The fast tier sets it to 0 (tests/conftest.py).
+    DEFAULT_BEHAVIOR_DURATION_S = 5.0
+
     def __init__(self) -> None:
         self.commands: list[tuple[str, dict[str, Any]]] = []
         self.connected = False
-        self.behavior_duration_s = 0.0
+        self.behavior_duration_s = self.DEFAULT_BEHAVIOR_DURATION_S
         self.posture_succeeds = True
         self.joint_names = ["HeadYaw", "HeadPitch"]
         self.joint_angles = [0.0, 0.1]

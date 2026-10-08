@@ -5,6 +5,7 @@ No robot needed. Async runs via ``asyncio.run``.
 """
 
 import asyncio
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -255,6 +256,26 @@ def test_stop_expressive_reaction_stops_the_behavior_that_is_playing():
     assert stopped
     assert playing in happy
     assert ("stop_behavior", {"name": playing}) in commands
+
+
+@pytest.mark.fake_behavior_durations
+def test_on_a_fresh_fake_behaviors_run_until_stopped():
+    async def run() -> tuple[float, list[str], bool, bool, float]:
+        async with NaoBridge("fake") as bridge:
+            duration = fake(bridge).behavior_duration_s
+            started = time.monotonic()
+            dancing = asyncio.create_task(bridge.dance("eagle-dance"))
+            await asyncio.sleep(0.2)
+            running = list(bridge.current_dances)
+            stopped = await bridge.stop_dance("eagle-dance")
+            danced = await asyncio.wait_for(dancing, 1.0)
+            return duration, running, stopped, danced, time.monotonic() - started
+
+    duration, running, stopped, danced, elapsed = asyncio.run(run())
+    assert duration == 5.0
+    assert running == ["eagle-dance"]  # still dancing after 0.2 s
+    assert stopped and danced
+    assert elapsed < 1.0  # ended by the stop, not by the 5 s
 
 
 def test_stop_releases_long_running_behaviors_and_clears_tracking():

@@ -85,7 +85,7 @@ What the fake does is set by what the tests exercise:
 
 - **Recording:** each Protocol call appends `(method_name, {args})` to `commands`; `connected` mirrors `connect()`/`close()`.
 - **Package list:** `list_packages()` returns a fixed `packages2`-shaped list. The bridge classifies it with the same code it uses for a real robot. It yields 4 dances, 4 apps, 6 arm actions, and reactions for every type (`Happy`, `Proud`, `Laugh`, `Sad`, `HeadTouched`), plus a `Sit/` emotion that the classifier must ignore.
-- **Behavior runs:** `run_behavior` blocks for `behavior_duration_s` (default `0.0`, so it returns at once) or until `stop_behavior(name)` ends it. `running_behaviors` lists what's running. Tests raise the duration to exercise stop.
+- **Behavior runs:** a behavior takes time, as on a robot. `run_behavior` blocks for `behavior_duration_s`, which defaults to `DEFAULT_BEHAVIOR_DURATION_S = 5.0` s, or until `stop_behavior(name)` (or `close()`) ends it. So on the fake, dances, body actions, apps and reactions can be seen running (`running_behaviors`, the bridge's `current_*` tracking) and stopped, and a long-running verb holds its caller, as it would on the robot. The fast tier makes them instant; [testing.md](testing.md) "Instant fake behaviors" explains how.
 - **Posture:** `go_to_posture` returns `posture_succeeds` (default `True`).
 - **Joints:** `get_joints()` returns fixed `joint_names` / `joint_angles`.
 - **Sensor events:** test helpers `touch(key, value)` and `emit_audio(channels, samples_per_channel, buffer)` call the subscribed callback the way Naoqi's threads would. With nothing subscribed they do nothing.

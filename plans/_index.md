@@ -14,6 +14,7 @@ Implementation plans for Nao Bridge — each plan turns a settled part of a spec
 | [202610081629_qi-as-a-platform-dependency.md](202610081629_qi-as-a-platform-dependency.md) | `qi==3.1.6` declared from the fork's wheels on macOS arm64 / Linux x86_64 (CPython 3.12–3.13); other platforms install fake-only | Done |
 | [202610081653_mcp-stdout-reserved-for-the-protocol.md](202610081653_mcp-stdout-reserved-for-the-protocol.md) | libqi's native console log no longer corrupts the MCP stdio channel: fd 1 → stderr while serving, the transport on a private dup | Done |
 | [202610081700_bounded-connection-attempts.md](202610081700_bounded-connection-attempts.md) | `robot.connect_timeout_s` (5 s): each qi connection attempt is bounded instead of waiting ~76 s on a silent host | Done |
+| [202610081713_fake-behaviors-take-time.md](202610081713_fake-behaviors-take-time.md) | Fake behaviors last 5 s by default (stoppable), so running/stopping is observable offline; the fast tier sets them to 0 | Done |
 
 ## Status legend
 

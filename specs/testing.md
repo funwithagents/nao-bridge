@@ -1,6 +1,7 @@
 ---
 code:
   - tests/conftest.py
+  - pyproject.toml
   - tests-e2e/conftest.py
   - tests-e2e/support.py
 tests:
@@ -33,6 +34,13 @@ The `tests/` tier mirrors the `src/nao_bridge/` module layout (`test_<module>.py
 - **Functional, not tautological.** Exercise what a feature actually does — inputs → outputs, state changes, side effects — not that it runs or matches its own signature. A test that would pass against a broken implementation (asserting a constant, that an object isn't `None`, that a mock was called) isn't worth writing.
 - **Drive the public API like a real caller.** Prefer exercising the public surface the way a consumer would over reaching into internals; assert on the observable result.
 - **In the e2e tier, assert on behavior, not exact output.** Real service responses vary run to run, so a live test asserts a robust property ("a non-empty result came back", "the side effect happened"), never a specific string.
+
+## Instant fake behaviors
+
+The fake's behaviors last `FakeNaoRobot.DEFAULT_BEHAVIOR_DURATION_S` (5 s) so that demos and client development see them running and stoppable ([robot.md](robot.md)). In the fast tier that would make every dance or app call wait 5 s, so an autouse fixture in `tests/conftest.py` sets the class default to `0.0` for every test.
+- A test that needs a running behavior sets `behavior_duration_s` on its fake instance (reached through `bridge.robot`).
+- A test that checks the real default is marked `@pytest.mark.fake_behavior_durations`, which the fixture leaves alone.
+- Tests that start a server in a subprocess don't get the fixture, so they don't run behaviors.
 
 ## Test isolation
 
