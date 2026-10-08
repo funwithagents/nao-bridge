@@ -21,6 +21,7 @@ Implementation plans for Nao Bridge — each plan turns a settled part of a spec
 | [202610081840_websocket-server-restructure.md](202610081840_websocket-server-restructure.md) | `ClientSession` (protocol over a connection-like object) split from `NaoWebsocketServer` (bridge + listener); command table; typed; `server.host` | Done |
 | [202610081845_broader-ruff-rules.md](202610081845_broader-ruff-rules.md) | Ruff's defaults extended with pycodestyle, perf and annotations (ANN on `src/` only), and the fixes they flag | Done |
 | [202610081850_config-defaults-and-errors.md](202610081850_config-defaults-and-errors.md) | Config defaults declared once on the dataclass; `ConfigError.key` instead of message-prefix key paths | Done |
+| [202610081855_bridge-mcp-and-robot-cleanups.md](202610081855_bridge-mcp-and-robot-cleanups.md) | One running-items tracker and read-only views in the bridge, tolerant package parsing, `TouchPart`; MCP `_status` helper; real backend audio guard and `close()` cleanup | Done |
 
 ## Status legend
 

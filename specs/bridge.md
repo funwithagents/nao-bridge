@@ -52,12 +52,12 @@ Every action is `async` and returns `bool` (success). Verbs **never raise** — 
 | Body actions | `get_body_action_behaviors()` | `dialog_move_arms` package; the name/description comes from the path leaf (`UpLArm` → "Raise left arm", `StretchBothArms` → "Stretch both arms"; `fr_FR` empty) | path leaf |
 | Apps | `get_app_behaviors()` | root behavior of a package that's not a system package (`animations`, `boot-config`, `daps`, `default_launchpad_plugins`, `fall-recovery`), not `dialog*`, and not a dance | behavior name |
 
-The classifier doesn't mutate the parsed behaviors. Getters return an empty list before the first `start()`.
+The classifier doesn't mutate the parsed behaviors, and tolerates packages or behaviors missing a field (a behavior without `langToName` / `langToDesc` / `langToTags` gets empty values; a package without `elems`, `contents`, `names` or `descriptions` is skipped). Getters return an empty list before the first `start()`.
 
 ### Catalog verbs and what's running
 
 - `dance(id)`, `body_action(id)` and `run_app(id)` run the entry's behavior and await its end. `expressive_reaction(type)` runs a **random** behavior of that type. An unknown id/type returns `False`; so does a reaction type with no behaviors.
-- While running, the item is tracked in `current_dances`, `current_body_actions`, `current_apps` (lists of ids), `current_expressive_reactions` (type → the behavior actually playing) and `current_behaviors`. Tracking is cleared when the run ends, fails or is cancelled.
+- While running, the item is tracked: `current_dances`, `current_body_actions`, `current_apps` and `current_behaviors` are read-only sequences of ids, `current_expressive_reactions` a read-only mapping from type to the behavior actually playing. They are snapshots: a caller can't alter the tracking through them. Tracking is cleared when the run ends, fails or is cancelled.
 - `stop_dance(id)`, `stop_body_action(id)` and `stop_app(id)` return `False` for an unknown id or one that isn't running; otherwise they stop its behavior. `stop_expressive_reaction(type)` stops **the behavior `expressive_reaction` picked for that type**.
 - The stop verbs are meant to be called concurrently with the long-running verb they stop.
 
@@ -67,20 +67,20 @@ The config's `streams` block decides what `start()` subscribes to on the robot (
 
 | Stream | API | Contract |
 |---|---|---|
-| touch | `bridge.on_touch: Event[TouchEvent]` ([events.md](events.md)) | `TouchEvent(part, touched: bool)`; `part` ∈ `FrontTactilTouched` / `MiddleTactilTouched` / `RearTactilTouched`. Naoqi fires on its own thread, and the bridge re-emits on its event loop (`call_soon_threadsafe`), so handlers run on the loop. Disabled: it simply never emits. |
+| touch | `bridge.on_touch: Event[TouchEvent]` ([events.md](events.md)) | `TouchEvent(part: TouchPart, touched: bool)`; `TouchPart` is the `Literal` of `FrontTactilTouched` / `MiddleTactilTouched` / `RearTactilTouched`, so a handler can match on it under pyright. Naoqi fires on its own thread, and the bridge re-emits on its event loop (`call_soon_threadsafe`), so handlers run on the loop. Disabled: it simply never emits. |
 | joints | `bridge.joints: Observable[JointsState \| None]` ([observable.md](observable.md)) | `JointsState(names, angles, ts)`, angles in radians, `ts` on the monotonic clock, `set` every `streams.joints.period_s` by a bridge task. `None` outside a session. A failing read is logged and the loop continues. Disabled: reading `joints` raises `BridgeError`. |
 | audio | `bridge.audio_input(preroll_s=0.0)`, `bridge.mic` ([microphone.md](microphone.md)) | Each call is a subscriber yielding int16 LE mono `bytes` at `mic.sample_rate` (16000). `mic.latest()` and `published_count` are for samplers. Disabled, or bridge not running: `audio_input()` raises `BridgeError` at the call. |
 
 ### Errors
 
-`BridgeError(RuntimeError)` (in `errors.py`, so the bridge's modules share it): lifecycle and stream misuse (double `start()`, `robot` while stopped, a disabled stream's API). `ConfigError` comes from [config.md](config.md). `RobotConnectionError` from [robot.md](robot.md) propagates out of `start()`. Verbs return `False` rather than raising.
+`BridgeError(RuntimeError)` (defined in `errors.py`, so the bridge's modules share it; `bridge.py` doesn't re-export it, the front door does): lifecycle and stream misuse (double `start()`, `robot` while stopped, a disabled stream's API). `ConfigError` comes from [config.md](config.md). `RobotConnectionError` from [robot.md](robot.md) propagates out of `start()`. Verbs return `False` rather than raising.
 
 ### Front door and logging
 
 `from nao_bridge import NaoBridge` re-exports what a caller needs:
 - `NaoBridge`;
 - the config classes (`NaoBridgeConfig`, `RobotSettings`, `StreamSettings`, `TouchStream`, `JointsStream`, `AudioStream`, `Backend`);
-- the stream values (`TouchEvent`, `JointsState`, `MicChunk`) and the `Event` / `Observable` types;
+- the stream values (`TouchEvent`, `TouchPart`, `JointsState`, `MicChunk`) and the `Event` / `Observable` types;
 - `BehaviorInfos`, `LocalizedString`;
 - the errors (`BridgeError`, `ConfigError`, `RobotConnectionError`). Library modules only use `logging.getLogger(__name__)`; `logging.basicConfig` belongs to the CLIs.
 

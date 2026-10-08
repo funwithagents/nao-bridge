@@ -12,6 +12,26 @@ from nao_bridge.real_robot import RealNaoRobot
 from nao_bridge.robot import RobotConnectionError
 
 
+class _StubSignal:
+    """An ALMemory subscriber's ``signal``: records connects and disconnects."""
+
+    def __init__(self, calls: list[tuple[str, str, tuple[Any, ...]]], key: str) -> None:
+        self._calls = calls
+        self._key = key
+
+    def connect(self, handler: Any) -> int:
+        self._calls.append(("ALMemory", "connect", (self._key,)))
+        return 1
+
+    def disconnect(self, link: int) -> None:
+        self._calls.append(("ALMemory", "disconnect", (self._key,)))
+
+
+class _StubSubscriber:
+    def __init__(self, calls: list[tuple[str, str, tuple[Any, ...]]], key: str) -> None:
+        self.signal = _StubSignal(calls, key)
+
+
 class _StubService:
     def __init__(
         self, calls: list[tuple[str, str, tuple[Any, ...]]], name: str
@@ -20,6 +40,9 @@ class _StubService:
         self._name = name
 
     def __getattr__(self, method: str) -> Any:
+        if method == "subscriber":
+            return lambda key: _StubSubscriber(self._calls, key)
+
         def call(*args: Any) -> Any:
             self._calls.append((self._name, method, args))
             return True
@@ -86,6 +109,9 @@ class _StubSession:
         type(self).calls.append(("session", "registerService", (name,)))
         return 7
 
+    def unregisterService(self, service_id: int) -> None:
+        type(self).calls.append(("session", "unregisterService", (service_id,)))
+
 
 @pytest.fixture
 def stub_qi(monkeypatch: pytest.MonkeyPatch) -> type[_StubSession]:
@@ -145,6 +171,30 @@ def test_real_backend_subscribes_to_the_configured_microphone(
         "setClientPreferences",
         ("NaoBridgeAudio", 16000, code, 0),
     ) in (stub_qi.calls)
+
+
+def test_real_backend_refuses_robot_calls_while_disconnected(
+    stub_qi: type[_StubSession],
+):
+    robot = RealNaoRobot("10.0.0.5")
+    with pytest.raises(RobotConnectionError, match="not connected"):
+        robot.say("hello")
+    with pytest.raises(RobotConnectionError, match="not connected"):
+        robot.subscribe_audio(lambda *_: None, "front")
+    assert stub_qi.calls == []
+
+
+def test_real_backend_close_forgets_its_subscriptions(stub_qi: type[_StubSession]):
+    robot = RealNaoRobot("10.0.0.5")
+    robot.connect()
+    robot.subscribe_touch(lambda key, value: None)
+    robot.subscribe_audio(lambda *_: None, "front")
+    robot.close()
+    stub_qi.calls.clear()
+    # Nothing left to release: no disconnect, no unregister, and no error either.
+    robot.unsubscribe_touch()
+    robot.unsubscribe_audio()
+    assert stub_qi.calls == []
 
 
 def test_real_backend_sets_posture_retries_before_moving(stub_qi: type[_StubSession]):

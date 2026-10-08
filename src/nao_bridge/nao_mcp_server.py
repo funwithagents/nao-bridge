@@ -85,6 +85,11 @@ def stdout_reserved_for_protocol() -> Iterator[None]:
         os.close(real_stdout_fd)
 
 
+def _status(ok: bool, success: str, failure: str) -> str:
+    """A tool's result: the status line the model reads."""
+    return success if ok else failure
+
+
 class NaoMcpServer:
     """``NaoBridge`` as MCP tools: one FastMCP server over one bridge session."""
 
@@ -151,10 +156,11 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_bridge.set_tts_language(language)
-        if result:
-            return f"Nao switched language to {language}"
-        return f"Nao failed to switch language to {language}"
+        return _status(
+            await self.nao_bridge.set_tts_language(language),
+            f"Nao switched language to {language}",
+            f"Nao failed to switch language to {language}",
+        )
 
     async def say(self, text: str) -> str:
         """Make Nao say something.
@@ -165,10 +171,11 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_bridge.say(text)
-        if result:
-            return f"Nao said {text}"
-        return f"Nao failed to say {text}"
+        return _status(
+            await self.nao_bridge.say(text),
+            f"Nao said {text}",
+            f"Nao failed to say {text}",
+        )
 
     async def wake_up(self) -> str:
         """Enable Nao motors for action.
@@ -178,10 +185,11 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_bridge.wake_up()
-        if result:
-            return "Nao motors are enabled"
-        return "Failed to enable Nao motors"
+        return _status(
+            await self.nao_bridge.wake_up(),
+            "Nao motors are enabled",
+            "Failed to enable Nao motors",
+        )
 
     async def rest(self) -> str:
         """Disable Nao motors.
@@ -190,10 +198,11 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_bridge.rest()
-        if result:
-            return "Nao motors are disabled"
-        return "Failed to disable Nao motors"
+        return _status(
+            await self.nao_bridge.rest(),
+            "Nao motors are disabled",
+            "Failed to disable Nao motors",
+        )
 
     async def stand_up(self) -> str:
         """Make Nao stand up.
@@ -201,10 +210,9 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_bridge.stand_up()
-        if result:
-            return "Nao stood up"
-        return "Nao failed to stand up"
+        return _status(
+            await self.nao_bridge.stand_up(), "Nao stood up", "Nao failed to stand up"
+        )
 
     async def sit_down(self) -> str:
         """Make Nao sit down.
@@ -212,10 +220,9 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_bridge.sit_down()
-        if result:
-            return "Nao sat down"
-        return "Nao failed to sit down"
+        return _status(
+            await self.nao_bridge.sit_down(), "Nao sat down", "Nao failed to sit down"
+        )
 
     def get_dance_list(self) -> str:
         """Get the list of available dances.
@@ -243,10 +250,11 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_bridge.dance(dance_id)
-        if result:
-            return f"Nao has danced the dance with id '{dance_id}'"
-        return f"Nao failed to dance the dance with id '{dance_id}'"
+        return _status(
+            await self.nao_bridge.dance(dance_id),
+            f"Nao has danced the dance with id '{dance_id}'",
+            f"Nao failed to dance the dance with id '{dance_id}'",
+        )
 
     def get_expressive_reaction_types(self) -> str:
         """Get the list of available reaction types.
@@ -268,12 +276,13 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_bridge.expressive_reaction(reaction_type)
-        if result:
-            return f"Nao has reacted for type '{reaction_type}'"
-        return f"Nao failed to react for type '{reaction_type}'"
+        return _status(
+            await self.nao_bridge.expressive_reaction(reaction_type),
+            f"Nao has reacted for type '{reaction_type}'",
+            f"Nao failed to react for type '{reaction_type}'",
+        )
 
-    async def get_body_actions_list(self) -> str:
+    def get_body_actions_list(self) -> str:
         """Get the list of available body actions.
         - to be called at the beginning of an interaction to know the list of available body actions
         - needed before calling the body_action tool
@@ -295,10 +304,11 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_bridge.body_action(body_action_id)
-        if result:
-            return f"Nao has performed the body action with id '{body_action_id}'"
-        return f"Nao failed to perform the body action with id '{body_action_id}'"
+        return _status(
+            await self.nao_bridge.body_action(body_action_id),
+            f"Nao has performed the body action with id '{body_action_id}'",
+            f"Nao failed to perform the body action with id '{body_action_id}'",
+        )
 
     def get_app_list(self) -> str:
         """Get the list of available apps.
@@ -326,10 +336,11 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_bridge.run_app(app_id)
-        if result:
-            return f"Nao has run the app with id '{app_id}'"
-        return f"Nao failed to run the app with id '{app_id}'"
+        return _status(
+            await self.nao_bridge.run_app(app_id),
+            f"Nao has run the app with id '{app_id}'",
+            f"Nao failed to run the app with id '{app_id}'",
+        )
 
     async def stop_app(self, app_id: str) -> str:
         """Make Nao stop a running app.
@@ -341,10 +352,11 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        result = await self.nao_bridge.stop_app(app_id)
-        if result:
-            return f"Nao has stopped the app with id '{app_id}'"
-        return f"Nao failed to stop the app with id '{app_id}'"
+        return _status(
+            await self.nao_bridge.stop_app(app_id),
+            f"Nao has stopped the app with id '{app_id}'",
+            f"Nao failed to stop the app with id '{app_id}'",
+        )
 
     # endregion
 

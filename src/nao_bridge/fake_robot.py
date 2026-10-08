@@ -11,7 +11,7 @@ import threading
 from typing import Any
 
 from .config import AudioChannel
-from .robot import AUDIO_SAMPLE_RATE, AudioCallback, TouchCallback
+from .robot import AUDIO_SAMPLE_RATE, AudioCallback, TouchCallback, TouchPart
 
 __all__ = ["FakeNaoRobot"]
 
@@ -293,7 +293,7 @@ class FakeNaoRobot:
             if callback is not None:
                 callback(1, samples, bytes(2 * samples))
 
-    def touch(self, key: str, value: float) -> None:
+    def touch(self, key: TouchPart, value: float) -> None:
         """Simulate a tactile sensor event, as Naoqi would fire it."""
         if self._touch_callback is not None:
             self._touch_callback(key, value)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+from functools import partial
 from typing import Any
 
 from .config import AudioChannel
@@ -128,13 +129,19 @@ class RealNaoRobot:
             self._session.close()
         self._session = None
         self._services.clear()
+        self._touch_links.clear()
+        self._audio_service_id = None
 
-    def _service(self, name: str) -> Any:
+    def _connected_session(self) -> Any:
         if self._session is None:
             raise RobotConnectionError("not connected")
+        return self._session
+
+    def _service(self, name: str) -> Any:
+        session = self._connected_session()
         service = self._services.get(name)
         if service is None:
-            service = self._services[name] = self._session.service(name)
+            service = self._services[name] = session.service(name)
         return service
 
     def set_language(self, language: str) -> None:
@@ -191,9 +198,7 @@ class RealNaoRobot:
         memory = self._service("ALMemory")
         for key in TOUCH_KEYS:
             subscriber = memory.subscriber(key)
-            link = subscriber.signal.connect(
-                lambda value, key=key: callback(key, value)
-            )
+            link = subscriber.signal.connect(partial(callback, key))
             self._touch_links.append((subscriber, link))
 
     def unsubscribe_touch(self) -> None:
@@ -202,7 +207,7 @@ class RealNaoRobot:
         self._touch_links.clear()
 
     def subscribe_audio(self, callback: AudioCallback, channel: AudioChannel) -> None:
-        self._audio_service_id = self._session.registerService(
+        self._audio_service_id = self._connected_session().registerService(
             self.AUDIO_SERVICE_NAME, _AudioSink(callback)
         )
         audio_device = self._service("ALAudioDevice")
@@ -215,5 +220,5 @@ class RealNaoRobot:
         if self._audio_service_id is None:
             return
         self._service("ALAudioDevice").unsubscribe(self.AUDIO_SERVICE_NAME)
-        self._session.unregisterService(self._audio_service_id)
+        self._connected_session().unregisterService(self._audio_service_id)
         self._audio_service_id = None

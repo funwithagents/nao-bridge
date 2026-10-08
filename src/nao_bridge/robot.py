@@ -10,28 +10,36 @@ recording every command. ``build_robot`` selects one from the bridge config.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
-from .config import AudioChannel, Backend, NaoBridgeConfig
+from .config import AudioChannel, NaoBridgeConfig
 
 __all__ = [
     "AUDIO_CHANNEL_CODES",
     "AUDIO_SAMPLE_RATE",
     "TOUCH_KEYS",
     "AudioCallback",
-    "Backend",
     "NaoRobot",
     "RobotConnectionError",
     "TouchCallback",
+    "TouchPart",
     "build_robot",
 ]
 
+# The head's tactile sensors, by their ALMemory key.
+type TouchPart = Literal[
+    "FrontTactilTouched", "MiddleTactilTouched", "RearTactilTouched"
+]
+TOUCH_KEYS: tuple[TouchPart, ...] = (
+    "FrontTactilTouched",
+    "MiddleTactilTouched",
+    "RearTactilTouched",
+)
+
 # Called on Naoqi's threads: (memory key, value 0/1).
-type TouchCallback = Callable[[str, float], None]
+type TouchCallback = Callable[[TouchPart, float], None]
 # Called on Naoqi's threads: (channels, samples per channel, 16-bit LE PCM buffer).
 type AudioCallback = Callable[[int, int, bytes], None]
-
-TOUCH_KEYS = ("FrontTactilTouched", "MiddleTactilTouched", "RearTactilTouched")
 AUDIO_SAMPLE_RATE = 16000
 # ALAudioDevice.setClientPreferences channel configurations for one microphone at 16 kHz.
 AUDIO_CHANNEL_CODES: dict[AudioChannel, int] = {

@@ -82,7 +82,7 @@ Sensor callbacks are invoked **on Naoqi's threads**; marshalling onto an event l
   - **Still running at the deadline** (a silent host, which a blocking connect would wait out for the OS TCP timeout, ~76 s): the future is cancelled, the session closed, and the next attempt starts.
 
   After the last attempt it raises `RobotConnectionError` naming the attempts, chained to the last error. A wrong IP therefore fails within `connect_tries × connect_timeout_s` (50 s by default).
-- Services are acquired lazily on first use and cached for the session; `close()` drops them.
+- Services are acquired lazily on first use and cached for the session; `close()` drops them, along with the touch links and the audio sink registration. Any call that needs the session while not connected — the audio subscription included — raises `RobotConnectionError`.
 - Naoqi requires the audio sink to expose a method named exactly `processRemote`. That lives on a small private sink object, so `RealNaoRobot`'s own surface stays the Protocol.
 
 ### `FakeNaoRobot`

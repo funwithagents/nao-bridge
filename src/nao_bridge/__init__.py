@@ -15,7 +15,7 @@ from .errors import BridgeError
 from .events import Event
 from .microphone import MicChunk
 from .observable import Observable
-from .robot import RobotConnectionError
+from .robot import RobotConnectionError, TouchPart
 
 __all__ = [
     "AudioStream",
@@ -35,5 +35,6 @@ __all__ = [
     "RobotSettings",
     "StreamSettings",
     "TouchEvent",
+    "TouchPart",
     "TouchStream",
 ]

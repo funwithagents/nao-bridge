@@ -11,13 +11,8 @@ from typing import Any
 
 import pytest
 
-from nao_bridge.bridge import (
-    BridgeError,
-    JointsState,
-    NaoBridge,
-    TouchEvent,
-    build_catalog,
-)
+from nao_bridge import BridgeError
+from nao_bridge.bridge import JointsState, NaoBridge, TouchEvent, build_catalog
 from nao_bridge.config import (
     AudioStream,
     JointsStream,
@@ -135,6 +130,19 @@ def test_catalog_skips_malformed_packages():
     assert all(not behaviors for behaviors in catalog.reactions.values())
 
 
+def test_catalog_tolerates_sub_behaviors_without_names_or_tags():
+    bare = {
+        "uuid": "dialog_move_arms",
+        "elems": {
+            "names": {"en_US": "Move arms"},
+            "descriptions": {},
+            "contents": {"behaviors": [{"path": "animations/UpRArm"}]},
+        },
+    }
+    catalog = build_catalog([bare])
+    assert catalog.body_actions["UpRArm"].description == "Raise right arm"
+
+
 def test_getters_serve_the_robot_catalog_once_started():
     async def run() -> tuple[int, int, list[str]]:
         bridge = NaoBridge("fake")
@@ -249,7 +257,8 @@ def test_stop_expressive_reaction_stops_the_behavior_that_is_playing():
             stopped = await bridge.stop_expressive_reaction("Happy")
             async with asyncio.timeout(1.0):
                 await reacting
-            happy = {b.behavior_name for b in bridge._catalog.reactions["Happy"]}
+            catalog = build_catalog(robot.list_packages())
+            happy = {b.behavior_name for b in catalog.reactions["Happy"]}
             return stopped, playing, robot.commands, happy
 
     stopped, playing, commands, happy = asyncio.run(run())
@@ -279,18 +288,18 @@ def test_on_a_fresh_fake_behaviors_run_until_stopped():
 
 
 def test_stop_releases_long_running_behaviors_and_clears_tracking():
-    async def run() -> tuple[bool, list[str]]:
+    async def run() -> tuple[bool, tuple[str, ...]]:
         bridge = NaoBridge("fake")
         await bridge.start()
         fake(bridge).behavior_duration_s = 5.0
         app = asyncio.create_task(bridge.run_app("follow-me"))
-        await wait_until(lambda: bridge.current_apps == ["follow-me"])
+        await wait_until(lambda: bridge.current_apps == ("follow-me",))
         await bridge.stop()
         async with asyncio.timeout(1.0):
             await app
         return bridge.running, bridge.current_apps
 
-    assert asyncio.run(run()) == (False, [])
+    assert asyncio.run(run()) == (False, ())
 
 
 # --- Config -------------------------------------------------------------------
