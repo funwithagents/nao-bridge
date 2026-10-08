@@ -1,7 +1,7 @@
 {
   "bridge": {
     "backend": "real",
-    "robot": { "ip": "192.168.1.42", "port": 9559 }
+    "robot": { "ip": "192.168.1.42", "port": 9559, "connect_tries": 10, "connect_timeout_s": 5.0 }
   },
   "server": { "transport": "stdio" }
 }

@@ -174,6 +174,9 @@ class RobotSettings(JsonConfig):
     ip: str = ""
     port: int = 9559
     connect_tries: int = 10
+    # Per attempt: a host that doesn't answer would otherwise hold each attempt for
+    # the OS TCP timeout (over a minute).
+    connect_timeout_s: float = 5.0
 
     def __post_init__(self) -> None:
         _require(self.port > 0, f"port must be a positive integer, got {self.port}")
@@ -181,17 +184,22 @@ class RobotSettings(JsonConfig):
             self.connect_tries > 0,
             f"connect_tries must be a positive integer, got {self.connect_tries}",
         )
+        _require(
+            math.isfinite(self.connect_timeout_s) and self.connect_timeout_s > 0,
+            f"connect_timeout_s must be a positive, finite number, got {self.connect_timeout_s}",
+        )
 
     @classmethod
     def parse(cls, data: Any, path: str) -> Self:
         obj = read_object(data, path)
-        check_keys(obj, ("ip", "port", "connect_tries"), path)
+        check_keys(obj, ("ip", "port", "connect_tries", "connect_timeout_s"), path)
         return build(
             cls,
             path,
             ip=read_str(obj, "ip", "", path),
             port=read_int(obj, "port", 9559, path),
             connect_tries=read_int(obj, "connect_tries", 10, path),
+            connect_timeout_s=read_number(obj, "connect_timeout_s", 5.0, path),
         )
 
 

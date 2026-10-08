@@ -24,11 +24,19 @@ from nao_bridge.robot import (
 def test_build_robot_follows_the_config():
     assert isinstance(build_robot(NaoBridgeConfig()), FakeNaoRobot)
     config = NaoBridgeConfig(
-        backend="real", robot=RobotSettings(ip="10.0.0.5", port=9600, connect_tries=3)
+        backend="real",
+        robot=RobotSettings(
+            ip="10.0.0.5", port=9600, connect_tries=3, connect_timeout_s=2.5
+        ),
     )
     real = build_robot(config)
     assert isinstance(real, QiNaoRobot)
-    assert (real.ip, real.port, real.connect_tries) == ("10.0.0.5", 9600, 3)
+    assert (real.ip, real.port, real.connect_tries, real.connect_timeout_s) == (
+        "10.0.0.5",
+        9600,
+        3,
+        2.5,
+    )
 
 
 def test_fake_ignores_the_robot_block():
@@ -54,23 +62,60 @@ class _StubService:
         return call
 
 
+class _StubFuture:
+    """Stands in for the ``qi.Future`` of an async connect."""
+
+    def __init__(self, finished: bool, error: str = "") -> None:
+        self._finished = finished
+        self._error = error
+        self.waited_ms: int | None = None
+        self.cancelled = False
+
+    def wait(self, timeout_ms: int) -> None:
+        self.waited_ms = timeout_ms
+
+    def isFinished(self) -> bool:
+        return self._finished
+
+    def hasError(self) -> bool:
+        return bool(self._error)
+
+    def error(self) -> str:
+        return self._error
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+
 class _StubSession:
-    """Stands in for ``qi.Session``: fails the first ``failures`` connects."""
+    """Stands in for ``qi.Session``: the first ``failures`` connects are refused and
+    the next ``silent`` ones never answer; later ones connect."""
 
     failures: ClassVar[int] = 0
+    silent: ClassVar[int] = 0
     connects: ClassVar[int] = 0
+    closed: ClassVar[int] = 0
+    futures: ClassVar[list[_StubFuture]] = []
     calls: ClassVar[list[tuple[str, str, tuple[Any, ...]]]] = []
 
-    def connect(self, url: str) -> None:
-        type(self).connects += 1
-        if type(self).connects <= type(self).failures:
-            raise RuntimeError(f"cannot reach {url}")
+    def connect(self, url: str, _async: bool = False) -> _StubFuture:
+        assert _async, "connect must be asynchronous so a silent host can time out"
+        cls = type(self)
+        cls.connects += 1
+        if cls.connects <= cls.failures:
+            future = _StubFuture(finished=True, error=f"cannot reach {url}")
+        elif cls.connects <= cls.failures + cls.silent:
+            future = _StubFuture(finished=False)
+        else:
+            future = _StubFuture(finished=True)
+        cls.futures.append(future)
+        return future
 
     def service(self, name: str) -> _StubService:
         return _StubService(type(self).calls, name)
 
     def close(self) -> None:
-        pass
+        type(self).closed += 1
 
     def registerService(self, name: str, service: Any) -> int:
         type(self).calls.append(("session", "registerService", (name,)))
@@ -80,7 +125,10 @@ class _StubSession:
 @pytest.fixture
 def stub_qi(monkeypatch: pytest.MonkeyPatch) -> type[_StubSession]:
     _StubSession.failures = 0
+    _StubSession.silent = 0
     _StubSession.connects = 0
+    _StubSession.closed = 0
+    _StubSession.futures = []
     _StubSession.calls = []
     monkeypatch.setitem(sys.modules, "qi", types.SimpleNamespace(Session=_StubSession))
     return _StubSession
@@ -105,6 +153,7 @@ def test_real_backend_retries_then_connects(stub_qi: type[_StubSession]):
     robot = QiNaoRobot("10.0.0.5")
     robot.connect()
     assert stub_qi.connects == 4
+    assert stub_qi.closed == 3  # each failed attempt's session is released
     robot.say("hello")
     assert stub_qi.calls == [("ALAnimatedSpeech", "say", ("hello",))]
 

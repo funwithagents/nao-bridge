@@ -75,7 +75,7 @@ The bridge is built from a `NaoBridgeConfig`, in code or from JSON (`NaoBridge.f
 ```json
 {
   "backend": "real",
-  "robot": { "ip": "192.168.1.42", "port": 9559, "connect_tries": 10 },
+  "robot": { "ip": "192.168.1.42", "port": 9559, "connect_tries": 10, "connect_timeout_s": 5.0 },
   "streams": {
     "touch": { "enabled": true },
     "joints": { "enabled": true, "period_s": 0.2 },
@@ -85,7 +85,7 @@ The bridge is built from a `NaoBridgeConfig`, in code or from JSON (`NaoBridge.f
 ```
 
 - **`backend`**: `"fake"` (default, offline stand-in) or `"real"` (needs `qi` and `robot.ip`)
-- **`robot`**: the robot's address; validated but ignored on `fake`, so switching backend is a one-word change
+- **`robot`**: the robot's address, and how hard to try reaching it: up to `connect_tries` attempts of at most `connect_timeout_s` each, so a wrong address fails within 50 s by default. Validated but ignored on `fake`, so switching backend is a one-word change
 - **`streams`**: which robot streams the bridge subscribes to; `channel` picks the microphone (`front`, `rear`, `left`, `right`)
 
 A malformed config raises `ConfigError` naming the key (e.g. `streams.joints.period_s must be a positive, finite number`). Full reference: [specs/config.md](specs/config.md).

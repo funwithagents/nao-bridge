@@ -29,7 +29,7 @@ So the seam is a **first-party `NaoRobot` Protocol**, with two implementations:
 
 | Backend | Class | What it is |
 |---|---|---|
-| `real` (default) | `QiNaoRobot(ip, port=9559)` | Translates each Protocol method into the Naoqi service call(s) |
+| `real` (default) | `QiNaoRobot(ip, port=9559, *, connect_tries=10, connect_timeout_s=5.0)` | Translates each Protocol method into the Naoqi service call(s) |
 | `fake` | `FakeNaoRobot()` | Records every command, serves a fixed package list, simulates behavior runs and sensor events |
 
 The Protocol is the contract; each implementation translates it to its backend. Units and names at this layer are Naoqi's. Intent-level semantics (catalog, reactions, tracking what's running) belong to [bridge.md](bridge.md).
@@ -38,7 +38,7 @@ The Protocol is the contract; each implementation translates it to its backend. 
 
 The one way in, used by `NaoBridge.start()`, driven by the [config](config.md):
 - `backend: "fake"` → `FakeNaoRobot()`; the `robot` block is ignored.
-- `backend: "real"` → `QiNaoRobot(robot.ip, robot.port, connect_tries=robot.connect_tries)`.
+- `backend: "real"` → `QiNaoRobot(robot.ip, robot.port, connect_tries=robot.connect_tries, connect_timeout_s=robot.connect_timeout_s)`.
 
 The config has already rejected unknown backends and a `real` backend without an IP. Building does not connect.
 
@@ -70,7 +70,12 @@ Sensor callbacks are invoked **on Naoqi's threads**; marshalling onto an event l
 
 - **`qi` is imported lazily in `connect()`** (via `importlib`), so importing `nao_bridge` never needs it. `qi` is a dependency on the platforms with a wheel and absent elsewhere ([project.md](project.md)). If it's missing, `connect()` raises `RobotConnectionError`: the message names the platforms that ship `qi` (macOS arm64, Linux x86_64, CPython 3.12 / 3.13), says to run `uv sync` there, and says the platform otherwise runs the `fake` backend only. **There is no silent fallback to fake** — that was the old behavior, and it let an agent believe a real robot was moving. Ask for the fake explicitly.
 - `connect()` with an empty IP or a non-positive port raises `RobotConnectionError` before trying.
-- `connect()` retries the session up to `connect_tries` times (default 10, from the config), then raises `RobotConnectionError`, chained to the last `qi` error.
+- `connect()` makes up to `connect_tries` attempts (default 10, from the config), each **bounded by `connect_timeout_s`** (default 5 s). An attempt connects asynchronously (`session.connect(url, _async=True)` → a `qi.Future`) and waits on the future with that deadline:
+  - **Finished without error:** connected.
+  - **Finished with an error** (refused port, unreachable network): the session is closed and the next attempt starts at once.
+  - **Still running at the deadline** (a silent host, which a blocking connect would wait out for the OS TCP timeout, ~76 s): the future is cancelled, the session closed, and the next attempt starts.
+
+  After the last attempt it raises `RobotConnectionError` naming the attempts, chained to the last error. A wrong IP therefore fails within `connect_tries × connect_timeout_s` (50 s by default).
 - Services are acquired lazily on first use and cached for the session; `close()` drops them.
 - Naoqi requires the audio sink to expose a method named exactly `processRemote`. That lives on a small private sink object, so `QiNaoRobot`'s own surface stays the Protocol.
 

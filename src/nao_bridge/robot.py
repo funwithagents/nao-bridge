@@ -87,7 +87,12 @@ def build_robot(config: NaoBridgeConfig) -> NaoRobot:
     if config.backend == "fake":
         return FakeNaoRobot()
     robot = config.robot
-    return QiNaoRobot(robot.ip, robot.port, connect_tries=robot.connect_tries)
+    return QiNaoRobot(
+        robot.ip,
+        robot.port,
+        connect_tries=robot.connect_tries,
+        connect_timeout_s=robot.connect_timeout_s,
+    )
 
 
 # region Real robot
@@ -117,10 +122,18 @@ class QiNaoRobot:
 
     AUDIO_SERVICE_NAME = "NaoBridgeAudio"
 
-    def __init__(self, ip: str, port: int = 9559, *, connect_tries: int = 10) -> None:
+    def __init__(
+        self,
+        ip: str,
+        port: int = 9559,
+        *,
+        connect_tries: int = 10,
+        connect_timeout_s: float = 5.0,
+    ) -> None:
         self.ip = ip
         self.port = port
         self.connect_tries = connect_tries
+        self.connect_timeout_s = connect_timeout_s
         self._session: Any = None
         self._services: dict[str, Any] = {}
         self._touch_links: list[tuple[Any, Any]] = []
@@ -141,22 +154,46 @@ class QiNaoRobot:
             ) from e
 
         url = f"tcp://{self.ip}:{self.port}"
+        timeout_ms = max(1, round(self.connect_timeout_s * 1000))
         last_error: Exception | None = None
+        timed_out = 0
         for attempt in range(1, self.connect_tries + 1):
             session = qi.Session()
-            try:
-                session.connect(url)
-            except RuntimeError as e:
-                last_error = e
+            # Asynchronous, so a silent host costs connect_timeout_s, not the OS TCP
+            # timeout: the future is still running at the deadline.
+            future = session.connect(url, _async=True)
+            future.wait(timeout_ms)
+            if not future.isFinished():
+                future.cancel()
+                session.close()
+                timed_out += 1
+                last_error = TimeoutError(
+                    f"no answer within {self.connect_timeout_s:g} s"
+                )
                 logger.warning(
-                    "Connection attempt %d to %s failed: %s", attempt, url, e
+                    "Connection attempt %d to %s timed out after %g s",
+                    attempt,
+                    url,
+                    self.connect_timeout_s,
+                )
+                continue
+            if future.hasError():
+                session.close()
+                last_error = RuntimeError(future.error())
+                logger.warning(
+                    "Connection attempt %d to %s failed: %s", attempt, url, last_error
                 )
                 continue
             self._session = session
             logger.debug("Connected to %s", url)
             return
+        detail = (
+            f" ({timed_out} timed out after {self.connect_timeout_s:g} s)"
+            if timed_out
+            else ""
+        )
         raise RobotConnectionError(
-            f"could not connect to {url} after {self.connect_tries} tries"
+            f"could not connect to {url} after {self.connect_tries} tries{detail}"
         ) from last_error
 
     def close(self) -> None:

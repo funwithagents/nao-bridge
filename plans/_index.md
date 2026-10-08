@@ -13,6 +13,7 @@ Implementation plans for Nao Bridge — each plan turns a settled part of a spec
 | [202610081509_config-and-stream-apis.md](202610081509_config-and-stream-apis.md) | `NaoBridgeConfig` + server configs + `--config` CLIs; stream APIs replacing callbacks (touch `Event`, joints `Observable`, mic feed with `audio_input()` subscribers) | Done |
 | [202610081629_qi-as-a-platform-dependency.md](202610081629_qi-as-a-platform-dependency.md) | `qi==3.1.6` declared from the fork's wheels on macOS arm64 / Linux x86_64 (CPython 3.12–3.13); other platforms install fake-only | Done |
 | [202610081653_mcp-stdout-reserved-for-the-protocol.md](202610081653_mcp-stdout-reserved-for-the-protocol.md) | libqi's native console log no longer corrupts the MCP stdio channel: fd 1 → stderr while serving, the transport on a private dup | Done |
+| [202610081700_bounded-connection-attempts.md](202610081700_bounded-connection-attempts.md) | `robot.connect_timeout_s` (5 s): each qi connection attempt is bounded instead of waiting ~76 s on a silent host | Done |
 
 ## Status legend
 

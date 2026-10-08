@@ -1,7 +1,7 @@
 {
   "bridge": {
     "backend": "real",
-    "robot": { "ip": "192.168.1.42", "port": 9559, "connect_tries": 10 },
+    "robot": { "ip": "192.168.1.42", "port": 9559, "connect_tries": 10, "connect_timeout_s": 5.0 },
     "streams": {
       "touch": { "enabled": true },
       "joints": { "enabled": true, "period_s": 0.2 },

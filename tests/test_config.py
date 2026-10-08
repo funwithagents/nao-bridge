@@ -43,6 +43,7 @@ def test_a_full_config_loads_every_field():
         }
     )
     assert config.robot == RobotSettings(ip="192.168.1.42", port=9600, connect_tries=3)
+    assert config.robot.connect_timeout_s == 5.0  # the default
     assert config.streams.joints == JointsStream(enabled=True, period_s=0.5)
     assert config.streams.audio == AudioStream(enabled=True, channel="rear")
     assert config.streams.touch.enabled
@@ -57,6 +58,18 @@ def test_a_full_config_loads_every_field():
         ({"robot": {"port": "9559"}}, "robot.port must be an integer"),
         ({"robot": {"connect_tries": True}}, "robot.connect_tries must be an integer"),
         ({"robot": {"adress": "x"}}, "unknown key 'robot.adress'"),
+        (
+            {"robot": {"connect_timeout_s": 0}},
+            "robot.connect_timeout_s must be a positive",
+        ),
+        (
+            {"robot": {"connect_timeout_s": float("inf")}},
+            "robot.connect_timeout_s must be a positive",
+        ),
+        (
+            {"robot": {"connect_timeout_s": "5s"}},
+            "robot.connect_timeout_s must be a number",
+        ),
         (
             {"streams": {"joints": {"period_s": -1}}},
             "streams.joints.period_s must be a positive",

@@ -26,7 +26,7 @@ The first version deliberately covers only the **backend**, the **robot connecti
 ```json
 {
   "backend": "real",
-  "robot": { "ip": "192.168.1.42", "port": 9559, "connect_tries": 10 },
+  "robot": { "ip": "192.168.1.42", "port": 9559, "connect_tries": 10, "connect_timeout_s": 5.0 },
   "streams": {
     "touch": { "enabled": true },
     "joints": { "enabled": false, "period_s": 0.2 },
@@ -47,6 +47,7 @@ class RobotSettings:
     ip: str = ""
     port: int = 9559
     connect_tries: int = 10
+    connect_timeout_s: float = 5.0   # per attempt; a silent host would otherwise wait for the OS TCP timeout
 
 @dataclass
 class StreamSettings:
@@ -63,7 +64,7 @@ class StreamSettings:
 - Every config class has the same three constructors: `from_dict(data)`, `from_json(text)` (parses, then calls `from_dict`), and `from_json_file(path)` (reads, then calls `from_json`; an invalid-JSON error names the path). All three share one validation path.
 - Errors raise `ConfigError(ValueError)`, with a message that names the offending key path (e.g. `streams.joints.period_s`).
 - **Unknown keys are errors**, so a typo fails when the config loads.
-- **Type and range checks:** `backend` ∈ `{"real", "fake"}`; `port` and `connect_tries` are positive integers; `period_s` is a positive, finite number; `channel` is one of the four values.
+- **Type and range checks:** `backend` ∈ `{"real", "fake"}`; `port` and `connect_tries` are positive integers; `connect_timeout_s` and `period_s` are positive, finite numbers; `channel` is one of the four values.
 - **`real` needs `robot.ip`.** An empty IP is a `ConfigError` when the config loads.
 - **On `fake`, `robot` is validated but not applied.** A config written for the robot runs offline by changing `backend` alone.
 - `config.py` imports neither `qi` nor `mcp` nor `websockets`.
