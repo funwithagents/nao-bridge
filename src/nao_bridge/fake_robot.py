@@ -189,9 +189,10 @@ class FakeNaoRobot:
         self._record("close")
         self.connected = False
         self._stop_audio_push()
-        with self._lock:
+        with self._lock:  # over once this returns, as on the robot
             for stop in self._running.values():
                 stop.set()
+            self._running.clear()
 
     def set_language(self, language: str) -> None:
         self._record("set_language", language=language)
@@ -250,8 +251,8 @@ class FakeNaoRobot:
 
     def stop_behavior(self, name: str) -> None:
         self._record("stop_behavior", name=name)
-        with self._lock:
-            stop = self._running.get(name)
+        with self._lock:  # over once this returns, as on the robot
+            stop = self._running.pop(name, None)
         if stop is not None:
             stop.set()
 

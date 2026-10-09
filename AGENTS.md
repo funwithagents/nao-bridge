@@ -15,6 +15,7 @@ Where things live. This is a coarse, module-level map — for the full file inve
 | `plans/` | Implementation plans turning settled specs into buildable steps — indexed by [plans/_index.md](plans/_index.md) |
 | `tests/` | Fast, deterministic, no-network tests; mirrors the `src/nao_bridge/` module structure |
 | `tests-e2e/` | Opt-in live tests that call real external services (not collected by default `pytest`) |
+| `.github/workflows/` | The CI workflow: lint, format, types and the fast tier on every pull request and push to `main` — [ci.md](specs/ci.md) |
 | `examples/configs/` | Ready-to-use server config files (fake and real, MCP and WebSocket), kept in sync with [config.md](specs/config.md) |
 
 ### `src/nao_bridge/` modules
@@ -92,6 +93,8 @@ Here the "live service" is a **real Nao robot**: e2e tests read its address with
 ## Verification
 
 After any code change, run linting, type checking, and tests, and fix any failures before considering the work done.
+
+CI ([ci.md](specs/ci.md)) runs the same gate — lint, format check, type check, fast tier — on every pull request and push to `main`.
 
 ## Commands
 

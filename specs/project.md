@@ -38,6 +38,7 @@ Structure and tooling for the Nao Bridge project itself: Python version, depende
   - `examples/configs/` — ready-to-use server config files ([config.md](config.md)).
   - `tests/` at repo root, mirroring the `src/nao_bridge/` module structure.
   - `tests-e2e/` at repo root, for the live tier above — not collected by the default `pytest` run.
+  - `.github/workflows/` — the CI workflow ([ci.md](ci.md)).
 
 ## Open questions
 
