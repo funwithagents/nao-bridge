@@ -34,18 +34,25 @@ Lets an LLM agent (Claude Desktop, HuggingFace Tiny Agents, any MCP client) driv
 | `wake_up()` / `rest()` | `wake_up` / `rest` | status string |
 | `stand_up()` / `sit_down()` | `stand_up` / `sit_down` | status string |
 | `get_dance_list()` | `get_dance_behaviors` | JSON list of `BehaviorInfos` (snake_case `asdict`) |
-| `dance(dance_id)` | `dance` | status string |
+| `dance(dance_id)` / `stop_dance(dance_id)` | `dance` / `stop_dance` | status string |
 | `get_expressive_reaction_types()` | `get_expressive_reaction_types` | JSON list of strings |
-| `expressive_reaction(reaction_type)` | `expressive_reaction` | status string |
+| `expressive_reaction(reaction_type)` / `stop_expressive_reaction(reaction_type)` | `expressive_reaction` / `stop_expressive_reaction` | status string |
 | `get_body_actions_list()` | `get_body_action_behaviors` | JSON list of `BehaviorInfos` |
-| `body_action(body_action_id)` | `body_action` | status string |
+| `body_action(body_action_id)` / `stop_body_action(body_action_id)` | `body_action` / `stop_body_action` | status string |
 | `get_app_list()` | `get_app_behaviors` | JSON list of `BehaviorInfos` |
 | `run_app(app_id)` / `stop_app(app_id)` | `run_app` / `stop_app` | status string |
+| `get_running()` | `current_dances`, `current_expressive_reactions`, `current_body_actions`, `current_apps` | JSON object `{"dances", "expressive_reactions", "body_actions", "apps"}`, each a list of ids (reaction types for reactions) |
 
-  Deliberately **not** exposed: `stop_say`, eyes color, basic awareness, breathing, raw `run_behavior`/`stop_behavior`, and stop-variants for dances/reactions/body actions.
+  Deliberately **not** exposed: `stop_say`, eyes color, basic awareness, breathing, raw `run_behavior`/`stop_behavior`.
+- **Behaviors return once started**, as the [WebSocket server](nao-websocket-server.md) runs each command in its own task. A dance, an app or a body action can last minutes, and most MCP clients issue one tool call at a time, so a tool that held the call until the behavior ended would leave the agent unable to do anything else, stop included. So `dance`, `expressive_reaction`, `body_action` and `run_app` start their (blocking) bridge verb as a task the server owns, then wait until **either** the item is playing (it appears in the bridge's `current_*` tracking) **or** the task has ended:
+  - playing: the result is `"Nao started …"`, and the run goes on in the background;
+  - ended with an expected failure (`BridgeError` / `ValueError`: unknown id, motors off, …): the usual `"Nao failed to …: <reason>"`;
+  - ended successfully before it was seen playing (a behavior shorter than the wait's polling, e.g. the fast tier's instant fake): `"Nao started …"` too.
+
+  A run that fails after it started is logged at error level with its reason; it's then gone from `get_running`. The server keeps its run tasks and cancels them when it stops serving, before the bridge stops (which closes the robot and so ends the behaviors). The model follows up with `get_running` and the `stop_*` tool of the same kind; the tools' docstrings say so. The bridge is unchanged: its verbs still await the behavior's end.
 - **Failure reporting:** an expected verb failure (`BridgeError` or `ValueError`, [bridge.md](bridge.md) "Errors") becomes the tool's result string, `"Nao failed to …: <reason>"`, so the model reads why and can act on it (`Nao failed to dance the dance with id 'macarena': unknown dance 'macarena' (known: …)`). Anything else is a bug, and FastMCP reports it as a tool error.
 - **CLI:** the `nao-mcp-server` console script (also `python -m nao_bridge.nao_mcp_server`) takes `--config path.json` only; without it the server runs on its default config (the fake). An invalid config exits 2 with the `ConfigError` message. It configures logging (stderr, since stdout carries the stdio transport) and exits 1 if the robot is unreachable. Ready-made files: `examples/configs/mcp-fake.json`, `mcp-real.json`.
 
 ## Open questions
 
-1. **Long-running tools.** `dance`/`run_app`/`body_action` hold the tool call until the behavior ends; `stop_app` only helps if the client issues calls concurrently. Should there be stop tools for dances and body actions, or should these tools return immediately?
+None.

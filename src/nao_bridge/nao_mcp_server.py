@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Awaitable, Iterator
+from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Self
 
@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 type Transport = Literal["stdio", "sse"]
 TRANSPORTS: tuple[Transport, ...] = ("stdio", "sse")
+
+# How often a start tool checks whether its behavior is playing yet.
+_START_POLL_S = 0.01
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,17 @@ async def _attempt(action: Awaitable[None], success: str, failure: str) -> str:
     return success
 
 
+def _log_run_failure(failure: str, task: asyncio.Task[None]) -> None:
+    """Log how a run that the tool already reported as started ended, if it failed."""
+    if task.cancelled():
+        return
+    error = task.exception()
+    if isinstance(error, (BridgeError, ValueError)):
+        logger.error("%s: %s", failure, error)
+    elif error is not None:
+        logger.error("%s", failure, exc_info=error)
+
+
 class NaoMcpServer:
     """``NaoBridge`` as MCP tools: one FastMCP server over one bridge session."""
 
@@ -104,6 +118,8 @@ class NaoMcpServer:
         self.config = config or NaoMcpServerConfig()
         self.nao_bridge = NaoBridge(self.config.bridge)
         self.mcp = FastMCP("Nao")
+        # Behaviors started by a tool, still running (strong references).
+        self._runs: set[asyncio.Task[None]] = set()
 
         # Name and description come from each method's name and docstring.
         for tool in (
@@ -115,13 +131,17 @@ class NaoMcpServer:
             self.sit_down,
             self.get_dance_list,
             self.dance,
+            self.stop_dance,
             self.get_expressive_reaction_types,
             self.expressive_reaction,
+            self.stop_expressive_reaction,
             self.get_body_actions_list,
             self.body_action,
+            self.stop_body_action,
             self.get_app_list,
             self.run_app,
             self.stop_app,
+            self.get_running,
         ):
             self.mcp.add_tool(tool)
 
@@ -132,12 +152,46 @@ class NaoMcpServer:
         nothing libqi logs while connecting or serving reaches the client.
         """
         if self.config.server.transport == "sse":
-            async with self.nao_bridge:
-                await self.mcp.run_sse_async()
+            await self._serve(self.mcp.run_sse_async)
             return
         with stdout_reserved_for_protocol():
-            async with self.nao_bridge:
-                await self.mcp.run_stdio_async()
+            await self._serve(self.mcp.run_stdio_async)
+
+    async def _serve(self, transport: Callable[[], Awaitable[None]]) -> None:
+        async with self.nao_bridge:
+            try:
+                await transport()
+            finally:
+                await self._cancel_runs()
+
+    async def _cancel_runs(self) -> None:
+        """Cancel the behaviors still running; stopping the bridge then closes the
+        robot, which ends them robot-side."""
+        runs = list(self._runs)
+        for run in runs:
+            run.cancel()
+        await asyncio.gather(*runs, return_exceptions=True)
+
+    async def _start(
+        self,
+        action: Coroutine[Any, Any, None],
+        playing: Callable[[], bool],
+        success: str,
+        failure: str,
+    ) -> str:
+        """Run a long bridge verb in a task of its own, as the WebSocket server does,
+        and return once it is ``playing()`` or has ended (specs/nao-mcp-server.md
+        "Behaviors return once started"): the model learns why it couldn't start,
+        without holding the call for the length of the behavior."""
+        task = asyncio.create_task(action)
+        self._runs.add(task)
+        task.add_done_callback(self._runs.discard)
+        while not task.done() and not playing():
+            await asyncio.wait({task}, timeout=_START_POLL_S)
+        if task.done():
+            return await _attempt(task, success, failure)
+        task.add_done_callback(lambda t: _log_run_failure(failure, t))
+        return success
 
     def run(self) -> bool:
         """Run the NaoMcpServer.
@@ -247,19 +301,37 @@ class NaoMcpServer:
         return json.dumps([asdict(b) for b in dance_behaviors])
 
     async def dance(self, dance_id: str) -> str:
-        """Make Nao perform a dance.
+        """Make Nao start a dance.
         - you need to have called the get_dance_list tool before, to know the list of available dances
+        - returns as soon as the dance has started; it goes on while you call other tools
+        - call get_running to know whether it is still playing, stop_dance to stop it
 
         Args:
             dance_id: The id of the dance to perform
 
         Returns:
+            str: Status message indicating it started, or why it failed to
+        """
+        return await self._start(
+            self.nao_bridge.dance(dance_id),
+            lambda: dance_id in self.nao_bridge.current_dances,
+            f"Nao started dancing the dance with id '{dance_id}'",
+            f"Nao failed to dance the dance with id '{dance_id}'",
+        )
+
+    async def stop_dance(self, dance_id: str) -> str:
+        """Make Nao stop a dance it is playing.
+
+        Args:
+            dance_id: The id of the dance to stop
+
+        Returns:
             str: Status message indicating success or failure
         """
         return await _attempt(
-            self.nao_bridge.dance(dance_id),
-            f"Nao has danced the dance with id '{dance_id}'",
-            f"Nao failed to dance the dance with id '{dance_id}'",
+            self.nao_bridge.stop_dance(dance_id),
+            f"Nao has stopped the dance with id '{dance_id}'",
+            f"Nao failed to stop the dance with id '{dance_id}'",
         )
 
     def get_expressive_reaction_types(self) -> str:
@@ -273,19 +345,37 @@ class NaoMcpServer:
         return json.dumps(self.nao_bridge.get_expressive_reaction_types())
 
     async def expressive_reaction(self, reaction_type: str) -> str:
-        """Make Nao react to a specific emotion/situation.
+        """Make Nao start reacting to a specific emotion/situation.
         - you need to have called the get_expressive_reaction_types tool before, to know the list of available reactions
+        - returns as soon as the reaction has started; it goes on while you call other tools
+        - call get_running to know whether it is still playing, stop_expressive_reaction to stop it
 
         Args:
             reaction_type: The type of reaction to make
 
         Returns:
+            str: Status message indicating it started, or why it failed to
+        """
+        return await self._start(
+            self.nao_bridge.expressive_reaction(reaction_type),
+            lambda: reaction_type in self.nao_bridge.current_expressive_reactions,
+            f"Nao started reacting for type '{reaction_type}'",
+            f"Nao failed to react for type '{reaction_type}'",
+        )
+
+    async def stop_expressive_reaction(self, reaction_type: str) -> str:
+        """Make Nao stop a reaction it is playing.
+
+        Args:
+            reaction_type: The type of the reaction to stop
+
+        Returns:
             str: Status message indicating success or failure
         """
         return await _attempt(
-            self.nao_bridge.expressive_reaction(reaction_type),
-            f"Nao has reacted for type '{reaction_type}'",
-            f"Nao failed to react for type '{reaction_type}'",
+            self.nao_bridge.stop_expressive_reaction(reaction_type),
+            f"Nao has stopped reacting for type '{reaction_type}'",
+            f"Nao failed to stop reacting for type '{reaction_type}'",
         )
 
     def get_body_actions_list(self) -> str:
@@ -301,19 +391,37 @@ class NaoMcpServer:
         return json.dumps([asdict(b) for b in body_action_behaviors])
 
     async def body_action(self, body_action_id: str) -> str:
-        """Make Nao perform a body action.
+        """Make Nao start a body action.
         - you need to have called the get_body_actions_list tool before, to know the list of available body actions
+        - returns as soon as the body action has started; it goes on while you call other tools
+        - call get_running to know whether it is still playing, stop_body_action to stop it
 
         Args:
             body_action_id: The id of the body action to perform
 
         Returns:
+            str: Status message indicating it started, or why it failed to
+        """
+        return await self._start(
+            self.nao_bridge.body_action(body_action_id),
+            lambda: body_action_id in self.nao_bridge.current_body_actions,
+            f"Nao started the body action with id '{body_action_id}'",
+            f"Nao failed to perform the body action with id '{body_action_id}'",
+        )
+
+    async def stop_body_action(self, body_action_id: str) -> str:
+        """Make Nao stop a body action it is playing.
+
+        Args:
+            body_action_id: The id of the body action to stop
+
+        Returns:
             str: Status message indicating success or failure
         """
         return await _attempt(
-            self.nao_bridge.body_action(body_action_id),
-            f"Nao has performed the body action with id '{body_action_id}'",
-            f"Nao failed to perform the body action with id '{body_action_id}'",
+            self.nao_bridge.stop_body_action(body_action_id),
+            f"Nao has stopped the body action with id '{body_action_id}'",
+            f"Nao failed to stop the body action with id '{body_action_id}'",
         )
 
     def get_app_list(self) -> str:
@@ -333,18 +441,21 @@ class NaoMcpServer:
         return json.dumps([asdict(b) for b in app_behaviors])
 
     async def run_app(self, app_id: str) -> str:
-        """Make Nao run an app.
+        """Make Nao start an app.
         - you need to have called the get_app_list tool before, to know the list of available apps
+        - returns as soon as the app has started; it goes on while you call other tools
+        - call get_running to know whether it is still running, stop_app to stop it
 
         Args:
             app_id: The id of the app to run
 
         Returns:
-            str: Status message indicating success or failure
+            str: Status message indicating it started, or why it failed to
         """
-        return await _attempt(
+        return await self._start(
             self.nao_bridge.run_app(app_id),
-            f"Nao has run the app with id '{app_id}'",
+            lambda: app_id in self.nao_bridge.current_apps,
+            f"Nao started the app with id '{app_id}'",
             f"Nao failed to run the app with id '{app_id}'",
         )
 
@@ -362,6 +473,24 @@ class NaoMcpServer:
             self.nao_bridge.stop_app(app_id),
             f"Nao has stopped the app with id '{app_id}'",
             f"Nao failed to stop the app with id '{app_id}'",
+        )
+
+    def get_running(self) -> str:
+        """Get what Nao is playing right now: the dances, expressive reactions, body
+        actions and apps started with the other tools that haven't ended yet.
+
+        Returns:
+            str: JSON object with the lists "dances", "expressive_reactions",
+                "body_actions" and "apps" (ids; reaction types for reactions)
+        """
+        bridge = self.nao_bridge
+        return json.dumps(
+            {
+                "dances": list(bridge.current_dances),
+                "expressive_reactions": list(bridge.current_expressive_reactions),
+                "body_actions": list(bridge.current_body_actions),
+                "apps": list(bridge.current_apps),
+            }
         )
 
     # endregion

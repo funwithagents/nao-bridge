@@ -272,14 +272,16 @@ You are incarnating Nao, a fun and witty robot from the company Aldebaran. You c
 - **`stand_up`**: Make Nao stand up
 - **`sit_down`**: Make Nao sit down
 - **`get_dance_list`**: Get the list of available dances, needed before calling the dance tool
-- **`dance`**: Make the robot dance
+- **`dance`** / **`stop_dance`**: Make the robot start / stop a dance
 - **`get_expressive_reaction_types`**: Get the list of available reaction types, needed before calling the expressive_reaction tool
-- **`expressive_reaction`**: Make Nao react expressively to a specific emotion/situation
+- **`expressive_reaction`** / **`stop_expressive_reaction`**: Make Nao start / stop reacting expressively to a specific emotion/situation
 - **`get_body_actions_list`**: Get the list of available body actions, needed before calling the body_action tool
-- **`body_action`**: Make Nao perform an action with its body
+- **`body_action`** / **`stop_body_action`**: Make Nao start / stop an action with its body
 - **`get_app_list`**: Get the list of installed apps, needed before calling the run_app and stop_app tools
-- **`run_app`**: Make Nao run an installed app
-- **`stop_app`**: Stop a running app
+- **`run_app`** / **`stop_app`**: Make Nao start / stop an installed app
+- **`get_running`**: What Nao is playing right now (dances, reactions, body actions, apps)
+
+`dance`, `expressive_reaction`, `body_action` and `run_app` return as soon as the behavior has started (or with the reason it couldn't), like the WebSocket server's commands: the behavior goes on while the agent calls other tools, `get_running` says whether it's still playing, and the matching `stop_*` tool ends it.
 
 ## Nao websocket server
 

@@ -6,14 +6,17 @@ No robot needed. Async runs via ``asyncio.run``.
 
 import asyncio
 import json
+import logging
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 from mcp.types import TextContent
 
+from nao_bridge.fake_robot import FakeNaoRobot
 from nao_bridge.nao_mcp_server import NaoMcpServer
 
 
@@ -25,6 +28,22 @@ async def call(server: NaoMcpServer, tool: str, **arguments: Any) -> str:
     block = content[0]
     assert isinstance(block, TextContent)
     return block.text
+
+
+def fake(server: NaoMcpServer) -> FakeNaoRobot:
+    robot = server.nao_bridge.robot
+    assert isinstance(robot, FakeNaoRobot)
+    return robot
+
+
+async def running(server: NaoMcpServer) -> dict[str, list[str]]:
+    return json.loads(await call(server, "get_running"))
+
+
+async def wait_until_idle(server: NaoMcpServer, timeout: float = 2.0) -> None:
+    async with asyncio.timeout(timeout):
+        while any((await running(server)).values()):
+            await asyncio.sleep(0.01)
 
 
 def test_tools_are_described_by_their_docstrings():
@@ -42,16 +61,21 @@ def test_tools_are_described_by_their_docstrings():
         "sit_down",
         "get_dance_list",
         "dance",
+        "stop_dance",
         "get_expressive_reaction_types",
         "expressive_reaction",
+        "stop_expressive_reaction",
         "get_body_actions_list",
         "body_action",
+        "stop_body_action",
         "get_app_list",
         "run_app",
         "stop_app",
+        "get_running",
     }
-    assert tools["dance"].description.startswith("Make Nao perform a dance.")
+    assert tools["dance"].description.startswith("Make Nao start a dance.")
     assert "get_dance_list" in tools["dance"].description
+    assert "stop_dance" in tools["dance"].description
     assert tools["dance"].title is None
 
 
@@ -75,7 +99,7 @@ def test_action_tools_report_success_and_failure_with_its_reason():
         "dance: the motors are off; call wake_up() first"
     )
     assert said == "Nao said Hello"
-    assert danced == "Nao has danced the dance with id 'gangnam-style'"
+    assert danced == "Nao started dancing the dance with id 'gangnam-style'"
     # The model reads why, and the ids it can use instead.
     assert unknown.startswith(
         "Nao failed to dance the dance with id 'macarena': "
@@ -104,7 +128,7 @@ def test_list_tools_return_json_the_model_can_feed_back():
             # An id read from the list is accepted by the matching action tool.
             assert await call(
                 server, "body_action", body_action_id=actions[0]["id"]
-            ) == (f"Nao has performed the body action with id '{actions[0]['id']}'")
+            ) == (f"Nao started the body action with id '{actions[0]['id']}'")
         return dances, reactions, actions
 
     dances, reactions, actions = asyncio.run(run())
@@ -113,6 +137,155 @@ def test_list_tools_return_json_the_model_can_feed_back():
     assert set(dances[0]["localized_name"]) == {"en_US", "fr_FR"}
     assert reactions == ["Happy", "Proud", "Laugh", "Sad", "HeadTouched"]
     assert len(actions) == 6
+
+
+# --- Behaviors return once started --------------------------------------------
+
+
+def test_a_dance_returns_while_it_plays_and_stop_dance_ends_it():
+    async def run() -> tuple[str, float, dict[str, list[str]], str, list[str]]:
+        server = NaoMcpServer()
+        async with server.nao_bridge:
+            await call(server, "wake_up")
+            fake(server).behavior_duration_s = 5.0
+            started = time.monotonic()
+            result = await call(server, "dance", dance_id="eagle-dance")
+            elapsed = time.monotonic() - started
+            playing = await running(server)
+            stopped = await call(server, "stop_dance", dance_id="eagle-dance")
+            await wait_until_idle(server)
+            return result, elapsed, playing, stopped, fake(server).running_behaviors
+
+    result, elapsed, playing, stopped, still_running = asyncio.run(run())
+    assert result == "Nao started dancing the dance with id 'eagle-dance'"
+    assert elapsed < 1.0  # not held for the dance's 5 s
+    assert playing == {
+        "dances": ["eagle-dance"],
+        "expressive_reactions": [],
+        "body_actions": [],
+        "apps": [],
+    }
+    assert stopped == "Nao has stopped the dance with id 'eagle-dance'"
+    assert still_running == []
+
+
+def test_reactions_and_body_actions_start_and_stop_through_their_tools():
+    async def run() -> tuple[list[str], dict[str, list[str]], list[str]]:
+        server = NaoMcpServer()
+        async with server.nao_bridge:
+            await call(server, "wake_up")
+            fake(server).behavior_duration_s = 5.0
+            started = [
+                await call(server, "expressive_reaction", reaction_type="Happy"),
+                await call(server, "body_action", body_action_id="UpLArm"),
+                await call(server, "run_app", app_id="follow-me"),
+            ]
+            playing = await running(server)
+            stopped = [
+                await call(server, "stop_expressive_reaction", reaction_type="Happy"),
+                await call(server, "stop_body_action", body_action_id="UpLArm"),
+                await call(server, "stop_app", app_id="follow-me"),
+            ]
+            await wait_until_idle(server)
+            return started, playing, stopped
+
+    started, playing, stopped = asyncio.run(run())
+    assert started == [
+        "Nao started reacting for type 'Happy'",
+        "Nao started the body action with id 'UpLArm'",
+        "Nao started the app with id 'follow-me'",
+    ]
+    assert playing == {
+        "dances": [],
+        "expressive_reactions": ["Happy"],
+        "body_actions": ["UpLArm"],
+        "apps": ["follow-me"],
+    }
+    assert stopped == [
+        "Nao has stopped reacting for type 'Happy'",
+        "Nao has stopped the body action with id 'UpLArm'",
+        "Nao has stopped the app with id 'follow-me'",
+    ]
+
+
+def test_stop_tools_say_when_nothing_is_playing():
+    async def run() -> list[str]:
+        server = NaoMcpServer()
+        async with server.nao_bridge:
+            return [
+                await call(server, "stop_dance", dance_id="eagle-dance"),
+                await call(server, "stop_expressive_reaction", reaction_type="Sad"),
+                await call(server, "stop_body_action", body_action_id="macarena"),
+            ]
+
+    idle, sad, unknown = asyncio.run(run())
+    assert idle == (
+        "Nao failed to stop the dance with id 'eagle-dance': "
+        "dance 'eagle-dance' is not playing"
+    )
+    assert sad == (
+        "Nao failed to stop reacting for type 'Sad': reaction type 'Sad' is not playing"
+    )
+    assert unknown.startswith(
+        "Nao failed to stop the body action with id 'macarena': "
+        "unknown body action 'macarena' (known: "
+    )
+
+
+def test_a_behavior_failing_after_it_started_is_logged(
+    caplog: pytest.LogCaptureFixture,
+):
+    def failing_run(name: str) -> None:
+        time.sleep(0.1)
+        raise RuntimeError(f"{name} fell over")
+
+    async def run() -> tuple[str, dict[str, list[str]]]:
+        server = NaoMcpServer()
+        async with server.nao_bridge:
+            await call(server, "wake_up")
+            fake(server).run_behavior = failing_run
+            result = await call(server, "dance", dance_id="eagle-dance")
+            await wait_until_idle(server)
+            return result, await running(server)
+
+    with caplog.at_level(logging.ERROR, logger="nao_bridge.nao_mcp_server"):
+        result, after = asyncio.run(run())
+    assert result == "Nao started dancing the dance with id 'eagle-dance'"
+    assert after["dances"] == []
+    assert (
+        "Nao failed to dance the dance with id 'eagle-dance': "
+        "run_behavior failed: eagle-dance fell over"
+    ) in caplog.messages
+
+
+def test_leaving_serve_cancels_the_behaviors_still_running():
+    async def run() -> tuple[str, float, bool, list[str]]:
+        server = NaoMcpServer()
+        results: list[str] = []
+        robots: list[FakeNaoRobot] = []
+
+        async def client_session() -> None:
+            await call(server, "wake_up")
+            robots.append(fake(server))
+            robots[0].behavior_duration_s = 5.0
+            results.append(await call(server, "run_app", app_id="follow-me"))
+
+        started = time.monotonic()
+        await server._serve(client_session)  # pyright: ignore[reportPrivateUsage]
+        elapsed = time.monotonic() - started
+        left = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        return (
+            results[0],
+            elapsed,
+            server.nao_bridge.running or bool(left),
+            robots[0].running_behaviors,
+        )
+
+    result, elapsed, still_serving, still_running = asyncio.run(run())
+    assert result == "Nao started the app with id 'follow-me'"
+    assert elapsed < 1.0  # the app's 5 s didn't hold the shutdown
+    assert not still_serving
+    assert still_running == []
 
 
 # --- stdout belongs to the protocol ------------------------------------------
