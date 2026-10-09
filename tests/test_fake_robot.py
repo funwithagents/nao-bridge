@@ -17,9 +17,9 @@ def test_fake_behavior_runs_until_stopped():
     while "eagle-dance" not in robot.running_behaviors:
         pass
     robot.stop_behavior("eagle-dance")
+    assert robot.running_behaviors == []  # at once, not when the run's thread wakes
     runner.join(timeout=1.0)
     assert not runner.is_alive()
-    assert robot.running_behaviors == []
 
 
 def test_fake_motors_start_off_and_follow_wake_up_and_rest():
@@ -41,6 +41,7 @@ def test_fake_close_ends_running_behaviors():
     while not robot.running_behaviors:
         pass
     robot.close()
+    assert robot.running_behaviors == []  # at once, not when the run's thread wakes
     runner.join(timeout=1.0)
     assert not runner.is_alive()
 
