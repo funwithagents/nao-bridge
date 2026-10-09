@@ -37,10 +37,10 @@ The `tests/` tier mirrors the `src/nao_bridge/` module layout (`test_<module>.py
 
 ## Instant fake behaviors
 
-The fake's behaviors last `FakeNaoRobot.DEFAULT_BEHAVIOR_DURATION_S` (5 s) so that demos and client development see them running and stoppable ([robot.md](robot.md)). In the fast tier that would make every dance or app call wait 5 s, so an autouse fixture in `tests/conftest.py` sets the class default to `0.0` for every test.
-- A test that needs a running behavior sets `behavior_duration_s` on its fake instance (reached through `bridge.robot`).
-- A test that checks the real default is marked `@pytest.mark.fake_behavior_durations`, which the fixture leaves alone.
-- Tests that start a server in a subprocess don't get the fixture, so they don't run behaviors.
+The fake's behaviors last `FakeNaoRobot.DEFAULT_BEHAVIOR_DURATION_S` (5 s), its speech `DEFAULT_SPEECH_DURATION_S` (1 s) and its posture moves `DEFAULT_POSTURE_DURATION_S` (2 s). That way demos and client development see them running and stoppable ([robot.md](robot.md)). In the fast tier it would make every dance, `say` or `stand_up` wait, so an autouse fixture in `tests/conftest.py` sets all three class defaults to `0.0` for every test.
+- A test that needs one in flight (a running behavior, a `say` or posture move to cancel) sets `behavior_duration_s`, `speech_duration_s` or `posture_duration_s` on its fake instance (reached through `bridge.robot`).
+- A test that checks the real defaults is marked `@pytest.mark.fake_behavior_durations`, which the fixture leaves alone.
+- Tests that start a server in a subprocess don't get the fixture, so they don't run behaviors, speech or postures.
 
 ## Test isolation
 

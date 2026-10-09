@@ -167,6 +167,9 @@ class RealNaoRobot:
         robot_posture.setMaxTryNumber(max_tries)
         return bool(robot_posture.goToPosture(posture, speed))
 
+    def stop_posture(self) -> None:
+        self._service("ALRobotPosture").stopMove()
+
     def set_breathing(self, chain_name: str, enabled: bool) -> None:
         self._service("ALMotion").setBreathEnabled(chain_name, enabled)
 

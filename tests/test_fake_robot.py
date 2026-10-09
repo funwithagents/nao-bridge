@@ -1,10 +1,14 @@
-"""The fake backend (specs/robot.md): behavior runs, package list and sensor simulation.
+"""The fake backend (specs/robot.md): behavior runs, timed speech and postures, package
+list and sensor simulation.
 
 Async runs via ``asyncio.run``.
 """
 
 import threading
 import time
+from collections.abc import Callable
+
+import pytest
 
 from nao_bridge.fake_robot import FakeNaoRobot
 
@@ -20,6 +24,65 @@ def test_fake_behavior_runs_until_stopped():
     assert robot.running_behaviors == []  # at once, not when the run's thread wakes
     runner.join(timeout=1.0)
     assert not runner.is_alive()
+
+
+def run_in_thread(
+    call: Callable[[], object], started: Callable[[], bool]
+) -> threading.Thread:
+    runner = threading.Thread(target=call)
+    runner.start()
+    while not started():
+        pass
+    return runner
+
+
+def test_fake_speech_lasts_until_stopped_or_closed():
+    robot = FakeNaoRobot()
+    robot.speech_duration_s = 5.0
+    runner = run_in_thread(lambda: robot.say("Hello"), lambda: robot.speaking)
+    robot.stop_speech()
+    assert not robot.speaking  # at once, not when the say's thread wakes
+    runner.join(timeout=1.0)
+    runner = run_in_thread(lambda: robot.say("Again"), lambda: robot.speaking)
+    robot.close()
+    runner.join(timeout=1.0)
+    assert not runner.is_alive()
+    assert not robot.speaking
+
+
+def test_fake_posture_move_lasts_until_stopped_and_still_reports_its_outcome():
+    robot = FakeNaoRobot()
+    robot.posture_duration_s = 5.0
+    robot.posture_succeeds = False
+    outcome: list[bool] = []
+    runner = run_in_thread(
+        lambda: outcome.append(robot.go_to_posture("Stand", 0.8, 3)),
+        lambda: robot.moving_posture,
+    )
+    robot.stop_posture()
+    runner.join(timeout=1.0)
+    assert not runner.is_alive()
+    assert outcome == [False]
+    assert [name for name, _ in robot.commands] == ["go_to_posture", "stop_posture"]
+
+
+def test_fake_stop_before_the_call_finds_nothing_to_stop():
+    robot = FakeNaoRobot()
+    robot.speech_duration_s = 0.2
+    robot.stop_speech()  # as on the robot: a stop ahead of the call is lost
+    started = time.monotonic()
+    robot.say("Hello")
+    assert time.monotonic() - started >= 0.15
+
+
+@pytest.mark.fake_behavior_durations
+def test_fake_durations_default_to_robot_like_times():
+    robot = FakeNaoRobot()
+    assert (
+        robot.behavior_duration_s,
+        robot.speech_duration_s,
+        robot.posture_duration_s,
+    ) == (5.0, 1.0, 2.0)
 
 
 def test_fake_motors_start_off_and_follow_wake_up_and_rest():

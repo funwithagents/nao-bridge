@@ -70,7 +70,7 @@ Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index
 | --- | --- |
 | Config and server configs, `--config` CLIs, example files | Built and tested ([config.md](config.md)) |
 | Robot seam, `real` and `fake` backends | Built and tested; `real` verified live on Naoqi 2.1.4.13 / Nao v5 only ([robot.md](robot.md)) |
-| `NaoBridge`: verbs, catalog, errors, streams | Built and tested ([bridge.md](bridge.md)) |
+| `NaoBridge`: verbs, catalog, errors, streams, cancellation | Built and tested ([bridge.md](bridge.md)) |
 | `Event`, `Observable`, mic feed | Built and tested ([events.md](events.md), [observable.md](observable.md), [microphone.md](microphone.md)) |
 | MCP server | Built and tested ([nao-mcp-server.md](nao-mcp-server.md)) |
 | WebSocket server, protocol version 1 | Built and tested ([nao-websocket-server.md](nao-websocket-server.md)) |
@@ -80,7 +80,7 @@ Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index
 
 ## How a call flows
 
-- **Verbs.** Every verb is `async`. The bridge checks it's running (`NotRunningError`), resolves catalog ids (`ValueError` naming the known ones), asks the robot whether the motors are on when the verb moves the body (`MotorsOffError`), then runs the blocking robot call in `asyncio.to_thread`. A Naoqi exception comes back as `CommandFailedError`, chained. Success returns `None`. So `except (BridgeError, ValueError)` catches every expected failure, and both servers turn exactly those into a readable reason for their client ([bridge.md](bridge.md) "Errors").
+- **Verbs.** Every verb is `async`. The bridge checks it's running (`NotRunningError`), resolves catalog ids (`ValueError` naming the known ones), asks the robot whether the motors are on when the verb moves the body (`MotorsOffError`), then runs the blocking robot call in `asyncio.to_thread`. A Naoqi exception comes back as `CommandFailedError`, chained. Success returns `None`. Cancelling the awaiting task interrupts any verb. A spanning verb (`say`, the postures, behaviors and the catalog verbs) sends its stop and waits for the robot call to return before re-raising, so the robot has stopped by the time the caller sees the `CancelledError` ([bridge.md](bridge.md) "Cancellation"). So `except (BridgeError, ValueError)` catches every expected failure, and both servers turn exactly those into a readable reason for their client ([bridge.md](bridge.md) "Errors").
 - **Long-running behaviors.** On the bridge, `dance`, `expressive_reaction`, `body_action`, `run_app` and `run_behavior` await the behavior's end, and the item shows in `current_*` while it runs; the stop verbs are called concurrently. The servers don't hold their client for minutes: the WebSocket server runs each command as its own task, and the MCP tools return once the item is seen playing ([nao-mcp-server.md](nao-mcp-server.md)).
 - **Streams.** Naoqi calls back on its own threads. The bridge marshals touch onto its event loop and re-emits it on `on_touch`; a bridge task samples joints every `period_s` into `joints`; the mic feed writes each pushed buffer into its ring under a lock and wakes its subscribers through `call_soon_threadsafe`. Consumers only ever see the event loop.
 
@@ -88,9 +88,10 @@ Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index
 
 - **Three stream shapes, chosen by what the data is.** An occurrence where every one matters and nothing replays is an `Event` (touch). A state where only the latest matters is an `Observable` (joints). A continuous signal every consumer needs whole, at its own pace, is a ring with cursors (audio). Each shape has any number of consumers; none is a callback.
 - **The config switches streams; the bridge's APIs consume them.** A stream is subscribed on the robot at `start()` only when the config enables it, and using a disabled stream's API raises `BridgeError` ([config.md](config.md)).
+- **Every verb is cancellable.** Cancelling the task is the one way to interrupt a verb: the effect it started stops, the cancel returns in bounded time, and the session stays usable. There's no rewind ([bridge.md](bridge.md) "Cancellation").
 - **Raise why, not whether.** No verb returns `bool`; each failure has a type and a message an agent can act on.
 - **The Protocol is the contract.** pyright checks both backends against `NaoRobot`, so the fake can't drift from what the bridge calls. Units and names at the seam are Naoqi's; intent belongs to the bridge.
-- **Fake is the default and honest.** `NaoBridgeConfig()` is the fake; a real robot always means an explicit config with `robot.ip`. The fake behaves like a robot where tests and demos need it (motors start off, behaviors last 5 s and can be stopped, audio is pushed at Naoqi's pace).
+- **Fake is the default and honest.** `NaoBridgeConfig()` is the fake; a real robot always means an explicit config with `robot.ip`. The fake behaves like a robot where tests and demos need it (motors start off, behaviors last 5 s, speech 1 s and posture moves 2 s, all stoppable, audio is pushed at Naoqi's pace).
 - **Adapters hold no robot logic.** Each server maps its protocol onto bridge verbs and back; logic found in a server belongs in the bridge.
 - **The library never configures the process.** Modules log through `logging.getLogger(__name__)`; logging setup, stdout handling and exit codes belong to the CLIs.
 
@@ -125,6 +126,7 @@ Collected from the concept specs, which own them.
 
 - **Simulated Naoqi** ([robot.md](robot.md), [config.md](config.md), [ci.md](ci.md)): a simulated Naoqi is reachable today as `real` at `127.0.0.1`. A `sim` backend name only earns its place if something must tell it apart; a live CI job against a simulator waits until one exists.
 - **Newer robots** ([robot.md](robot.md)): only Naoqi 2.1.4.13 / Nao v5 is verified. Nao v6 (Naoqi 2.8) or Pepper may need different service calls inside `RealNaoRobot`; the Protocol shouldn't change.
+- **Cancellation** ([bridge.md](bridge.md)): an interruptible connection so a cancelled `start()` doesn't wait out the attempts; whether the newest `say` should interrupt the one in flight; checking live that `stopAll` also stops animated speech's gestures.
 - **Microphone** ([microphone.md](microphone.md)): Naoqi's real chunk size at 16 kHz mono is unmeasured (the fake's 1360 samples is a placeholder); 48 kHz four-channel capture and a gap signal in the stream are deferred.
 - **Config blocks** ([config.md](config.md)): motion, session state (what the robot does at start and stop) and catalog rules are candidate blocks, added when needed.
 - **WebSocket protocol** ([nao-websocket-server.md](nao-websocket-server.md)): no machine-readable schema, no authentication.

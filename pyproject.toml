@@ -61,7 +61,7 @@ ignore = [
 # Only the fast, deterministic tier is collected by default; tests-e2e/ is opt-in.
 testpaths = ["tests"]
 markers = [
-    "fake_behavior_durations: keep the fake's real behavior duration (5 s) instead of the fast tier's 0",
+    "fake_behavior_durations: keep the fake's real behavior, speech and posture durations (5 s, 1 s, 2 s) instead of the fast tier's 0",
 ]
 
 [tool.pyright]

@@ -11,10 +11,11 @@ Nao or the fake, as the ``NaoBridgeConfig`` says.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import random
 import time
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
@@ -50,6 +51,12 @@ logger = logging.getLogger(__name__)
 
 POSTURE_SPEED = 0.8
 POSTURE_MAX_TRIES = 3
+
+# A cancelled spanning verb re-sends its stop when the robot call hasn't returned
+# STOP_RETRY_S after it (the cancel may have beaten the command to Naoqi), up to
+# STOP_ATTEMPTS stops in all (specs/bridge.md "How a spanning verb stops").
+STOP_RETRY_S = 0.5
+STOP_ATTEMPTS = 4
 
 REACTION_TYPES = ("Happy", "Proud", "Laugh", "Sad", "HeadTouched")
 _SYSTEM_PACKAGES = frozenset(
@@ -211,6 +218,28 @@ def build_catalog(packages: list[dict[str, Any]]) -> BehaviorCatalog:
 # endregion
 
 
+async def _owned(coro: Coroutine[Any, Any, None]) -> None:
+    """Run ``coro`` to its end even if the caller is cancelled meanwhile; a cancel
+    absorbed on the way is re-raised once it's done."""
+    task = asyncio.ensure_future(coro)
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+    task.result()
+    if cancelled:
+        raise asyncio.CancelledError
+
+
+def _drop_outcome(future: asyncio.Future[Any]) -> None:
+    """Retrieve a future's result nobody waits for any more, so asyncio doesn't log
+    it as never retrieved."""
+    if not future.cancelled():
+        future.exception()
+
+
 class NaoBridge:
     """Drive a Nao robot (``real``) or its offline stand-in (``fake``).
 
@@ -278,6 +307,25 @@ class NaoBridge:
             raise BridgeError("the bridge is already running")
         streams = self._config.streams
         robot = build_robot(self._config)
+        bring_up = asyncio.ensure_future(self._bring_up(robot))
+        try:
+            await asyncio.shield(bring_up)
+        except asyncio.CancelledError:
+            # The step in flight can't be interrupted in its thread: let it finish,
+            # then undo what came up (specs/bridge.md "Cancellation", Lifecycle).
+            with contextlib.suppress(asyncio.CancelledError):
+                await _owned(self._abort_bring_up(robot, bring_up))
+            raise
+        self._robot = robot
+        if streams.joints.enabled:
+            self._joints_task = asyncio.create_task(
+                self._joints_loop(robot, streams.joints.period_s)
+            )
+
+    async def _bring_up(self, robot: NaoRobot) -> None:
+        """Connect ``robot``, subscribe the enabled streams and load the catalog; a
+        failure after the connection tears down what already came up."""
+        streams = self._config.streams
         await asyncio.to_thread(robot.connect)
         self._loop = asyncio.get_running_loop()
         try:
@@ -289,17 +337,24 @@ class NaoBridge:
         except BaseException:
             await self._teardown(robot)
             raise
-        self._robot = robot
-        if streams.joints.enabled:
-            self._joints_task = asyncio.create_task(
-                self._joints_loop(robot, streams.joints.period_s)
-            )
+
+    async def _abort_bring_up(
+        self, robot: NaoRobot, bring_up: asyncio.Future[None]
+    ) -> None:
+        """Wait for a cancelled ``start()``'s bring-up to settle, then tear down what
+        it brought up (a failed one already tore itself down)."""
+        await asyncio.wait({bring_up})
+        if bring_up.cancelled() or bring_up.exception() is None:
+            await self._teardown(robot)
 
     async def stop(self) -> None:
         robot = self._robot
         if robot is None:
             return
         self._robot = None
+        await _owned(self._shut_down(robot))  # owned once begun, past a cancel
+
+    async def _shut_down(self, robot: NaoRobot) -> None:
         if self._joints_task is not None:
             self._joints_task.cancel()
             await asyncio.gather(self._joints_task, return_exceptions=True)
@@ -389,6 +444,50 @@ class NaoBridge:
         except Exception as e:
             raise CommandFailedError(f"{verb} failed: {e or type(e).__name__}") from e
 
+    async def _span[T](
+        self,
+        verb: str,
+        call: Callable[[NaoRobot], T],
+        stop: Callable[[NaoRobot], None],
+    ) -> T:
+        """Run the spanning robot ``call`` like ``_act``. Cancelled, it sends ``stop``
+        and waits for ``call`` to return before re-raising, so the robot has stopped
+        what the verb started (specs/bridge.md "How a spanning verb stops")."""
+        robot = self.robot
+        run = asyncio.ensure_future(asyncio.to_thread(call, robot))
+        try:
+            return await asyncio.shield(run)
+        except asyncio.CancelledError:
+            run.add_done_callback(_drop_outcome)  # the caller gets the cancel only
+            with contextlib.suppress(asyncio.CancelledError):
+                await _owned(self._stop_span(verb, robot, run, stop))
+            raise
+        except Exception as e:
+            raise CommandFailedError(f"{verb} failed: {e or type(e).__name__}") from e
+
+    async def _stop_span(
+        self,
+        verb: str,
+        robot: NaoRobot,
+        run: asyncio.Future[Any],
+        stop: Callable[[NaoRobot], None],
+    ) -> None:
+        for _ in range(STOP_ATTEMPTS):
+            if run.done():
+                return
+            try:
+                await asyncio.to_thread(stop, robot)
+            except Exception:
+                logger.warning("%s: stopping it failed", verb, exc_info=True)
+                return
+            await asyncio.wait({run}, timeout=STOP_RETRY_S)
+        if not run.done():
+            logger.warning(
+                "%s: the robot did not confirm the stop after %d attempts",
+                verb,
+                STOP_ATTEMPTS,
+            )
+
     async def _require_awake(self, verb: str) -> None:
         """``MotorsOffError`` unless the robot's motors are on. The robot is asked each
         time: it can go to rest without the bridge (fall manager, chest button)."""
@@ -400,8 +499,9 @@ class NaoBridge:
         await self._act("set_tts_language", lambda r: r.set_language(language))
 
     async def say(self, text: str) -> None:
-        """Make the robot say ``text`` (animated speech); returns once spoken."""
-        await self._act("say", lambda r: r.say(text))
+        """Make the robot say ``text`` (animated speech); returns once spoken.
+        Cancelling it stops the speech."""
+        await self._span("say", lambda r: r.say(text), lambda r: r.stop_speech())
 
     async def stop_say(self) -> None:
         """Stop the robot talking."""
@@ -417,8 +517,10 @@ class NaoBridge:
 
     async def _go_to_posture(self, verb: str, posture: str) -> None:
         await self._require_awake(verb)
-        reached = await self._act(
-            verb, lambda r: r.go_to_posture(posture, POSTURE_SPEED, POSTURE_MAX_TRIES)
+        reached = await self._span(
+            verb,
+            lambda r: r.go_to_posture(posture, POSTURE_SPEED, POSTURE_MAX_TRIES),
+            lambda r: r.stop_posture(),
         )
         if not reached:
             raise CommandFailedError(
@@ -426,11 +528,11 @@ class NaoBridge:
             )
 
     async def stand_up(self) -> None:
-        """Go to the Stand posture."""
+        """Go to the Stand posture; cancelling it stops the move."""
         await self._go_to_posture("stand_up", "Stand")
 
     async def sit_down(self) -> None:
-        """Go to the Sit posture."""
+        """Go to the Sit posture; cancelling it stops the move."""
         await self._go_to_posture("sit_down", "Sit")
 
     async def change_eyes_color(self, color: str) -> None:
@@ -456,15 +558,21 @@ class NaoBridge:
         )
 
     async def run_behavior(self, behavior_name: str) -> None:
-        """Run an installed behavior (motors on); returns when it ends."""
+        """Run an installed behavior (motors on); returns when it ends. Cancelling it
+        stops the behavior."""
         await self._require_awake("run_behavior")
         await self._run_behavior(behavior_name)
 
     async def _run_behavior(self, behavior_name: str) -> None:
-        """Run a behavior, tracked in ``current_behaviors`` until it ends."""
+        """Run a behavior, tracked in ``current_behaviors`` until it ends (or, when
+        cancelled, until it has stopped)."""
         self._running_behaviors.append(behavior_name)
         try:
-            await self._act("run_behavior", lambda r: r.run_behavior(behavior_name))
+            await self._span(
+                "run_behavior",
+                lambda r: r.run_behavior(behavior_name),
+                lambda r: r.stop_behavior(behavior_name),
+            )
         finally:
             if behavior_name in self._running_behaviors:
                 self._running_behaviors.remove(behavior_name)
@@ -545,7 +653,8 @@ class NaoBridge:
         return list(self._catalog.dances.values())
 
     async def dance(self, dance_id: str) -> None:
-        """Run a dance from ``get_dance_behaviors``; returns when it ends."""
+        """Run a dance from ``get_dance_behaviors``; returns when it ends.
+        Cancelling it stops the behavior."""
         dance = self._entry("dance", self._catalog.dances, dance_id)
         await self._play("dance", "dance", dance_id, dance.behavior_name)
 
@@ -556,7 +665,8 @@ class NaoBridge:
         return list(self._catalog.reactions)
 
     async def expressive_reaction(self, reaction_type: str) -> None:
-        """Play a random reaction of ``reaction_type``; returns when it ends."""
+        """Play a random reaction of ``reaction_type``; returns when it ends.
+        Cancelling it stops the behavior."""
         reactions = self._entry("reaction type", self._catalog.reactions, reaction_type)
         if not reactions:
             raise ValueError(
@@ -575,7 +685,8 @@ class NaoBridge:
         return list(self._catalog.body_actions.values())
 
     async def body_action(self, body_action_id: str) -> None:
-        """Run a body action from ``get_body_action_behaviors``; returns when it ends."""
+        """Run a body action from ``get_body_action_behaviors``; returns when it ends.
+        Cancelling it stops the behavior."""
         action = self._entry("body action", self._catalog.body_actions, body_action_id)
         await self._play(
             "body_action", "body action", body_action_id, action.behavior_name
@@ -588,7 +699,8 @@ class NaoBridge:
         return list(self._catalog.apps.values())
 
     async def run_app(self, app_id: str) -> None:
-        """Run an installed app from ``get_app_behaviors``; returns when it ends."""
+        """Run an installed app from ``get_app_behaviors``; returns when it ends.
+        Cancelling it stops the behavior."""
         app = self._entry("app", self._catalog.apps, app_id)
         await self._play("run_app", "app", app_id, app.behavior_name)
 

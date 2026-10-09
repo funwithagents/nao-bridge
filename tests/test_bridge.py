@@ -5,8 +5,9 @@ No robot needed. Async runs via ``asyncio.run``.
 """
 
 import asyncio
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Coroutine
 from typing import Any
 
 import pytest
@@ -416,6 +417,345 @@ def test_stop_releases_long_running_behaviors_and_clears_tracking():
         return bridge.running, bridge.current_apps
 
     assert asyncio.run(run()) == (False, ())
+
+
+# --- Cancellation -------------------------------------------------------------
+
+Verb = Callable[[NaoBridge], Coroutine[Any, Any, None]]
+Tracking = Callable[[NaoBridge], Collection[str]]
+
+SPANNING_BEHAVIOR_VERBS: list[tuple[Verb, Tracking]] = [
+    (lambda b: b.dance("eagle-dance"), lambda b: b.current_dances),
+    (lambda b: b.body_action("UpLArm"), lambda b: b.current_body_actions),
+    (lambda b: b.run_app("follow-me"), lambda b: b.current_apps),
+    (lambda b: b.run_behavior("eagle-dance"), lambda b: b.current_behaviors),
+    (
+        lambda b: b.expressive_reaction("Happy"),
+        lambda b: b.current_expressive_reactions,
+    ),
+]
+
+
+def command_names(robot: FakeNaoRobot) -> list[str]:
+    return [name for name, _ in robot.commands]
+
+
+async def start_dancing(bridge: NaoBridge) -> asyncio.Task[None]:
+    """Wake the robot and start a 5 s ``eagle-dance``, returned once it's playing."""
+    await bridge.wake_up()
+    fake(bridge).behavior_duration_s = 5.0
+    dancing = asyncio.create_task(bridge.dance("eagle-dance"))
+    await wait_until(lambda: "eagle-dance" in fake(bridge).running_behaviors)
+    return dancing
+
+
+async def cancel_and_wait(task: asyncio.Task[None]) -> float:
+    """Cancel ``task``, check it ends cancelled, and return how long that took."""
+    started = time.monotonic()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    return time.monotonic() - started
+
+
+@pytest.mark.parametrize(
+    ("verb", "tracking"),
+    SPANNING_BEHAVIOR_VERBS,
+    ids=["dance", "body_action", "run_app", "run_behavior", "expressive_reaction"],
+)
+def test_a_cancelled_behavior_verb_stops_its_behavior(verb: Verb, tracking: Tracking):
+    async def run() -> tuple[str, float, list[str], Any, Any]:
+        async with NaoBridge("fake") as bridge:
+            robot = fake(bridge)
+            await bridge.wake_up()
+            robot.behavior_duration_s = 5.0
+            task = asyncio.create_task(verb(bridge))
+            await wait_until(
+                lambda: bool(robot.running_behaviors) and bool(tracking(bridge))
+            )
+            playing = robot.running_behaviors[0]
+            elapsed = await cancel_and_wait(task)
+            return (
+                playing,
+                elapsed,
+                robot.running_behaviors,
+                robot.commands,
+                tracking(bridge),
+            )
+
+    playing, elapsed, running, commands, tracked = asyncio.run(run())
+    assert elapsed < 1.0  # stopped, not waited out for 5 s
+    assert running == []
+    assert ("stop_behavior", {"name": playing}) in commands
+    assert not tracked
+
+
+def test_a_timeout_around_a_dance_stops_it():
+    async def run() -> list[str]:
+        async with NaoBridge("fake") as bridge:
+            await bridge.wake_up()
+            fake(bridge).behavior_duration_s = 5.0
+            with pytest.raises(TimeoutError):
+                async with asyncio.timeout(0.1):
+                    await bridge.dance("eagle-dance")
+            return fake(bridge).running_behaviors
+
+    assert asyncio.run(run()) == []
+
+
+def test_a_cancelled_dance_stays_tracked_until_it_has_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    stop_behavior = FakeNaoRobot.stop_behavior
+
+    def slow_stop(self: FakeNaoRobot, name: str) -> None:
+        time.sleep(0.2)
+        stop_behavior(self, name)
+
+    async def run() -> tuple[tuple[str, ...], tuple[str, ...]]:
+        monkeypatch.setattr(FakeNaoRobot, "stop_behavior", slow_stop)
+        async with NaoBridge("fake") as bridge:
+            dancing = await start_dancing(bridge)
+            dancing.cancel()
+            await asyncio.sleep(0.05)
+            while_stopping = bridge.current_dances
+            with pytest.raises(asyncio.CancelledError):
+                await dancing
+            return while_stopping, bridge.current_dances
+
+    assert asyncio.run(run()) == (("eagle-dance",), ())
+
+
+def test_a_cancelled_say_stops_the_speech():
+    async def run() -> tuple[float, bool, list[str]]:
+        async with NaoBridge("fake") as bridge:
+            robot = fake(bridge)
+            robot.speech_duration_s = 5.0
+            saying = asyncio.create_task(bridge.say("A very long story"))
+            await wait_until(lambda: robot.speaking)
+            elapsed = await cancel_and_wait(saying)
+            return elapsed, robot.speaking, command_names(robot)
+
+    elapsed, speaking, commands = asyncio.run(run())
+    assert elapsed < 1.0
+    assert not speaking
+    assert commands[-2:] == ["say", "stop_speech"]
+
+
+def test_a_cancelled_posture_move_stops_and_raises_only_the_cancel():
+    async def run() -> tuple[float, bool, list[str]]:
+        async with NaoBridge("fake") as bridge:
+            robot = fake(bridge)
+            await bridge.wake_up()
+            robot.posture_duration_s = 5.0
+            robot.posture_succeeds = False  # a stopped move hasn't reached Stand
+            standing = asyncio.create_task(bridge.stand_up())
+            await wait_until(lambda: robot.moving_posture)
+            elapsed = await cancel_and_wait(standing)  # not CommandFailedError
+            return elapsed, robot.moving_posture, command_names(robot)
+
+    elapsed, moving, commands = asyncio.run(run())
+    assert elapsed < 1.0
+    assert not moving
+    assert commands[-2:] == ["go_to_posture", "stop_posture"]
+
+
+def test_a_stop_that_finds_nothing_yet_is_sent_again(monkeypatch: pytest.MonkeyPatch):
+    stop_behavior = FakeNaoRobot.stop_behavior
+    stops: list[str] = []
+
+    def stop_missing_the_first_time(self: FakeNaoRobot, name: str) -> None:
+        stops.append(name)
+        if len(stops) == 1:
+            self.commands.append(("stop_behavior", {"name": name}))  # too early
+        else:
+            stop_behavior(self, name)
+
+    async def run() -> list[str]:
+        monkeypatch.setattr("nao_bridge.bridge.STOP_RETRY_S", 0.05)
+        monkeypatch.setattr(FakeNaoRobot, "stop_behavior", stop_missing_the_first_time)
+        async with NaoBridge("fake") as bridge:
+            await cancel_and_wait(await start_dancing(bridge))
+            return fake(bridge).running_behaviors
+
+    assert asyncio.run(run()) == []
+    assert stops == ["eagle-dance", "eagle-dance"]
+
+
+def test_a_stop_the_robot_never_confirms_gives_up_in_bounded_time(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    def ignored_stop(self: FakeNaoRobot, name: str) -> None:
+        self.commands.append(("stop_behavior", {"name": name}))
+
+    async def run() -> tuple[float, int, tuple[str, ...]]:
+        monkeypatch.setattr("nao_bridge.bridge.STOP_RETRY_S", 0.02)
+        monkeypatch.setattr(FakeNaoRobot, "stop_behavior", ignored_stop)
+        async with NaoBridge("fake") as bridge:
+            elapsed = await cancel_and_wait(await start_dancing(bridge))
+            stops = command_names(fake(bridge)).count("stop_behavior")
+            return elapsed, stops, bridge.current_dances
+
+    elapsed, stops, tracked = asyncio.run(run())
+    assert elapsed < 0.5  # 4 attempts of 20 ms, not the dance's 5 s
+    assert stops == 4
+    assert tracked == ()
+    assert (
+        "run_behavior: the robot did not confirm the stop after 4 attempts"
+        in caplog.messages
+    )
+
+
+def test_a_failing_stop_is_logged_and_the_caller_still_gets_the_cancel(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    def broken_stop(self: FakeNaoRobot, name: str) -> None:
+        raise RuntimeError("ALBehaviorManager is gone")
+
+    async def run() -> tuple[str, ...]:
+        monkeypatch.setattr(FakeNaoRobot, "stop_behavior", broken_stop)
+        async with NaoBridge("fake") as bridge:
+            await cancel_and_wait(await start_dancing(bridge))
+            return bridge.current_dances
+
+    assert asyncio.run(run()) == ()
+    assert "run_behavior: stopping it failed" in caplog.messages
+
+
+def test_a_second_cancel_does_not_cut_the_stop_short(monkeypatch: pytest.MonkeyPatch):
+    stop_behavior = FakeNaoRobot.stop_behavior
+
+    def slow_stop(self: FakeNaoRobot, name: str) -> None:
+        time.sleep(0.1)
+        stop_behavior(self, name)
+
+    async def run() -> list[str]:
+        monkeypatch.setattr(FakeNaoRobot, "stop_behavior", slow_stop)
+        async with NaoBridge("fake") as bridge:
+            dancing = await start_dancing(bridge)
+            dancing.cancel()
+            await asyncio.sleep(0.02)
+            dancing.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await dancing
+            return fake(bridge).running_behaviors
+
+    assert asyncio.run(run()) == []
+
+
+def test_a_cancel_during_the_motors_check_sends_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    asked = threading.Event()
+    answer = threading.Event()
+
+    def slow_is_awake(self: FakeNaoRobot) -> bool:
+        asked.set()
+        answer.wait(1.0)
+        return True
+
+    async def run() -> list[str]:
+        monkeypatch.setattr(FakeNaoRobot, "is_awake", slow_is_awake)
+        async with NaoBridge("fake") as bridge:
+            dancing = asyncio.create_task(bridge.dance("eagle-dance"))
+            await wait_until(asked.is_set)
+            await cancel_and_wait(dancing)
+            answer.set()
+            await asyncio.sleep(0.05)
+            return command_names(fake(bridge))
+
+    commands = asyncio.run(run())
+    assert "run_behavior" not in commands
+    assert "stop_behavior" not in commands
+
+
+def test_the_session_is_usable_right_after_a_cancel():
+    async def run() -> tuple[list[str], bool]:
+        async with NaoBridge("fake") as bridge:
+            await cancel_and_wait(await start_dancing(bridge))
+            fake(bridge).behavior_duration_s = 0.0
+            await bridge.dance("gangnam-style")
+            return command_names(fake(bridge)), fake(bridge).awake
+
+    commands, awake = asyncio.run(run())
+    assert commands.count("run_behavior") == 2
+    assert "rest" not in commands
+    assert awake
+
+
+def test_a_cancelled_instant_verb_returns_at_once_and_its_command_completes(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fade_eyes = FakeNaoRobot.fade_eyes
+
+    def slow_fade(self: FakeNaoRobot, color: str) -> None:
+        time.sleep(0.3)
+        fade_eyes(self, color)
+
+    async def run() -> tuple[float, list[str]]:
+        monkeypatch.setattr(FakeNaoRobot, "fade_eyes", slow_fade)
+        async with NaoBridge("fake") as bridge:
+            fading = asyncio.create_task(bridge.change_eyes_color("red"))
+            await asyncio.sleep(0.05)
+            elapsed = await cancel_and_wait(fading)
+            await asyncio.sleep(0.4)
+            return elapsed, command_names(fake(bridge))
+
+    elapsed, commands = asyncio.run(run())
+    assert elapsed < 0.2
+    assert commands.count("fade_eyes") == 1
+
+
+def test_a_start_cancelled_while_connecting_closes_the_robot(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    connect = FakeNaoRobot.connect
+    robots: list[FakeNaoRobot] = []
+
+    def slow_connect(self: FakeNaoRobot) -> None:
+        robots.append(self)
+        time.sleep(0.2)
+        connect(self)
+
+    async def run() -> tuple[bool, float]:
+        monkeypatch.setattr(FakeNaoRobot, "connect", slow_connect)
+        bridge = NaoBridge("fake")
+        starting = asyncio.create_task(bridge.start())
+        await asyncio.sleep(0.05)
+        elapsed = await cancel_and_wait(starting)
+        return bridge.running, elapsed
+
+    running, elapsed = asyncio.run(run())
+    assert not running
+    assert elapsed >= 0.1  # waited for the connection in flight
+    assert command_names(robots[0]) == ["connect", "close"]
+    assert not robots[0].connected
+
+
+def test_a_cancelled_stop_still_runs_every_teardown_step(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    unsubscribe_touch = FakeNaoRobot.unsubscribe_touch
+
+    def slow_unsubscribe(self: FakeNaoRobot) -> None:
+        time.sleep(0.2)
+        unsubscribe_touch(self)
+
+    async def run() -> tuple[bool, list[str]]:
+        monkeypatch.setattr(FakeNaoRobot, "unsubscribe_touch", slow_unsubscribe)
+        bridge = NaoBridge(
+            NaoBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True)))
+        )
+        await bridge.start()
+        robot = fake(bridge)
+        stopping = asyncio.create_task(bridge.stop())
+        await asyncio.sleep(0.05)
+        await cancel_and_wait(stopping)
+        return bridge.running, command_names(robot)
+
+    running, commands = asyncio.run(run())
+    assert not running
+    assert commands[-2:] == ["unsubscribe_touch", "close"]
 
 
 # --- Config -------------------------------------------------------------------

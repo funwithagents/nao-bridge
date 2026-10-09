@@ -259,7 +259,7 @@ def test_a_behavior_failing_after_it_started_is_logged(
 
 
 def test_leaving_serve_cancels_the_behaviors_still_running():
-    async def run() -> tuple[str, float, bool, list[str]]:
+    async def run() -> tuple[str, float, bool, list[str], list[str]]:
         server = NaoMcpServer()
         results: list[str] = []
         robots: list[FakeNaoRobot] = []
@@ -279,13 +279,16 @@ def test_leaving_serve_cancels_the_behaviors_still_running():
             elapsed,
             server.nao_bridge.running or bool(left),
             robots[0].running_behaviors,
+            [name for name, _ in robots[0].commands],
         )
 
-    result, elapsed, still_serving, still_running = asyncio.run(run())
+    result, elapsed, still_serving, still_running, commands = asyncio.run(run())
     assert result == "Nao started the app with id 'follow-me'"
     assert elapsed < 1.0  # the app's 5 s didn't hold the shutdown
     assert not still_serving
     assert still_running == []
+    # the cancel stopped the app itself, before the bridge closed the robot
+    assert commands[-2:] == ["stop_behavior", "close"]
 
 
 # --- stdout belongs to the protocol ------------------------------------------

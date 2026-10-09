@@ -1,7 +1,8 @@
 """The ``fake`` backend: an offline ``NaoRobot`` that records every command.
 
 Specified by [specs/robot.md](../../specs/robot.md). It serves a fixed ``packages2``-shaped
-package list, simulates behavior runs and sensor events, and pushes silent audio.
+package list, simulates behavior runs, speech and posture moves that take time, and
+sensor events, and pushes silent audio.
 """
 
 from __future__ import annotations
@@ -147,7 +148,8 @@ class FakeNaoRobot:
     """Offline ``NaoRobot``: records commands, serves a fixed package list.
 
     Tests reach it through ``bridge.robot`` to assert on ``commands``, tune
-    ``behavior_duration_s`` / ``posture_succeeds`` / ``awake``, and fire sensor events with
+    ``behavior_duration_s`` / ``speech_duration_s`` / ``posture_duration_s`` /
+    ``posture_succeeds`` / ``awake``, and fire sensor events with
     ``touch`` / ``emit_audio``. While audio is subscribed, a thread pushes a silent
     mono chunk every ``audio_chunk_s`` seconds, as Naoqi pushes its buffers; setting
     ``audio_chunk_s`` to ``None`` pauses it, so a test pushes only what it emits.
@@ -156,16 +158,23 @@ class FakeNaoRobot:
     # How long a behavior runs unless stopped: long enough to be seen running and
     # stopped, as on a robot. The fast tier sets it to 0 (tests/conftest.py).
     DEFAULT_BEHAVIOR_DURATION_S = 5.0
+    # Likewise for a ``say`` and a posture move, so a cancel can be seen stopping them.
+    DEFAULT_SPEECH_DURATION_S = 1.0
+    DEFAULT_POSTURE_DURATION_S = 2.0
 
     def __init__(self) -> None:
         self.commands: list[tuple[str, dict[str, Any]]] = []
         self.connected = False
         self.awake = False  # motors at rest, as a robot starts
         self.behavior_duration_s = self.DEFAULT_BEHAVIOR_DURATION_S
+        self.speech_duration_s = self.DEFAULT_SPEECH_DURATION_S
+        self.posture_duration_s = self.DEFAULT_POSTURE_DURATION_S
         self.posture_succeeds = True
         self.joint_names = ["HeadYaw", "HeadPitch"]
         self.joint_angles = [0.0, 0.1]
         self._running: dict[str, threading.Event] = {}
+        self._speeches: set[threading.Event] = set()
+        self._posture_moves: set[threading.Event] = set()
         self._lock = threading.Lock()
         self._touch_callback: TouchCallback | None = None
         self._audio_callback: AudioCallback | None = None
@@ -176,10 +185,41 @@ class FakeNaoRobot:
     def _record(self, method: str, **args: Any) -> None:
         self.commands.append((method, args))
 
+    def _wait_unless_ended(
+        self, pending: set[threading.Event], duration: float
+    ) -> None:
+        """Block for ``duration`` s, or until ``_end_all(pending)`` ends the wait."""
+        ended = threading.Event()
+        with self._lock:
+            pending.add(ended)
+        try:
+            ended.wait(duration)
+        finally:
+            with self._lock:
+                pending.discard(ended)
+
+    def _end_all(self, pending: set[threading.Event]) -> None:
+        """End every wait in ``pending``; over once this returns, as on the robot."""
+        with self._lock:
+            waits = list(pending)
+            pending.clear()
+        for ended in waits:
+            ended.set()
+
     @property
     def running_behaviors(self) -> list[str]:
         with self._lock:
             return list(self._running)
+
+    @property
+    def speaking(self) -> bool:
+        with self._lock:
+            return bool(self._speeches)
+
+    @property
+    def moving_posture(self) -> bool:
+        with self._lock:
+            return bool(self._posture_moves)
 
     def connect(self) -> None:
         self._record("connect")
@@ -193,15 +233,19 @@ class FakeNaoRobot:
             for stop in self._running.values():
                 stop.set()
             self._running.clear()
+        self._end_all(self._speeches)
+        self._end_all(self._posture_moves)
 
     def set_language(self, language: str) -> None:
         self._record("set_language", language=language)
 
     def say(self, text: str) -> None:
         self._record("say", text=text)
+        self._wait_unless_ended(self._speeches, self.speech_duration_s)
 
     def stop_speech(self) -> None:
         self._record("stop_speech")
+        self._end_all(self._speeches)
 
     def wake_up(self) -> None:
         self._record("wake_up")
@@ -216,7 +260,12 @@ class FakeNaoRobot:
 
     def go_to_posture(self, posture: str, speed: float, max_tries: int) -> bool:
         self._record("go_to_posture", posture=posture, speed=speed, max_tries=max_tries)
+        self._wait_unless_ended(self._posture_moves, self.posture_duration_s)
         return self.posture_succeeds
+
+    def stop_posture(self) -> None:
+        self._record("stop_posture")
+        self._end_all(self._posture_moves)
 
     def set_breathing(self, chain_name: str, enabled: bool) -> None:
         self._record("set_breathing", chain_name=chain_name, enabled=enabled)

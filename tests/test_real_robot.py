@@ -214,3 +214,10 @@ def test_real_backend_sets_posture_retries_before_moving(stub_qi: type[_StubSess
         ("ALRobotPosture", "setMaxTryNumber", (2,)),
         ("ALRobotPosture", "goToPosture", ("Sit", 0.5)),
     ]
+
+
+def test_real_backend_stops_a_posture_move(stub_qi: type[_StubSession]):
+    robot = RealNaoRobot("10.0.0.5")
+    robot.connect()
+    robot.stop_posture()
+    assert stub_qi.calls == [("ALRobotPosture", "stopMove", ())]
