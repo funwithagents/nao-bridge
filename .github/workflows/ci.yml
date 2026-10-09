@@ -1,0 +1,54 @@
+# Continuous integration — specs/ci.md.
+#
+# Two jobs side by side on GitHub's hosted Linux runners, on every pull request and push
+# to main: `check` (lint, format, types) and `fast-tier` (tests/, on the fake backend and
+# a stub qi). Neither waits on the other. No system package and no secret is needed; the
+# Linux x86_64 qi wheel installs with the sync, so the qi-gated fast-tier tests run here.
+# The live tier (tests-e2e/) needs a real Nao and is not run (specs/ci.md).
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: lint, format, types
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync (against the lock)
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Format check
+        run: uv run ruff format --check .
+      - name: Type check
+        run: uv run pyright
+
+  fast-tier:
+    name: fast tier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync (against the lock)
+        run: uv sync --locked
+      - name: Fast tier
+        run: uv run pytest -rs

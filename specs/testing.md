@@ -59,4 +59,4 @@ For Nao Bridge the live service is a **real Nao robot**: e2e tests take its addr
 
 ## Open questions
 
-1. **CI wiring.** Nothing here sets up continuous integration. The default `tests/` tier is CI-ready (deterministic, no credentials), and the e2e tier is designed to skip cleanly when keys are absent — but actually running either on a hosted runner is unbuilt. Today all testing is a local, manual command.
+None currently. CI runs the fast tier on GitHub's runners ([ci.md](ci.md)); the live tier stays a local command until a simulated Nao exists.

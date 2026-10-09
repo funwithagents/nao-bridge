@@ -26,6 +26,7 @@ Implementation plans for Nao Bridge — each plan turns a settled part of a spec
 | [202610090937_motors-off-error.md](202610090937_motors-off-error.md) | Verbs that move the body (postures, breathing on, behaviors, dances, reactions, body actions, apps) ask the robot `is_awake()` and raise `MotorsOffError` ("call wake_up() first") when the motors are off | Done |
 | [202610090943_mcp-tools-start-behaviors.md](202610090943_mcp-tools-start-behaviors.md) | MCP `dance` / `expressive_reaction` / `body_action` / `run_app` run their verb in a server task and return once it's playing (or with why it couldn't start), as the WebSocket server does; `stop_dance` / `stop_expressive_reaction` / `stop_body_action` / `get_running` tools | Done |
 | [202610091004_websocket-bind-fallback-and-protocol-version.md](202610091004_websocket-bind-fallback-and-protocol-version.md) | WebSocket server: an empty `host` falls back to `127.0.0.1` with no route out, a failed bind stops the bridge and returns `False`; `NaoState.protocolVersion` (`1`, bumped on incompatible changes only) | Done |
+| [202610091016_ci-on-github-runners.md](202610091016_ci-on-github-runners.md) | `.github/workflows/ci.yml`: `check` and `fast-tier` side by side on GitHub's Linux runners for every pull request and push to `main`; the project's first Linux run | In progress |
 
 ## Status legend
 
