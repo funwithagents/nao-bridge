@@ -5,6 +5,10 @@ code:
   - src/nao_bridge/errors.py
 tests:
   - tests/test_bridge.py
+  - tests-e2e/test_live_verbs.py
+  - tests-e2e/test_live_motion.py
+  - tests-e2e/test_live_cancellation.py
+  - tests-e2e/test_live_streams.py
 ---
 
 # The bridge (`NaoBridge`)

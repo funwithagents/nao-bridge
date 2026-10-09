@@ -75,7 +75,7 @@ Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index
 | MCP server | Built and tested ([nao-mcp-server.md](nao-mcp-server.md)) |
 | WebSocket server, protocol version 1 | Built and tested ([nao-websocket-server.md](nao-websocket-server.md)) |
 | Project tooling, two test tiers, CI | In place ([project.md](project.md), [testing.md](testing.md), [ci.md](ci.md)) |
-| Live tier | One smoke test against a real Nao (`NAO_IP`); not in CI |
+| Live tier | Verbs, streams, cancellation and both servers, in three opt-in levels (safe, motion, interactive); written but not yet run on a robot ([analysis](../analysis/202610091738_not-yet-tested-on-a-robot.md)); not in CI |
 | Simulated Naoqi as a target | Not built: no `sim` backend, no live CI job (open questions) |
 
 ## How a call flows
@@ -115,7 +115,7 @@ One JSON shape, `NaoBridgeConfig`: `backend` (`fake` by default, or `real`), `ro
 
 ## Testing and CI
 
-- Two tiers, split by directory ([testing.md](testing.md)): `tests/`, fast and deterministic, runs the bridge and both servers on `FakeNaoRobot` and `RealNaoRobot` against a stub `qi`; `tests-e2e/`, opt-in, runs against a real Nao from `NAO_IP` and skips without it.
+- Two tiers, split by directory ([testing.md](testing.md)): `tests/`, fast and deterministic, runs the bridge and both servers on `FakeNaoRobot` and `RealNaoRobot` against a stub `qi`; `tests-e2e/`, opt-in, runs against a real Nao from `NAO_IP` and skips without it. It has three levels of risk: safe (`NAO_IP`), motion (`NAO_ALLOW_MOTION=1`) and interactive (`NAO_INTERACTIVE=1`). It prints what it measured, such as cancel latencies and the audio chunk size.
 - The fast tier makes fake behaviors instant through an autouse fixture; a test that needs a running behavior sets its duration on the fake.
 - CI ([ci.md](ci.md)) runs `check` (ruff lint and format, pyright) and `fast-tier` on GitHub's `ubuntu-24.04` runners for every pull request and push to `main`. The Linux runner installs the real `qi` wheel, so the `qi`-gated tests run there.
 - `tests/test_project_map.py` keeps [AGENTS.md](../AGENTS.md)'s project map and the specs' frontmatter honest.

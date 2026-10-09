@@ -3,6 +3,7 @@ code:
   - src/nao_bridge/nao_mcp_server.py
 tests:
   - tests/test_nao_mcp_server.py
+  - tests-e2e/test_live_servers.py
 ---
 
 # Nao MCP server

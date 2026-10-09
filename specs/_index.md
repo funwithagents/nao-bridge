@@ -11,7 +11,7 @@ Nao Bridge connects AI agents to Aldebaran's Nao robot (and, in principle, any r
 | Spec | Description | Status |
 |---|---|---|
 | [project.md](project.md) | Project structure and tooling: Python version, packaging with uv, layout conventions | Implemented |
-| [testing.md](testing.md) | Testing strategy: two-tier `tests/`/`tests-e2e/` split, functional-test philosophy, skip-without-credentials live tier; fake behaviors, speech and postures made instant | Implemented |
+| [testing.md](testing.md) | Testing strategy: two-tier `tests/`/`tests-e2e/` split, functional-test philosophy, skip-without-credentials live tier; fake behaviors, speech and postures made instant; live tier in three opt-in levels (safe, motion, interactive) with measured cancel latencies | Implemented |
 | [ci.md](ci.md) | Continuous integration: `check` (lint, format, types) and `fast-tier` jobs side by side on GitHub's `ubuntu-24.04` runners, every pull request and push to `main`; no live job until a Nao sim exists | Implemented |
 | [config.md](config.md) | `NaoBridgeConfig` (backend — `fake` by default —, robot connection, streams) with the `from_dict` / `from_json` / `from_json_file` loaders and `ConfigError`; streams as switches for the bridge's stream APIs; `{"bridge", "server"}` server configs; `--config`-only CLIs; example files | Implemented |
 | [robot.md](robot.md) | Connection seam: the `NaoRobot` Protocol and `build_robot(config)` in `robot.py`; `RealNaoRobot` over `qi` (`real_robot.py` lazy import, no silent fallback), `FakeNaoRobot` (`fake_robot.py`; records commands, fixed package list, simulated behavior runs, speech and posture moves that take time and can be stopped, sensor events, paced audio push); `stop_posture` | Implemented |

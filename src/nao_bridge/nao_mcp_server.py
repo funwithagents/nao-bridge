@@ -165,8 +165,8 @@ class NaoMcpServer:
                 await self._cancel_runs()
 
     async def _cancel_runs(self) -> None:
-        """Cancel the behaviors still running; stopping the bridge then closes the
-        robot, which ends them robot-side."""
+        """Cancel the behaviors still running; a cancelled bridge verb stops its
+        behavior on the robot (specs/bridge.md "Cancellation")."""
         runs = list(self._runs)
         for run in runs:
             run.cancel()

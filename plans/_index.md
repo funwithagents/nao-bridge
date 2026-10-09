@@ -28,6 +28,7 @@ Implementation plans for Nao Bridge — each plan turns a settled part of a spec
 | [202610091004_websocket-bind-fallback-and-protocol-version.md](202610091004_websocket-bind-fallback-and-protocol-version.md) | WebSocket server: an empty `host` falls back to `127.0.0.1` with no route out, a failed bind stops the bridge and returns `False`; `NaoState.protocolVersion` (`1`, bumped on incompatible changes only) | Done |
 | [202610091016_ci-on-github-runners.md](202610091016_ci-on-github-runners.md) | `.github/workflows/ci.yml`: `check` and `fast-tier` side by side on GitHub's Linux runners for every pull request and push to `main`; the project's first Linux run | Done |
 | [202610091714_cancellable-verbs.md](202610091714_cancellable-verbs.md) | Every verb cancellable: a cancelled `say` / posture / behavior / catalog verb sends its stop (re-sent if Naoqi hadn't started yet, owned past a second cancel) and waits for the robot call to end before re-raising; tracking honest until then; `stop_posture` on the seam; timed, stoppable fake speech and postures; cancel-safe `start()` / `stop()` | Done |
+| [202610091738_live-tier-coverage.md](202610091738_live-tier-coverage.md) | Live tier in three opt-in levels (safe `NAO_IP`, motion `NAO_ALLOW_MOTION`, interactive `NAO_INTERACTIVE`): verbs, streams, cancellation with measured latencies, both servers against a real Nao; not yet run on a robot | Done |
 
 ## Status legend
 

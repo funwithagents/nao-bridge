@@ -9,6 +9,7 @@ tests:
   - tests/test_microphone.py
   - tests/test_bridge.py
   - tests/test_nao_websocket_server.py
+  - tests-e2e/test_live_streams.py
 ---
 
 # Mic feed — the one owner of the robot's microphone
