@@ -24,18 +24,22 @@ tests:
 - **`await stop()`** cancels the joints task and publishes `None` on `joints`. It then stops the mic feed (which ends every `audio_input()` subscriber), unsubscribes touch, closes the robot, and clears the running-item tracking. It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it.
 - **`async with NaoBridge(...) as bridge:`** is shorthand for the pair, and runs `stop()` on every way out.
 - `running: bool`. `config` and `backend` (read-only).
-- **Escape hatch:** `bridge.robot` is the `NaoRobot` — the `FakeNaoRobot` on `fake`, which tests use to assert on recorded commands. It raises `BridgeError` when the bridge isn't running.
+- **Escape hatch:** `bridge.robot` is the `NaoRobot` — the `FakeNaoRobot` on `fake`, which tests use to assert on recorded commands. It raises `NotRunningError` when the bridge isn't running.
 
 ### Action verb contract
 
-Every action is `async` and returns `bool` (success). Verbs **never raise** — a robot exception is logged and becomes `False`. Blocking robot calls run in `asyncio.to_thread`. A verb on a bridge that isn't running returns `False`. There's no special fake-mode branch: on `fake`, the `FakeNaoRobot` answers.
+Every action is `async`, returns `None` when it succeeded, and **raises** to say why it didn't, so a caller (an agent through a server, above all) can act on the reason. Blocking robot calls run in `asyncio.to_thread`. There's no special fake-mode branch: on `fake`, the `FakeNaoRobot` answers.
+
+- A verb on a bridge that isn't running raises `NotRunningError`, before anything else is checked.
+- A robot call that raises is re-raised as `CommandFailedError("<verb> failed: <reason>")`, chained to the Naoqi exception (`__cause__`). So is a posture the robot didn't reach (`go_to_posture` returning `False`).
+- Cancellation (`CancelledError`) passes through untouched.
 
 | Verb | Robot call |
 |---|---|
 | `set_tts_language(language)` | `set_language` |
 | `say(text)` / `stop_say()` | `say` / `stop_speech` |
 | `wake_up()` / `rest()` | `wake_up` / `rest` |
-| `stand_up()` / `sit_down()` | `go_to_posture("Stand"\|"Sit", 0.8, 3)`; returns the posture result |
+| `stand_up()` / `sit_down()` | `go_to_posture("Stand"\|"Sit", 0.8, 3)`; `CommandFailedError` when it returns `False` |
 | `change_eyes_color(color)` | `fade_eyes` |
 | `set_basic_awareness_state(enabled, engagement_mode, tracking_mode)` | `set_basic_awareness` |
 | `set_breathing_enabled(enabled, chain_name)` | `set_breathing` |
@@ -56,9 +60,9 @@ The classifier doesn't mutate the parsed behaviors, and tolerates packages or be
 
 ### Catalog verbs and what's running
 
-- `dance(id)`, `body_action(id)` and `run_app(id)` run the entry's behavior and await its end. `expressive_reaction(type)` runs a **random** behavior of that type. An unknown id/type returns `False`; so does a reaction type with no behaviors.
+- `dance(id)`, `body_action(id)` and `run_app(id)` run the entry's behavior and await its end. `expressive_reaction(type)` runs a **random** behavior of that type. An unknown id or type raises `ValueError` naming the known ones (`unknown dance 'macarena' (known: caravan-palace-se, eagle-dance, …)`), so the caller can correct itself without another lookup. A reaction type with no behaviors installed raises `ValueError` too.
 - While running, the item is tracked: `current_dances`, `current_body_actions`, `current_apps` and `current_behaviors` are read-only sequences of ids, `current_expressive_reactions` a read-only mapping from type to the behavior actually playing. They are snapshots: a caller can't alter the tracking through them. Tracking is cleared when the run ends, fails or is cancelled.
-- `stop_dance(id)`, `stop_body_action(id)` and `stop_app(id)` return `False` for an unknown id or one that isn't running; otherwise they stop its behavior. `stop_expressive_reaction(type)` stops **the behavior `expressive_reaction` picked for that type**.
+- `stop_dance(id)`, `stop_body_action(id)` and `stop_app(id)` raise `ValueError` for an unknown id and `NotPlayingError` for one that isn't playing; otherwise they stop its behavior. `stop_expressive_reaction(type)` stops **the behavior `expressive_reaction` picked for that type**.
 - The stop verbs are meant to be called concurrently with the long-running verb they stop.
 
 ### Streams
@@ -69,11 +73,21 @@ The config's `streams` block decides what `start()` subscribes to on the robot (
 |---|---|---|
 | touch | `bridge.on_touch: Event[TouchEvent]` ([events.md](events.md)) | `TouchEvent(part: TouchPart, touched: bool)`; `TouchPart` is the `Literal` of `FrontTactilTouched` / `MiddleTactilTouched` / `RearTactilTouched`, so a handler can match on it under pyright. Naoqi fires on its own thread, and the bridge re-emits on its event loop (`call_soon_threadsafe`), so handlers run on the loop. Disabled: it simply never emits. |
 | joints | `bridge.joints: Observable[JointsState \| None]` ([observable.md](observable.md)) | `JointsState(names, angles, ts)`, angles in radians, `ts` on the monotonic clock, `set` every `streams.joints.period_s` by a bridge task. `None` outside a session. A failing read is logged and the loop continues. Disabled: reading `joints` raises `BridgeError`. |
-| audio | `bridge.audio_input(preroll_s=0.0)`, `bridge.mic` ([microphone.md](microphone.md)) | Each call is a subscriber yielding int16 LE mono `bytes` at `mic.sample_rate` (16000). `mic.latest()` and `published_count` are for samplers. Disabled, or bridge not running: `audio_input()` raises `BridgeError` at the call. |
+| audio | `bridge.audio_input(preroll_s=0.0)`, `bridge.mic` ([microphone.md](microphone.md)) | Each call is a subscriber yielding int16 LE mono `bytes` at `mic.sample_rate` (16000). `mic.latest()` and `published_count` are for samplers. Disabled: `audio_input()` raises `BridgeError` at the call; bridge not running: `NotRunningError`. |
 
 ### Errors
 
-`BridgeError(RuntimeError)` (defined in `errors.py`, so the bridge's modules share it; `bridge.py` doesn't re-export it, the front door does): lifecycle and stream misuse (double `start()`, `robot` while stopped, a disabled stream's API). `ConfigError` comes from [config.md](config.md). `RobotConnectionError` from [robot.md](robot.md) propagates out of `start()`. Verbs return `False` rather than raising.
+Defined in `errors.py`, so the bridge's modules share them; `bridge.py` doesn't re-export them, the front door does.
+
+| Error | Raised for |
+|---|---|
+| `BridgeError(RuntimeError)` | The base of the bridge's own errors. Raised as such for lifecycle and stream misuse: a double `start()`, a disabled stream's API. |
+| `NotRunningError(BridgeError)` | A verb, `robot` or `audio_input()` on a bridge that isn't running. |
+| `NotPlayingError(BridgeError)` | A catalog stop verb for an item that isn't playing. |
+| `CommandFailedError(BridgeError)` | The robot failed a verb: a Naoqi exception (chained), or a posture not reached. |
+| `ValueError` | Bad input: a catalog id or reaction type the catalog doesn't hold, or a reaction type with no behaviors installed. |
+
+So `except (BridgeError, ValueError)` catches every expected verb failure, and that's what both servers do. `ConfigError` comes from [config.md](config.md). `RobotConnectionError` from [robot.md](robot.md) propagates out of `start()`; raised by a verb's robot call, it's wrapped in `CommandFailedError` like any robot failure.
 
 ### Front door and logging
 
@@ -82,8 +96,8 @@ The config's `streams` block decides what `start()` subscribes to on the robot (
 - the config classes (`NaoBridgeConfig`, `RobotSettings`, `StreamSettings`, `TouchStream`, `JointsStream`, `AudioStream`, `Backend`);
 - the stream values (`TouchEvent`, `TouchPart`, `JointsState`, `MicChunk`) and the `Event` / `Observable` types;
 - `BehaviorInfos`, `LocalizedString`;
-- the errors (`BridgeError`, `ConfigError`, `RobotConnectionError`). Library modules only use `logging.getLogger(__name__)`; `logging.basicConfig` belongs to the CLIs.
+- the errors (`BridgeError`, `NotRunningError`, `NotPlayingError`, `CommandFailedError`, `ConfigError`, `RobotConnectionError`). Library modules only use `logging.getLogger(__name__)`; `logging.basicConfig` belongs to the CLIs.
 
 ## Open questions
 
-1. **Raise instead of `bool`?** Raising (`ValueError` for bad input, `BridgeError` subclasses for state errors) would tell the caller *why* a verb failed. Switching would also change both servers' result mapping. This is a deferral: `bool` works today.
+None.

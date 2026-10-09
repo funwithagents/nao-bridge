@@ -31,6 +31,7 @@ from .config import (
     as_str,
     parse_block,
 )
+from .errors import BridgeError
 from .robot import RobotConnectionError
 
 __all__ = [
@@ -45,8 +46,8 @@ logger = logging.getLogger(__name__)
 
 # A command's ``commandData`` object.
 type CommandData = dict[str, Any]
-# A verb: runs the command and reports success. A query: answers with a payload.
-type Verb = Callable[[CommandData], Awaitable[bool]]
+# A verb: runs the command, raising why it failed. A query: answers with a payload.
+type Verb = Callable[[CommandData], Awaitable[None]]
 type Query = Callable[[], Any]
 
 
@@ -206,17 +207,17 @@ class ClientSession:
         if self._config.bridge.streams.touch.enabled:
             self._bridge.on_touch.unsubscribe(self._on_touch)
         self._log(logging.INFO, "Reset Nao state after disconnection")
-        await self._bridge.change_eyes_color("white")
-        await self._bridge.set_breathing_enabled(False, "Body")
-        await self._bridge.rest()
+        await self._ritual_step(self._bridge.change_eyes_color("white"))
+        await self._ritual_step(self._bridge.set_breathing_enabled(False, "Body"))
+        await self._ritual_step(self._bridge.rest())
         await self._connection.close()
         self._closed = True
 
     async def _open(self) -> None:
         self._log(logging.INFO, "Init Nao state after connection")
-        await self._bridge.change_eyes_color("cyan")
-        await self._bridge.wake_up()
-        await self._bridge.set_breathing_enabled(True, "Body")
+        await self._ritual_step(self._bridge.change_eyes_color("cyan"))
+        await self._ritual_step(self._bridge.wake_up())
+        await self._ritual_step(self._bridge.set_breathing_enabled(True, "Body"))
         await self._send(
             "NaoState",
             {
@@ -231,6 +232,14 @@ class ClientSession:
             self._spawn(self._stream_joints(), self._stream_tasks)
         if streams.audio.enabled:
             self._spawn(self._stream_audio(), self._stream_tasks)
+
+    async def _ritual_step(self, step: Awaitable[None]) -> None:
+        """One step of the connect / disconnect ritual: a failure is a warning, and
+        the ritual goes on."""
+        try:
+            await step
+        except BridgeError as e:
+            self._log(logging.WARNING, f"Session ritual step skipped: {e}")
 
     def _spawn(
         self, coro: Coroutine[Any, Any, None], tasks: set[asyncio.Task[None]]
@@ -333,11 +342,14 @@ class ClientSession:
         result, data, message = False, None, ""
         try:
             if command_id in self._verbs:
-                result = await self._verbs[command_id](command_data)
+                await self._verbs[command_id](command_data)
+                result = True
             elif command_id in self._queries:
                 result, data = True, self._queries[command_id]()
             else:
                 message = f"command not found: {command_id}"
+        except (BridgeError, ValueError) as e:  # a verb's own reason
+            message = str(e)
         except Exception as e:  # noqa: BLE001 - reported to the client as an Error result
             message = f"error in command '{command_id}': {e!r}"
         if message:
@@ -356,9 +368,8 @@ class ClientSession:
             },
         )
 
-    async def _generic(self, command_data: CommandData) -> bool:
+    async def _generic(self, command_data: CommandData) -> None:
         self._log(logging.INFO, f"text = {command_data['text']}")
-        return True
 
 
 def _lan_ip() -> str:

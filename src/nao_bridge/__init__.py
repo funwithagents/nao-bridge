@@ -11,7 +11,7 @@ from .config import (
     StreamSettings,
     TouchStream,
 )
-from .errors import BridgeError
+from .errors import BridgeError, CommandFailedError, NotPlayingError, NotRunningError
 from .events import Event
 from .microphone import MicChunk
 from .observable import Observable
@@ -22,6 +22,7 @@ __all__ = [
     "Backend",
     "BehaviorInfos",
     "BridgeError",
+    "CommandFailedError",
     "ConfigError",
     "Event",
     "JointsState",
@@ -30,6 +31,8 @@ __all__ = [
     "MicChunk",
     "NaoBridge",
     "NaoBridgeConfig",
+    "NotPlayingError",
+    "NotRunningError",
     "Observable",
     "RobotConnectionError",
     "RobotSettings",

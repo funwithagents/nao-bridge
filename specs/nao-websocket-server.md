@@ -29,6 +29,7 @@ Gives non-MCP clients (a game engine, a web app, a custom agent loop) network ac
 Exactly one client at a time. A new connection ends the previous session (its streams stop, the robot is reset as on a disconnect, its connection is closed) before the new one starts; the old session's own cleanup then finds nothing left to do and logs nothing.
 - On client **connect** (when the robot is connected): eyes cyan, `wake_up`, breathing on for `Body`; then a `NaoState` message is sent and the client's streams start.
 - On client **disconnect**: its streams stop, then eyes white, breathing off, `rest`.
+- A step of either ritual that fails is logged as a warning (and, on connect, mirrored to the client as a `Log`); the next steps still run, and the session goes on.
 
 **Streams per client session** (each only when enabled in the bridge config):
 - **Touch:** the session subscribes its handler to `bridge.on_touch` for its lifetime and sends a `Touch` message for each event.
@@ -50,7 +51,7 @@ Every message, both directions, is `{"id": <string>, "data": <object>}`.
 | `id` | `data` |
 |---|---|
 | `NaoState` | `{connected, fakeRobot}` (`fakeRobot` is true on the `fake` backend) |
-| `CommandEnded` | `{commandUuid, resultType: "Success"\|"Error", message, data}` — always all four keys (`data` is `null` when a command has no payload); an unknown `commandId`, a `commandData` missing a field, or an exception yields `Error` with the reason in `message` |
+| `CommandEnded` | `{commandUuid, resultType: "Success"\|"Error", message, data}` — always all four keys (`data` is `null` when a command has no payload); `Success` has an empty `message`. An unknown `commandId`, a `commandData` missing a field, or a failed verb yields `Error` with the reason in `message`: a bridge error's own message (`BridgeError`, `ValueError`), or `error in command '<id>': <repr>` for anything else |
 | `Touch` | `{part, touched: bool}` |
 | `Joints` | `{jointsNames, jointsAngles}` (every `streams.joints.period_s`) |
 | `Audio` | `{rate, channels, nbSamplesPerChannel, data: base64 PCM16LE}`, one per mic chunk |
@@ -75,7 +76,7 @@ Every message, both directions, is `{"id": <string>, "data": <object>}`.
 | `SetBreathingEnabled` | `{enabled, chainName}` | — |
 | `RunBehavior` / `StopBehavior` | `{name}` | — |
 
-The `bool` result from `NaoBridge` maps to `resultType`; payloads use **camelCase** keys (unlike the MCP server's snake_case JSON).
+A verb that returns maps to `Success`, one that raises to `Error`; payloads use **camelCase** keys (unlike the MCP server's snake_case JSON).
 
 ## Open questions
 

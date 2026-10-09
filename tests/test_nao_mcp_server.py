@@ -55,7 +55,7 @@ def test_tools_are_described_by_their_docstrings():
     assert tools["dance"].title is None
 
 
-def test_action_tools_report_success_and_failure_as_text():
+def test_action_tools_report_success_and_failure_with_its_reason():
     async def run() -> list[str]:
         server = NaoMcpServer()
         async with server.nao_bridge:
@@ -63,13 +63,27 @@ def test_action_tools_report_success_and_failure_as_text():
                 await call(server, "say", text="Hello"),
                 await call(server, "dance", dance_id="gangnam-style"),
                 await call(server, "dance", dance_id="macarena"),
+                await call(server, "stop_app", app_id="follow-me"),
             ]
 
-    assert asyncio.run(run()) == [
-        "Nao said Hello",
-        "Nao has danced the dance with id 'gangnam-style'",
-        "Nao failed to dance the dance with id 'macarena'",
-    ]
+    said, danced, unknown, idle = asyncio.run(run())
+    assert said == "Nao said Hello"
+    assert danced == "Nao has danced the dance with id 'gangnam-style'"
+    # The model reads why, and the ids it can use instead.
+    assert unknown.startswith(
+        "Nao failed to dance the dance with id 'macarena': "
+        "unknown dance 'macarena' (known: caravan-palace-se, "
+    )
+    assert idle == (
+        "Nao failed to stop the app with id 'follow-me': app 'follow-me' is not playing"
+    )
+
+
+def test_a_tool_on_a_stopped_bridge_says_it_is_not_running():
+    result = asyncio.run(call(NaoMcpServer(), "wake_up"))
+    assert result == (
+        "Failed to enable Nao motors: the bridge is not running; call start() first"
+    )
 
 
 def test_list_tools_return_json_the_model_can_feed_back():

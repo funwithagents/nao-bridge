@@ -121,7 +121,7 @@ async with NaoBridge.from_dict({"streams": streams}) as bridge:
 
 ### APIs
 
-Every action is `async` and returns `True` on success, `False` otherwise (it never raises).
+Every action is `async`, returns `None` on success and raises to say why it failed: `ValueError` for an id or reaction type the catalog doesn't hold (the message lists the known ones), `NotRunningError` before `start()`, `NotPlayingError` when stopping something that isn't playing, `CommandFailedError` when the robot fails the command (the Naoqi error chained). The last three are `BridgeError`s, so `except (BridgeError, ValueError)` catches every expected failure.
 
 - **`async def set_tts_language(self, language: str)`**: Set the text-to-speech language
 - **`async def say(self, text: str)`**: Make the robot say something

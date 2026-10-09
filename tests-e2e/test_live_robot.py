@@ -19,14 +19,14 @@ def test_connects_and_reads_a_catalog():
     ip = require_env("NAO_IP")
     port = int(os.environ.get("NAO_PORT", "9559"))
 
-    async def run() -> tuple[int, bool, bool]:
+    async def run() -> int:
         config = NaoBridgeConfig(backend="real", robot=RobotSettings(ip=ip, port=port))
         async with NaoBridge(config) as bridge:
-            colored = await bridge.change_eyes_color("blue")
-            restored = await bridge.change_eyes_color("white")
-            return len(bridge.get_body_action_behaviors()), colored, restored
+            # A verb the robot fails raises CommandFailedError, failing the test.
+            await bridge.change_eyes_color("blue")
+            await bridge.change_eyes_color("white")
+            return len(bridge.get_body_action_behaviors())
 
-    body_actions, colored, restored = asyncio.run(run())
-    assert colored and restored
+    body_actions = asyncio.run(run())
     # Any stock Nao ships at least the dialog_move_arms actions.
     assert body_actions > 0

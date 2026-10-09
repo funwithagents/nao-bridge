@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Awaitable, Iterator
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Self
 
@@ -19,6 +19,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .bridge import NaoBridge
 from .config import ConfigError, JsonConfig, NaoBridgeConfig, as_choice, parse_block
+from .errors import BridgeError
 from .robot import RobotConnectionError
 
 logger = logging.getLogger(__name__)
@@ -85,9 +86,14 @@ def stdout_reserved_for_protocol() -> Iterator[None]:
         os.close(real_stdout_fd)
 
 
-def _status(ok: bool, success: str, failure: str) -> str:
-    """A tool's result: the status line the model reads."""
-    return success if ok else failure
+async def _attempt(action: Awaitable[None], success: str, failure: str) -> str:
+    """Await a bridge verb; the tool's result is the status line the model reads, with
+    the reason when the verb failed (specs/nao-mcp-server.md "Failure reporting")."""
+    try:
+        await action
+    except (BridgeError, ValueError) as e:
+        return f"{failure}: {e}"
+    return success
 
 
 class NaoMcpServer:
@@ -156,8 +162,8 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        return _status(
-            await self.nao_bridge.set_tts_language(language),
+        return await _attempt(
+            self.nao_bridge.set_tts_language(language),
             f"Nao switched language to {language}",
             f"Nao failed to switch language to {language}",
         )
@@ -171,8 +177,8 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        return _status(
-            await self.nao_bridge.say(text),
+        return await _attempt(
+            self.nao_bridge.say(text),
             f"Nao said {text}",
             f"Nao failed to say {text}",
         )
@@ -185,8 +191,8 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        return _status(
-            await self.nao_bridge.wake_up(),
+        return await _attempt(
+            self.nao_bridge.wake_up(),
             "Nao motors are enabled",
             "Failed to enable Nao motors",
         )
@@ -198,8 +204,8 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        return _status(
-            await self.nao_bridge.rest(),
+        return await _attempt(
+            self.nao_bridge.rest(),
             "Nao motors are disabled",
             "Failed to disable Nao motors",
         )
@@ -210,8 +216,8 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        return _status(
-            await self.nao_bridge.stand_up(), "Nao stood up", "Nao failed to stand up"
+        return await _attempt(
+            self.nao_bridge.stand_up(), "Nao stood up", "Nao failed to stand up"
         )
 
     async def sit_down(self) -> str:
@@ -220,8 +226,8 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        return _status(
-            await self.nao_bridge.sit_down(), "Nao sat down", "Nao failed to sit down"
+        return await _attempt(
+            self.nao_bridge.sit_down(), "Nao sat down", "Nao failed to sit down"
         )
 
     def get_dance_list(self) -> str:
@@ -250,8 +256,8 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        return _status(
-            await self.nao_bridge.dance(dance_id),
+        return await _attempt(
+            self.nao_bridge.dance(dance_id),
             f"Nao has danced the dance with id '{dance_id}'",
             f"Nao failed to dance the dance with id '{dance_id}'",
         )
@@ -276,8 +282,8 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        return _status(
-            await self.nao_bridge.expressive_reaction(reaction_type),
+        return await _attempt(
+            self.nao_bridge.expressive_reaction(reaction_type),
             f"Nao has reacted for type '{reaction_type}'",
             f"Nao failed to react for type '{reaction_type}'",
         )
@@ -304,8 +310,8 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        return _status(
-            await self.nao_bridge.body_action(body_action_id),
+        return await _attempt(
+            self.nao_bridge.body_action(body_action_id),
             f"Nao has performed the body action with id '{body_action_id}'",
             f"Nao failed to perform the body action with id '{body_action_id}'",
         )
@@ -336,8 +342,8 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        return _status(
-            await self.nao_bridge.run_app(app_id),
+        return await _attempt(
+            self.nao_bridge.run_app(app_id),
             f"Nao has run the app with id '{app_id}'",
             f"Nao failed to run the app with id '{app_id}'",
         )
@@ -352,8 +358,8 @@ class NaoMcpServer:
         Returns:
             str: Status message indicating success or failure
         """
-        return _status(
-            await self.nao_bridge.stop_app(app_id),
+        return await _attempt(
+            self.nao_bridge.stop_app(app_id),
             f"Nao has stopped the app with id '{app_id}'",
             f"Nao failed to stop the app with id '{app_id}'",
         )

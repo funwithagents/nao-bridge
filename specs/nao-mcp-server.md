@@ -43,7 +43,7 @@ Lets an LLM agent (Claude Desktop, HuggingFace Tiny Agents, any MCP client) driv
 | `run_app(app_id)` / `stop_app(app_id)` | `run_app` / `stop_app` | status string |
 
   Deliberately **not** exposed: `stop_say`, eyes color, basic awareness, breathing, raw `run_behavior`/`stop_behavior`, and stop-variants for dances/reactions/body actions.
-- **Failure reporting:** tools never raise; a `False` from the bridge becomes a "Nao failed to …" string.
+- **Failure reporting:** an expected verb failure (`BridgeError` or `ValueError`, [bridge.md](bridge.md) "Errors") becomes the tool's result string, `"Nao failed to …: <reason>"`, so the model reads why and can act on it (`Nao failed to dance the dance with id 'macarena': unknown dance 'macarena' (known: …)`). Anything else is a bug, and FastMCP reports it as a tool error.
 - **CLI:** the `nao-mcp-server` console script (also `python -m nao_bridge.nao_mcp_server`) takes `--config path.json` only; without it the server runs on its default config (the fake). An invalid config exits 2 with the `ConfigError` message. It configures logging (stderr, since stdout carries the stdio transport) and exits 1 if the robot is unreachable. Ready-made files: `examples/configs/mcp-fake.json`, `mcp-real.json`.
 
 ## Open questions

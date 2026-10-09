@@ -74,7 +74,7 @@ MicFeed()
 
 - **A slow subscriber costs only itself.** Neither Naoqi's thread nor any other subscriber ever waits on it.
 - **Where it starts:** by default at `head`. `preroll_s > 0` starts it at the oldest chunk whose `ts >= now - preroll_s`, never before the session's first chunk. A negative `preroll_s` raises `ValueError` at the call.
-- **Checks at the call:** a bridge that isn't running, or whose audio stream is disabled in the config, raises `BridgeError` where `audio_input()` is called, not at the first `async for`.
+- **Checks at the call:** a bridge whose audio stream is disabled in the config raises `BridgeError`, and one that isn't running raises `NotRunningError` (a `BridgeError`), where `audio_input()` is called, not at the first `async for`.
 - **End of session:** a subscriber ends on its own when the session stops (`stop()` wakes it and its iterator returns). It never carries over into a later session.
 - **Cancellation:** `break`, cancelling the consuming task, or `aclose()` ends that subscriber only, unregistering it in a `finally`.
 - **Waking across threads:** each waiting subscriber registers an `asyncio.Event` together with its loop. The publisher sets them through `loop.call_soon_threadsafe`, and a subscriber clears its event before reading `head`.

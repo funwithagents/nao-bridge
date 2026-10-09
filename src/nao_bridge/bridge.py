@@ -2,7 +2,7 @@
 
 Specified by [specs/bridge.md](../../specs/bridge.md). ``NaoBridge`` owns the
 ``start()`` / ``stop()`` lifecycle (``async with`` over it) and exposes intent-level
-async verbs returning ``bool``, the behavior catalog, and the robot's streams — touch
+async verbs that raise why they failed (``errors.py``), the behavior catalog, and the robot's streams — touch
 as an ``Event``, joints as an ``Observable``, the microphone as ``audio_input()``
 subscribers over the mic feed — over the robot seam in [robot.py](robot.py), a real
 Nao or the fake, as the ``NaoBridgeConfig`` says.
@@ -14,14 +14,14 @@ import asyncio
 import logging
 import random
 import time
-from collections.abc import AsyncIterator, Callable, Container, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Self
 
 from .config import Backend, NaoBridgeConfig
-from .errors import BridgeError
+from .errors import BridgeError, CommandFailedError, NotPlayingError, NotRunningError
 from .events import Event
 from .microphone import MicFeed
 from .observable import Observable
@@ -210,7 +210,8 @@ class NaoBridge:
 
     Built from a ``NaoBridgeConfig`` (or a bare backend string). Use
     ``async with NaoBridge("fake") as bridge:`` or the ``start()`` / ``stop()`` pair.
-    Action verbs return ``True`` on success and never raise.
+    Action verbs return ``None`` on success and raise why they failed: a
+    ``BridgeError`` subclass, or ``ValueError`` for an id the catalog doesn't hold.
     """
 
     def __init__(self, config: NaoBridgeConfig | Backend | None = None) -> None:
@@ -263,7 +264,7 @@ class NaoBridge:
     def robot(self) -> NaoRobot:
         """The underlying robot (``FakeNaoRobot`` on ``fake``); only while running."""
         if self._robot is None:
-            raise BridgeError("the bridge is not running; call start() first")
+            raise NotRunningError("the bridge is not running; call start() first")
         return self._robot
 
     async def start(self) -> None:
@@ -341,11 +342,10 @@ class NaoBridge:
     def audio_input(self, *, preroll_s: float = 0.0) -> AsyncIterator[bytes]:
         """A new subscriber to the microphone: int16 LE mono ``bytes`` per chunk at
         ``mic.sample_rate``, every chunk in order. ``BridgeError`` when the audio stream
-        is disabled or the bridge is not running."""
+        is disabled, ``NotRunningError`` when the bridge is not running."""
         if not self._config.streams.audio.enabled:
             raise BridgeError("the audio stream is disabled (streams.audio.enabled)")
-        if self._robot is None:
-            raise BridgeError("the bridge is not running; call start() first")
+        _ = self.robot  # NotRunningError while stopped
         return self._mic.subscribe(preroll_s=preroll_s)
 
     def _forward_touch(self, key: TouchPart, value: float) -> None:
@@ -374,134 +374,132 @@ class NaoBridge:
 
     # region Verbs
 
-    async def _act(self, verb: str, call: Callable[[NaoRobot], object]) -> bool:
-        """Run ``call`` on the robot off the loop; ``False`` if not running, on error,
-        or when the call itself reports failure by returning ``False``."""
-        robot = self._robot
-        if robot is None:
-            logger.error("%s failed: the bridge is not running", verb)
-            return False
+    async def _act[T](self, verb: str, call: Callable[[NaoRobot], T]) -> T:
+        """Run ``call`` on the robot off the loop. ``NotRunningError`` while stopped; a
+        robot exception becomes ``CommandFailedError``, chained to it."""
+        robot = self.robot
         try:
-            result = await asyncio.to_thread(call, robot)
-        except Exception:
-            logger.exception("%s failed", verb)
-            return False
-        return result is not False
+            return await asyncio.to_thread(call, robot)
+        except Exception as e:
+            raise CommandFailedError(f"{verb} failed: {e or type(e).__name__}") from e
 
-    async def set_tts_language(self, language: str) -> bool:
+    async def set_tts_language(self, language: str) -> None:
         """Set the text-to-speech language (e.g. 'English', 'French')."""
-        return await self._act("set_tts_language", lambda r: r.set_language(language))
+        await self._act("set_tts_language", lambda r: r.set_language(language))
 
-    async def say(self, text: str) -> bool:
+    async def say(self, text: str) -> None:
         """Make the robot say ``text`` (animated speech); returns once spoken."""
-        return await self._act("say", lambda r: r.say(text))
+        await self._act("say", lambda r: r.say(text))
 
-    async def stop_say(self) -> bool:
+    async def stop_say(self) -> None:
         """Stop the robot talking."""
-        return await self._act("stop_say", lambda r: r.stop_speech())
+        await self._act("stop_say", lambda r: r.stop_speech())
 
-    async def wake_up(self) -> bool:
+    async def wake_up(self) -> None:
         """Enable the robot motors."""
-        return await self._act("wake_up", lambda r: r.wake_up())
+        await self._act("wake_up", lambda r: r.wake_up())
 
-    async def rest(self) -> bool:
+    async def rest(self) -> None:
         """Disable the robot motors."""
-        return await self._act("rest", lambda r: r.rest())
+        await self._act("rest", lambda r: r.rest())
 
-    async def stand_up(self) -> bool:
+    async def _go_to_posture(self, verb: str, posture: str) -> None:
+        reached = await self._act(
+            verb, lambda r: r.go_to_posture(posture, POSTURE_SPEED, POSTURE_MAX_TRIES)
+        )
+        if not reached:
+            raise CommandFailedError(
+                f"{verb} failed: the robot did not reach the {posture} posture"
+            )
+
+    async def stand_up(self) -> None:
         """Go to the Stand posture."""
-        return await self._act(
-            "stand_up",
-            lambda r: r.go_to_posture("Stand", POSTURE_SPEED, POSTURE_MAX_TRIES),
-        )
+        await self._go_to_posture("stand_up", "Stand")
 
-    async def sit_down(self) -> bool:
+    async def sit_down(self) -> None:
         """Go to the Sit posture."""
-        return await self._act(
-            "sit_down",
-            lambda r: r.go_to_posture("Sit", POSTURE_SPEED, POSTURE_MAX_TRIES),
-        )
+        await self._go_to_posture("sit_down", "Sit")
 
-    async def change_eyes_color(self, color: str) -> bool:
+    async def change_eyes_color(self, color: str) -> None:
         """Change the eyes color ('white', 'red', 'green', 'blue', 'yellow', 'magenta', 'cyan')."""
-        return await self._act("change_eyes_color", lambda r: r.fade_eyes(color))
+        await self._act("change_eyes_color", lambda r: r.fade_eyes(color))
 
     async def set_basic_awareness_state(
         self, enabled: bool, engagement_mode: str, tracking_mode: str
-    ) -> bool:
+    ) -> None:
         """Configure and start/stop basic awareness."""
-        return await self._act(
+        await self._act(
             "set_basic_awareness_state",
             lambda r: r.set_basic_awareness(enabled, engagement_mode, tracking_mode),
         )
 
-    async def set_breathing_enabled(self, enabled: bool, chain_name: str) -> bool:
+    async def set_breathing_enabled(self, enabled: bool, chain_name: str) -> None:
         """Enable or disable breathing on a chain (e.g. 'Body')."""
-        return await self._act(
+        await self._act(
             "set_breathing_enabled", lambda r: r.set_breathing(chain_name, enabled)
         )
 
-    async def run_behavior(self, behavior_name: str) -> bool:
+    async def run_behavior(self, behavior_name: str) -> None:
         """Run an installed behavior; returns when it ends."""
         self._running_behaviors.append(behavior_name)
         try:
-            return await self._act(
-                "run_behavior", lambda r: r.run_behavior(behavior_name)
-            )
+            await self._act("run_behavior", lambda r: r.run_behavior(behavior_name))
         finally:
             if behavior_name in self._running_behaviors:
                 self._running_behaviors.remove(behavior_name)
 
-    async def stop_behavior(self, behavior_name: str) -> bool:
+    async def stop_behavior(self, behavior_name: str) -> None:
         """Stop a running behavior."""
-        return await self._act(
-            "stop_behavior", lambda r: r.stop_behavior(behavior_name)
-        )
+        await self._act("stop_behavior", lambda r: r.stop_behavior(behavior_name))
 
     # endregion
 
     # region Catalog verbs
 
-    async def _play(self, kind: str, item_id: str, behavior_name: str) -> bool:
+    def _entry[T](self, kind: str, entries: Mapping[str, T], item_id: str) -> T:
+        """The catalog entry ``item_id`` of ``kind``. ``NotRunningError`` while stopped;
+        ``ValueError`` naming the known ids for an unknown one."""
+        _ = self.robot  # NotRunningError while stopped
+        entry = entries.get(item_id)
+        if entry is None:
+            known = ", ".join(entries) or "none"
+            raise ValueError(f"unknown {kind} '{item_id}' (known: {known})")
+        return entry
+
+    async def _play(self, kind: str, item_id: str, behavior_name: str) -> None:
         """Run ``behavior_name`` for the catalog item ``(kind, item_id)``, tracked as
         playing until it ends."""
-        if not self.running:
-            logger.error("%s '%s' failed: the bridge is not running", kind, item_id)
-            return False
         key = (kind, item_id)
         self._running[key] = behavior_name
         try:
-            return await self.run_behavior(behavior_name)
+            await self.run_behavior(behavior_name)
         finally:
             if self._running.get(key) == behavior_name:
                 del self._running[key]
 
-    async def _stop(self, kind: str, known: Container[str], item_id: str) -> bool:
-        """Stop the behavior playing for ``(kind, item_id)``; ``False`` for an unknown
-        id or one that isn't playing."""
-        if item_id not in known:
-            logger.error("%s with id '%s' not found", kind, item_id)
-            return False
+    async def _stop(self, kind: str, known: Mapping[str, object], item_id: str) -> None:
+        """Stop the behavior playing for ``(kind, item_id)``; ``ValueError`` for an
+        unknown id, ``NotPlayingError`` for one that isn't playing."""
+        self._entry(kind, known, item_id)
         behavior_name = self._running.get((kind, item_id))
         if behavior_name is None:
-            logger.error("%s with id '%s' is not running", kind, item_id)
-            return False
-        return await self.stop_behavior(behavior_name)
+            raise NotPlayingError(f"{kind} '{item_id}' is not playing")
+        await self.stop_behavior(behavior_name)
 
     def _playing(self, kind: str) -> tuple[str, ...]:
         return tuple(item_id for k, item_id in self._running if k == kind)
 
     @property
     def current_dances(self) -> tuple[str, ...]:
-        return self._playing("Dance")
+        return self._playing("dance")
 
     @property
     def current_body_actions(self) -> tuple[str, ...]:
-        return self._playing("Body action")
+        return self._playing("body action")
 
     @property
     def current_apps(self) -> tuple[str, ...]:
-        return self._playing("App")
+        return self._playing("app")
 
     @property
     def current_expressive_reactions(self) -> Mapping[str, str]:
@@ -510,7 +508,7 @@ class NaoBridge:
             {
                 item_id: behavior
                 for (k, item_id), behavior in self._running.items()
-                if k == "Reaction"
+                if k == "reaction type"
             }
         )
 
@@ -522,64 +520,51 @@ class NaoBridge:
     def get_dance_behaviors(self) -> list[BehaviorInfos]:
         return list(self._catalog.dances.values())
 
-    async def dance(self, dance_id: str) -> bool:
+    async def dance(self, dance_id: str) -> None:
         """Run a dance from ``get_dance_behaviors``; returns when it ends."""
-        dance = self._catalog.dances.get(dance_id)
-        if dance is None:
-            logger.error("Dance with id '%s' not found", dance_id)
-            return False
-        return await self._play("Dance", dance_id, dance.behavior_name)
+        dance = self._entry("dance", self._catalog.dances, dance_id)
+        await self._play("dance", dance_id, dance.behavior_name)
 
-    async def stop_dance(self, dance_id: str) -> bool:
-        return await self._stop("Dance", self._catalog.dances, dance_id)
+    async def stop_dance(self, dance_id: str) -> None:
+        await self._stop("dance", self._catalog.dances, dance_id)
 
     def get_expressive_reaction_types(self) -> list[str]:
         return list(self._catalog.reactions)
 
-    async def expressive_reaction(self, reaction_type: str) -> bool:
+    async def expressive_reaction(self, reaction_type: str) -> None:
         """Play a random reaction of ``reaction_type``; returns when it ends."""
-        reactions = self._catalog.reactions.get(reaction_type)
-        if reactions is None:
-            logger.error("Reaction type '%s' not found", reaction_type)
-            return False
+        reactions = self._entry("reaction type", self._catalog.reactions, reaction_type)
         if not reactions:
-            logger.error("No reaction behaviors for reaction type '%s'", reaction_type)
-            return False
+            raise ValueError(
+                f"no behaviors installed for reaction type '{reaction_type}'"
+            )
         behavior_name = random.choice(reactions).behavior_name
-        return await self._play("Reaction", reaction_type, behavior_name)
+        await self._play("reaction type", reaction_type, behavior_name)
 
-    async def stop_expressive_reaction(self, reaction_type: str) -> bool:
+    async def stop_expressive_reaction(self, reaction_type: str) -> None:
         """Stop the reaction ``expressive_reaction`` is playing for ``reaction_type``."""
-        return await self._stop("Reaction", self._catalog.reactions, reaction_type)
+        await self._stop("reaction type", self._catalog.reactions, reaction_type)
 
     def get_body_action_behaviors(self) -> list[BehaviorInfos]:
         return list(self._catalog.body_actions.values())
 
-    async def body_action(self, body_action_id: str) -> bool:
+    async def body_action(self, body_action_id: str) -> None:
         """Run a body action from ``get_body_action_behaviors``; returns when it ends."""
-        action = self._catalog.body_actions.get(body_action_id)
-        if action is None:
-            logger.error("Body action with id '%s' not found", body_action_id)
-            return False
-        return await self._play("Body action", body_action_id, action.behavior_name)
+        action = self._entry("body action", self._catalog.body_actions, body_action_id)
+        await self._play("body action", body_action_id, action.behavior_name)
 
-    async def stop_body_action(self, body_action_id: str) -> bool:
-        return await self._stop(
-            "Body action", self._catalog.body_actions, body_action_id
-        )
+    async def stop_body_action(self, body_action_id: str) -> None:
+        await self._stop("body action", self._catalog.body_actions, body_action_id)
 
     def get_app_behaviors(self) -> list[BehaviorInfos]:
         return list(self._catalog.apps.values())
 
-    async def run_app(self, app_id: str) -> bool:
+    async def run_app(self, app_id: str) -> None:
         """Run an installed app from ``get_app_behaviors``; returns when it ends."""
-        app = self._catalog.apps.get(app_id)
-        if app is None:
-            logger.error("App with id '%s' not found", app_id)
-            return False
-        return await self._play("App", app_id, app.behavior_name)
+        app = self._entry("app", self._catalog.apps, app_id)
+        await self._play("app", app_id, app.behavior_name)
 
-    async def stop_app(self, app_id: str) -> bool:
-        return await self._stop("App", self._catalog.apps, app_id)
+    async def stop_app(self, app_id: str) -> None:
+        await self._stop("app", self._catalog.apps, app_id)
 
     # endregion

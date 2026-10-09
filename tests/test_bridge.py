@@ -11,7 +11,12 @@ from typing import Any
 
 import pytest
 
-from nao_bridge import BridgeError
+from nao_bridge import (
+    BridgeError,
+    CommandFailedError,
+    NotPlayingError,
+    NotRunningError,
+)
 from nao_bridge.bridge import JointsState, NaoBridge, TouchEvent, build_catalog
 from nao_bridge.config import (
     AudioStream,
@@ -61,7 +66,7 @@ def test_async_with_connects_then_closes_the_robot():
 
 def test_robot_is_only_reachable_while_running():
     bridge = NaoBridge("fake")
-    with pytest.raises(BridgeError):
+    with pytest.raises(NotRunningError):
         _ = bridge.robot
 
 
@@ -74,16 +79,19 @@ def test_starting_twice_is_an_error_and_restart_after_stop_works():
         await bridge.stop()
         await bridge.stop()  # no-op
         await bridge.start()
-        assert await bridge.say("again")
+        await bridge.say("again")
         await bridge.stop()
 
     asyncio.run(run())
 
 
-def test_verbs_return_false_when_not_running():
+def test_verbs_raise_not_running_when_the_bridge_is_stopped():
     bridge = NaoBridge("fake")
-    assert asyncio.run(bridge.say("hello")) is False
-    assert asyncio.run(bridge.wake_up()) is False
+    with pytest.raises(NotRunningError, match="call start"):
+        asyncio.run(bridge.say("hello"))
+    # Checked before the catalog: a stopped bridge doesn't call an id unknown.
+    with pytest.raises(NotRunningError):
+        asyncio.run(bridge.dance("macarena"))
 
 
 # --- Catalog ------------------------------------------------------------------
@@ -167,11 +175,11 @@ def test_verbs_drive_the_robot():
         async with NaoBridge("fake") as bridge:
             robot = fake(bridge)
             robot.commands.clear()
-            assert await bridge.set_tts_language("French")
-            assert await bridge.say("Bonjour")
-            assert await bridge.stand_up()
-            assert await bridge.change_eyes_color("cyan")
-            assert await bridge.set_breathing_enabled(True, "Body")
+            await bridge.set_tts_language("French")
+            await bridge.say("Bonjour")
+            await bridge.stand_up()
+            await bridge.change_eyes_color("cyan")
+            await bridge.set_breathing_enabled(True, "Body")
             return list(robot.commands)
 
     assert asyncio.run(run()) == [
@@ -183,70 +191,110 @@ def test_verbs_drive_the_robot():
     ]
 
 
-def test_a_failed_posture_is_reported():
-    async def run() -> bool:
+def test_a_posture_not_reached_raises_command_failed():
+    async def run() -> None:
         async with NaoBridge("fake") as bridge:
             fake(bridge).posture_succeeds = False
-            return await bridge.sit_down()
+            await bridge.sit_down()
 
-    assert asyncio.run(run()) is False
+    with pytest.raises(CommandFailedError, match="sit_down failed: .*Sit posture"):
+        asyncio.run(run())
 
 
-def test_a_robot_error_becomes_false_not_an_exception(monkeypatch: pytest.MonkeyPatch):
+def test_a_robot_error_is_raised_with_its_reason_and_chained(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    naoqi_error = RuntimeError("ALAnimatedSpeech is gone")
+
     def broken_say(text: str) -> None:
-        raise RuntimeError("ALAnimatedSpeech is gone")
+        raise naoqi_error
 
-    async def run() -> bool:
+    async def run() -> None:
         async with NaoBridge("fake") as bridge:
             monkeypatch.setattr(fake(bridge), "say", broken_say)
-            return await bridge.say("hello")
+            await bridge.say("hello")
 
-    assert asyncio.run(run()) is False
+    with pytest.raises(CommandFailedError) as raised:
+        asyncio.run(run())
+    assert str(raised.value) == "say failed: ALAnimatedSpeech is gone"
+    assert raised.value.__cause__ is naoqi_error
 
 
-def test_unknown_catalog_ids_are_rejected():
-    async def run() -> list[bool]:
+def test_unknown_catalog_ids_raise_value_error_naming_the_known_ones():
+    async def run() -> list[str]:
+        messages: list[str] = []
         async with NaoBridge("fake") as bridge:
-            return [
-                await bridge.dance("macarena"),
-                await bridge.run_app("nope"),
-                await bridge.body_action("Wave"),
-                await bridge.expressive_reaction("Angry"),
-                await bridge.stop_dance("macarena"),
-            ]
+            for verb in (
+                bridge.dance("macarena"),
+                bridge.run_app("nope"),
+                bridge.body_action("Wave"),
+                bridge.expressive_reaction("Angry"),
+                bridge.stop_dance("macarena"),
+            ):
+                with pytest.raises(ValueError) as raised:
+                    await verb
+                messages.append(str(raised.value))
+        return messages
 
-    assert asyncio.run(run()) == [False] * 5
+    dance, app, body_action, reaction, stop = asyncio.run(run())
+    assert dance.startswith("unknown dance 'macarena' (known: caravan-palace-se, ")
+    assert "follow-me" in app
+    assert "UpLArm" in body_action
+    assert reaction == (
+        "unknown reaction type 'Angry' (known: Happy, Proud, Laugh, Sad, HeadTouched)"
+    )
+    assert stop == dance
+
+
+def test_a_reaction_type_without_behaviors_raises_value_error(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    packages = FakeNaoRobot().list_packages()
+    for package in packages:  # a robot whose animations package has no Proud emotion
+        behaviors = package["elems"]["contents"]["behaviors"]
+        behaviors[:] = [
+            b for b in behaviors if "proud" not in b["langToTags"].get("en_US", [])
+        ]
+    monkeypatch.setattr(FakeNaoRobot, "list_packages", lambda self: packages)
+
+    async def run() -> None:
+        async with NaoBridge("fake") as bridge:
+            assert "Proud" in bridge.get_expressive_reaction_types()
+            await bridge.expressive_reaction("Proud")
+
+    with pytest.raises(ValueError, match="no behaviors installed .* 'Proud'"):
+        asyncio.run(run())
 
 
 def test_a_dance_runs_the_behavior_and_untracks_it_when_done():
-    async def run() -> tuple[bool, list[str], list[tuple[str, dict[str, Any]]]]:
+    async def run() -> tuple[list[str], list[tuple[str, dict[str, Any]]]]:
         async with NaoBridge("fake") as bridge:
-            ok = await bridge.dance("gangnam-style")
-            return ok, list(bridge.current_dances), fake(bridge).commands
+            await bridge.dance("gangnam-style")
+            return list(bridge.current_dances), fake(bridge).commands
 
-    ok, current, commands = asyncio.run(run())
-    assert ok
+    current, commands = asyncio.run(run())
     assert current == []
     assert ("run_behavior", {"name": "gangnam-style"}) in commands
 
 
 def test_stop_dance_ends_a_running_dance_but_not_an_idle_one():
-    async def run() -> tuple[bool, bool, bool]:
+    async def run() -> list[str]:
         async with NaoBridge("fake") as bridge:
             fake(bridge).behavior_duration_s = 5.0
-            idle_stop = await bridge.stop_dance("eagle-dance")
+            with pytest.raises(NotPlayingError, match="dance 'eagle-dance' is not"):
+                await bridge.stop_dance("eagle-dance")
             dancing = asyncio.create_task(bridge.dance("eagle-dance"))
             await wait_until(lambda: "eagle-dance" in fake(bridge).running_behaviors)
-            stopped = await bridge.stop_dance("eagle-dance")
+            await bridge.stop_dance("eagle-dance")
             async with asyncio.timeout(1.0):
-                danced = await dancing
-            return idle_stop, stopped, danced
+                await dancing  # ends normally, stopped well before its 5 s
+            return fake(bridge).running_behaviors
 
-    assert asyncio.run(run()) == (False, True, True)
+    assert asyncio.run(run()) == []
 
 
 def test_stop_expressive_reaction_stops_the_behavior_that_is_playing():
-    async def run() -> tuple[bool, str, list[tuple[str, dict[str, Any]]], set[str]]:
+    async def run() -> tuple[str, list[tuple[str, dict[str, Any]]], set[str]]:
         async with NaoBridge("fake") as bridge:
             robot = fake(bridge)
             robot.behavior_duration_s = 5.0
@@ -254,36 +302,34 @@ def test_stop_expressive_reaction_stops_the_behavior_that_is_playing():
             await wait_until(lambda: "Happy" in bridge.current_expressive_reactions)
             playing = bridge.current_expressive_reactions["Happy"]
             await wait_until(lambda: playing in robot.running_behaviors)
-            stopped = await bridge.stop_expressive_reaction("Happy")
+            await bridge.stop_expressive_reaction("Happy")
             async with asyncio.timeout(1.0):
                 await reacting
             catalog = build_catalog(robot.list_packages())
             happy = {b.behavior_name for b in catalog.reactions["Happy"]}
-            return stopped, playing, robot.commands, happy
+            return playing, robot.commands, happy
 
-    stopped, playing, commands, happy = asyncio.run(run())
-    assert stopped
+    playing, commands, happy = asyncio.run(run())
     assert playing in happy
     assert ("stop_behavior", {"name": playing}) in commands
 
 
 @pytest.mark.fake_behavior_durations
 def test_on_a_fresh_fake_behaviors_run_until_stopped():
-    async def run() -> tuple[float, list[str], bool, bool, float]:
+    async def run() -> tuple[float, list[str], float]:
         async with NaoBridge("fake") as bridge:
             duration = fake(bridge).behavior_duration_s
             started = time.monotonic()
             dancing = asyncio.create_task(bridge.dance("eagle-dance"))
             await asyncio.sleep(0.2)
             running = list(bridge.current_dances)
-            stopped = await bridge.stop_dance("eagle-dance")
-            danced = await asyncio.wait_for(dancing, 1.0)
-            return duration, running, stopped, danced, time.monotonic() - started
+            await bridge.stop_dance("eagle-dance")
+            await asyncio.wait_for(dancing, 1.0)
+            return duration, running, time.monotonic() - started
 
-    duration, running, stopped, danced, elapsed = asyncio.run(run())
+    duration, running, elapsed = asyncio.run(run())
     assert duration == 5.0
     assert running == ["eagle-dance"]  # still dancing after 0.2 s
-    assert stopped and danced
     assert elapsed < 1.0  # ended by the stop, not by the 5 s
 
 
@@ -403,7 +449,7 @@ def test_audio_input_streams_the_robot_microphone_to_several_subscribers():
                 asyncio.gather(count(5), count(5)), 2.0
             )
             live = bridge.mic.latest() is not None
-        with pytest.raises(BridgeError, match="not running"):
+        with pytest.raises(NotRunningError, match="not running"):
             bridge.audio_input()
         return first, second, live, bridge.mic.latest() is None
 

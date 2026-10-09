@@ -50,7 +50,7 @@ The config has already rejected unknown backends and a `real` backend without an
 
 ### The consumed slice
 
-Every method is **blocking** (the bridge calls them via `asyncio.to_thread`) and **raises** on failure; the bridge turns failures into its own results.
+Every method is **blocking** (the bridge calls them via `asyncio.to_thread`) and **raises** on failure; the bridge re-raises failures as its `CommandFailedError` ([bridge.md](bridge.md) "Errors").
 
 | Method | `RealNaoRobot` → Naoqi |
 |---|---|
@@ -99,7 +99,7 @@ What the fake does is set by what the tests exercise:
 
 ### Errors
 
-`RobotConnectionError(RuntimeError)`: the robot couldn't be reached, or the real backend lacks `qi`. Other failures are Naoqi's own exceptions, raised unwrapped; the bridge catches them per verb.
+`RobotConnectionError(RuntimeError)`: the robot couldn't be reached, or the real backend lacks `qi`. Other failures are Naoqi's own exceptions, raised unwrapped; the bridge chains them to its `CommandFailedError` per verb.
 
 ## Open questions
 

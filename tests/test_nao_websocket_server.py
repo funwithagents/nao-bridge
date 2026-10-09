@@ -160,9 +160,32 @@ def test_commands_answer_with_their_uuid_and_result():
         ],
         answers=2,
     )
-    results = {r["commandUuid"]: r["resultType"] for r in socket.of("CommandEnded")}
-    assert results == {"c1": "Success", "c2": "Error"}
+    ended = {r["commandUuid"]: r for r in socket.of("CommandEnded")}
+    assert (ended["c1"]["resultType"], ended["c1"]["message"]) == ("Success", "")
+    assert ended["c2"]["resultType"] == "Error"
+    assert ended["c2"]["message"].startswith(
+        "unknown dance 'macarena' (known: caravan-palace-se, "
+    )
     assert "say" in robot_calls
+
+
+def test_a_failed_ritual_step_is_a_warning_and_the_session_goes_on(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def broken_wake_up(self: FakeNaoRobot) -> None:
+        raise RuntimeError("motors too hot")
+
+    monkeypatch.setattr(FakeNaoRobot, "wake_up", broken_wake_up)
+    socket, robot_calls = session([command("c1", "Say", text="Hello")], answers=1)
+    [ended] = socket.of("CommandEnded")
+    assert ended["resultType"] == "Success"
+    assert {
+        "log": "Session ritual step skipped: wake_up failed: motors too hot",
+        "logLevel": "WARNING",
+    } in socket.of("Log")
+    # The steps after the failed one still ran, on connect and on disconnect.
+    assert robot_calls.count("set_breathing") == 2
+    assert robot_calls[-3:] == ["rest", "unsubscribe_touch", "close"]
 
 
 def test_every_command_result_carries_the_four_keys():
