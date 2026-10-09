@@ -112,7 +112,7 @@ Each server has its own config object, wrapping a `NaoBridgeConfig` under `bridg
 }
 ```
 
-- `NaoWebsocketServerConfig(bridge, server: WebsocketServerSettings(host="", port=8002))`. `host` is the bind address; empty (the default) means the host's LAN IP, found at start; `port` 0 means an OS-assigned port ([nao-websocket-server.md](nao-websocket-server.md)). Its bridge streams replace `--with-joints-data` / `--with-audio-data`. Touch is no longer forced on: it's on when the config says so. The server subscribes to `on_touch`, follows `bridge.joints.changes()`, and drains one `audio_input()` per client.
+- `NaoWebsocketServerConfig(bridge, server: WebsocketServerSettings(host="", port=8002))`. `host` is the bind address; empty (the default) means the host's LAN IP, found at start (`127.0.0.1` when there's no route out); `port` 0 means an OS-assigned port ([nao-websocket-server.md](nao-websocket-server.md)). Its bridge streams replace `--with-joints-data` / `--with-audio-data`. Touch is no longer forced on: it's on when the config says so. The server subscribes to `on_touch`, follows `bridge.joints.changes()`, and drains one `audio_input()` per client.
 - `NaoMcpServerConfig(bridge, server: McpServerSettings(transport="stdio" | "sse"))`.
 - The `bridge` block is exactly a `NaoBridgeConfig`, so it can be copied between files. Each server config class lives in its server module; `NaoBridgeConfig` and `ConfigError` live in `config.py`.
 

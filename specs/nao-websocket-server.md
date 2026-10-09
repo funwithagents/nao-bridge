@@ -17,10 +17,10 @@ Gives non-MCP clients (a game engine, a web app, a custom agent loop) network ac
 
 ### Lifecycle
 
-- **Config:** `NaoWebsocketServerConfig` is `{"bridge": NaoBridgeConfig, "server": WebsocketServerSettings}`, with `WebsocketServerSettings(host: str = "", port: int = 8002)` (port 0–65535; `0` lets the OS pick a free port, which `address` then reports). `host` is the address to bind; empty means the host's **LAN IP** (found via a UDP socket towards 8.8.8.8, which needs a route out), `"0.0.0.0"` every interface, `"127.0.0.1"` local only. Both blocks are optional and share the loaders and `ConfigError` rules of [config.md](config.md). The bridge's `streams` decide which events the server streams to its client: none is forced on.
+- **Config:** `NaoWebsocketServerConfig` is `{"bridge": NaoBridgeConfig, "server": WebsocketServerSettings}`, with `WebsocketServerSettings(host: str = "", port: int = 8002)` (port 0–65535; `0` lets the OS pick a free port, which `address` then reports). `host` is the address to bind; empty means the host's **LAN IP** (found via a UDP socket towards 8.8.8.8; with no route out, e.g. offline, it falls back to `127.0.0.1` with a warning, so local clients can still connect), `"0.0.0.0"` every interface, `"127.0.0.1"` local only. Both blocks are optional and share the loaders and `ConfigError` rules of [config.md](config.md). The bridge's `streams` decide which events the server streams to its client: none is forced on.
 - `NaoWebsocketServer(config=None)` (default: `NaoWebsocketServerConfig()`, the fake with no streams) builds a `NaoBridge(config.bridge)`.
 - **Two objects.** `NaoWebsocketServer` owns the bridge and the listener; `ClientSession` is the protocol over one connection — it takes the bridge, the config and a *connection-like* object (anything with `send(str)`, `close()` and `async for` over incoming text, which is what `websockets` gives and what a test can fake in memory) and runs `serve()` until the connection ends. The server builds one session per accepted connection. So the protocol is tested through its public surface without a network listener.
-- `async start_connection()` starts the bridge. On `RobotConnectionError` it logs and returns `False`. Otherwise it listens on `server.host` (the LAN IP when empty) at `server.port`; `address` then gives the `(host, port)` actually bound. The listener is the `websockets` `Server` object, held by the server and closed with it. Each accepted connection goes to `attach(connection)`, which is public: a host with its own transport can hand the server any connection-like object and get the same single-client policy.
+- `async start_connection()` starts the bridge. On `RobotConnectionError` it logs and returns `False`. Otherwise it listens on `server.host` (the LAN IP when empty) at `server.port`; `address` then gives the `(host, port)` actually bound. If the listener can't bind (port in use, an address that isn't this host's), it logs the error naming `host:port`, stops the bridge again and returns `False`: a `False` start leaves nothing running. The listener is the `websockets` `Server` object, held by the server and closed with it. Each accepted connection goes to `attach(connection)`, which is public: a host with its own transport can hand the server any connection-like object and get the same single-client policy.
 - `async stop_connection()` ends the client's session, closes the listener, then stops the bridge.
 - CLI: the `nao-websocket-server` console script (also `python -m nao_bridge.nao_websocket_server`) takes `--config path.json` only; without it the server runs on its default config. An invalid config exits 2 with the `ConfigError` message. It runs until Enter is pressed and exits 1 if the robot is unreachable. Ready-made files: `examples/configs/websocket-fake.json`, `websocket-real.json` (every stream on).
 
@@ -50,7 +50,7 @@ Every message, both directions, is `{"id": <string>, "data": <object>}`.
 
 | `id` | `data` |
 |---|---|
-| `NaoState` | `{connected, fakeRobot}` (`fakeRobot` is true on the `fake` backend) |
+| `NaoState` | `{protocolVersion, connected, fakeRobot}`: the first message of every session. `protocolVersion` is an integer (see "Protocol version"); `fakeRobot` is true on the `fake` backend |
 | `CommandEnded` | `{commandUuid, resultType: "Success"\|"Error", message, data}` — always all four keys (`data` is `null` when a command has no payload); `Success` has an empty `message`. An unknown `commandId`, a `commandData` missing a field, or a failed verb yields `Error` with the reason in `message`: a bridge error's own message (`BridgeError`, `ValueError`), or `error in command '<id>': <repr>` for anything else |
 | `Touch` | `{part, touched: bool}` |
 | `Joints` | `{jointsNames, jointsAngles}` (every `streams.joints.period_s`) |
@@ -78,7 +78,11 @@ Every message, both directions, is `{"id": <string>, "data": <object>}`.
 
 A verb that returns maps to `Success`, one that raises to `Error`; payloads use **camelCase** keys (unlike the MCP server's snake_case JSON).
 
+### Protocol version
+
+`NaoState.protocolVersion` is `PROTOCOL_VERSION`, a module constant, currently `1`. It is bumped on an **incompatible** change only: a message, command or field removed or renamed, or its meaning changed. Additions (a new command, a new message, a new field in an existing payload) keep the version, so a client must ignore message ids and fields it doesn't know. A client checks the version on `NaoState` and can refuse a server it wasn't written for. The tables above are the reference for the current version.
+
 ## Open questions
 
-1. **Protocol versioning / schema.** No version field and no published JSON schema (the README marks message docs as TODO); this table is now the reference.
+1. **JSON Schema.** The protocol has no machine-readable schema; the tables above are the reference. Deferred until a second client implementation (e.g. Unity/C#) needs one.
 2. **No auth.** Anyone on the LAN can drive the robot; acceptable for a local tool, revisit if exposed further.

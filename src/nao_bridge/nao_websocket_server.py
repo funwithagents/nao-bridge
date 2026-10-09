@@ -35,6 +35,7 @@ from .errors import BridgeError
 from .robot import RobotConnectionError
 
 __all__ = [
+    "PROTOCOL_VERSION",
     "ClientSession",
     "Connection",
     "NaoWebsocketServer",
@@ -43,6 +44,10 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+# Sent on NaoState; bumped on incompatible protocol changes only (specs/
+# nao-websocket-server.md "Protocol version").
+PROTOCOL_VERSION = 1
 
 # A command's ``commandData`` object.
 type CommandData = dict[str, Any]
@@ -221,6 +226,7 @@ class ClientSession:
         await self._send(
             "NaoState",
             {
+                "protocolVersion": PROTOCOL_VERSION,
                 "connected": self._bridge.running,
                 "fakeRobot": self._bridge.backend == "fake",
             },
@@ -373,9 +379,14 @@ class ClientSession:
 
 
 def _lan_ip() -> str:
-    """The address of the interface that routes out, via a UDP socket (no packet)."""
+    """The address of the interface that routes out, via a UDP socket (no packet);
+    ``127.0.0.1`` when there's no route out, so local clients can still connect."""
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect(("8.8.8.8", 80))
+        try:
+            s.connect(("8.8.8.8", 80))
+        except OSError as e:
+            logger.warning("No route out (%s); listening on 127.0.0.1 only", e)
+            return "127.0.0.1"
         return s.getsockname()[0]
 
 
@@ -407,7 +418,8 @@ class NaoWebsocketServer:
         return self._session
 
     async def start_connection(self) -> bool:
-        """Start the bridge and listen; ``False`` if the robot is unreachable."""
+        """Start the bridge and listen; ``False``, with nothing left running, if the
+        robot is unreachable or the listener can't bind."""
         logger.info("Starting nao connection")
         try:
             await self.nao_bridge.start()
@@ -416,7 +428,12 @@ class NaoWebsocketServer:
             return False
         settings = self.config.server
         host = settings.host or _lan_ip()
-        self._server = await websockets.serve(self.attach, host, settings.port)
+        try:
+            self._server = await websockets.serve(self.attach, host, settings.port)
+        except OSError as e:
+            logger.error("Could not listen on %s:%d: %s", host, settings.port, e)
+            await self.nao_bridge.stop()
+            return False
         logger.info("WebSocket server listening on %s:%d", *(self.address or (host, 0)))
         return True
 

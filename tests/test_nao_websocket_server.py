@@ -9,12 +9,15 @@ import asyncio
 import base64
 import json
 import logging
+import socket as socket_module
 from collections.abc import AsyncIterator, Callable, Sequence
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, Self
 
 import pytest
 import websockets
 
+from nao_bridge import nao_websocket_server
 from nao_bridge.bridge import NaoBridge
 from nao_bridge.config import (
     AudioStream,
@@ -32,6 +35,8 @@ from nao_bridge.nao_websocket_server import (
 )
 
 LOOPBACK = WebsocketServerSettings(host="127.0.0.1", port=0)
+# The version is part of the contract: bumping it should take a test change too.
+NAO_STATE = {"protocolVersion": 1, "connected": True, "fakeRobot": True}
 TOUCH_ONLY = NaoWebsocketServerConfig(
     bridge=NaoBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True))),
     server=LOOPBACK,
@@ -136,7 +141,7 @@ def session(
 
 def test_a_client_session_readies_then_rests_the_robot():
     socket, robot_calls = session([], answers=0)
-    assert socket.of("NaoState") == [{"connected": True, "fakeRobot": True}]
+    assert socket.of("NaoState") == [NAO_STATE]
     assert robot_calls[robot_calls.index("fade_eyes") :][:3] == [
         "fade_eyes",
         "wake_up",
@@ -343,7 +348,7 @@ def test_a_second_client_replaces_the_first_one_cleanly(
     # The first client is reset (rest) before the second is readied (wake_up).
     assert robot_calls.index("rest") < robot_calls.index("wake_up")
     assert robot_calls.count("rest") == 2
-    assert second.of("NaoState") == [{"connected": True, "fakeRobot": True}]
+    assert second.of("NaoState") == [NAO_STATE]
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
 
 
@@ -372,7 +377,7 @@ def test_the_listener_serves_a_real_websocket_client_on_the_configured_host():
 
     address, state, ended = asyncio.run(run())
     assert address is not None and address[0] == "127.0.0.1" and address[1] > 0
-    assert state == {"connected": True, "fakeRobot": True}
+    assert state == NAO_STATE
     assert (ended["commandUuid"], ended["resultType"]) == ("c1", "Success")
 
 
@@ -405,3 +410,65 @@ def test_an_unreachable_robot_is_reported_not_raised():
     server = NaoWebsocketServer(config)
     assert asyncio.run(server.start_connection()) is False
     assert server.address is None
+
+
+class _NoRouteSocket:
+    """A UDP socket whose ``connect`` fails, as with no network."""
+
+    def __init__(self, *args: object) -> None:
+        pass
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        pass
+
+    def connect(self, address: object) -> None:
+        raise OSError(51, "Network is unreachable")
+
+
+def test_with_no_route_out_an_empty_host_listens_on_loopback(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    # Only the server module's view of ``socket`` is offline; websockets binds as usual.
+    offline = SimpleNamespace(
+        socket=_NoRouteSocket,
+        AF_INET=socket_module.AF_INET,
+        SOCK_DGRAM=socket_module.SOCK_DGRAM,
+    )
+    monkeypatch.setattr(nao_websocket_server, "socket", offline)
+
+    async def run() -> tuple[str, int] | None:
+        server = NaoWebsocketServer(
+            NaoWebsocketServerConfig(server=WebsocketServerSettings(port=0))
+        )
+        assert await server.start_connection()
+        address = server.address
+        await server.stop_connection()
+        return address
+
+    with caplog.at_level(logging.WARNING, logger="nao_bridge.nao_websocket_server"):
+        address = asyncio.run(run())
+    assert address is not None and address[0] == "127.0.0.1"
+    assert any("listening on 127.0.0.1 only" in m for m in caplog.messages)
+
+
+def test_a_port_already_in_use_fails_the_start_and_stops_the_bridge(
+    caplog: pytest.LogCaptureFixture,
+):
+    with socket_module.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        port = taken.getsockname()[1]
+        server = NaoWebsocketServer(
+            NaoWebsocketServerConfig(
+                server=WebsocketServerSettings(host="127.0.0.1", port=port)
+            )
+        )
+        with caplog.at_level(logging.ERROR, logger="nao_bridge.nao_websocket_server"):
+            started = asyncio.run(server.start_connection())
+    assert started is False
+    assert server.address is None
+    assert not server.nao_bridge.running
+    assert any(f"Could not listen on 127.0.0.1:{port}" in m for m in caplog.messages)

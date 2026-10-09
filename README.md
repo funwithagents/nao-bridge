@@ -300,9 +300,9 @@ It provides access to all NaoBridge features through websocket messages in JSON 
   - if you don't have a Nao robot or if your current setup is not compatible with the available qi packages, you can run the server on the fake ⇒ all communication with the server will work but will just do nothing real
   - `uv run nao-websocket-server --config examples/configs/websocket-fake.json` (every stream on, the fake streams silent audio)
 
-The `server` block sets the WebSocket `host` (the address to bind; empty, the default, means the machine's LAN IP, `"0.0.0.0"` every interface) and `port` (default 8002; `0` lets the OS pick).
+The `server` block sets the WebSocket `host` (the address to bind; empty, the default, means the machine's LAN IP, or `127.0.0.1` when offline; `"0.0.0.0"` every interface) and `port` (default 8002; `0` lets the OS pick).
 
 ### Messages
 
 > [!NOTE]
-> The full protocol (envelope, commands and their data, streamed events) is described in [specs/nao-websocket-server.md](specs/nao-websocket-server.md).
+> The full protocol (envelope, commands and their data, streamed events) is described in [specs/nao-websocket-server.md](specs/nao-websocket-server.md). The first message of every session, `NaoState`, carries `protocolVersion` (currently `1`), bumped only on incompatible changes.
