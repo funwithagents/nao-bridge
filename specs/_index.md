@@ -2,6 +2,8 @@
 
 Nao Bridge connects AI agents to Aldebaran's Nao robot (and, in principle, any robot running Naoqi). Its core idea is a single high-level, async Python API — `NaoBridge` — that hides the Naoqi `qi` session and services behind intent-level actions (speak, change posture, dance, react expressively, run an installed app) and streams the robot's touch, joint and audio data back out. Two thin adapters expose that one API to different clients without duplicating logic: an MCP server for LLM agents (Claude Desktop, Tiny Agents) and a JSON WebSocket server for custom apps. The bridge sits on a robot seam with two backends, a real robot over `qi` or an offline fake, so the whole stack runs and is tested without hardware or the `qi` wheel.
 
+[_overview.md](_overview.md) is the map of the whole project: goals, scope, architecture, how a call flows, the cross-cutting rules, where each part stands, and the open questions collected from the specs. It is reference material without a status; the concept specs below are the authority on their details.
+
 ## Specs
 
 <!-- One row per concept spec. Keep the Status column in sync with each spec's `**Status:**` line. -->

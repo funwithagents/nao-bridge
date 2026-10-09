@@ -33,8 +33,8 @@ So the seam is a **first-party `NaoRobot` Protocol**, with two implementations:
 
 | Backend | Class | What it is |
 |---|---|---|
-| `real` (default) | `RealNaoRobot(ip, port=9559, *, connect_tries=10, connect_timeout_s=5.0)` | Translates each Protocol method into the Naoqi service call(s) |
-| `fake` | `FakeNaoRobot()` | Records every command, serves a fixed package list, simulates behavior runs and sensor events |
+| `real` | `RealNaoRobot(ip, port=9559, *, connect_tries=10, connect_timeout_s=5.0)` | Translates each Protocol method into the Naoqi service call(s) |
+| `fake` (default) | `FakeNaoRobot()` | Records every command, serves a fixed package list, simulates behavior runs and sensor events |
 
 Each lives in its own module: `robot.py` holds what they share (the Protocol, the callback types, `TOUCH_KEYS` / `AUDIO_SAMPLE_RATE` / `AUDIO_CHANNEL_CODES`, `RobotConnectionError`) and `build_robot`; `real_robot.py` holds `RealNaoRobot`; `fake_robot.py` holds `FakeNaoRobot` and its package list. `build_robot` imports the two lazily, since both import `robot.py`.
 
