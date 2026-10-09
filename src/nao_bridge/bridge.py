@@ -21,7 +21,13 @@ from types import MappingProxyType
 from typing import Any, Self
 
 from .config import Backend, NaoBridgeConfig
-from .errors import BridgeError, CommandFailedError, NotPlayingError, NotRunningError
+from .errors import (
+    BridgeError,
+    CommandFailedError,
+    MotorsOffError,
+    NotPlayingError,
+    NotRunningError,
+)
 from .events import Event
 from .microphone import MicFeed
 from .observable import Observable
@@ -383,6 +389,12 @@ class NaoBridge:
         except Exception as e:
             raise CommandFailedError(f"{verb} failed: {e or type(e).__name__}") from e
 
+    async def _require_awake(self, verb: str) -> None:
+        """``MotorsOffError`` unless the robot's motors are on. The robot is asked each
+        time: it can go to rest without the bridge (fall manager, chest button)."""
+        if not await self._act(verb, lambda r: r.is_awake()):
+            raise MotorsOffError(f"{verb}: the motors are off; call wake_up() first")
+
     async def set_tts_language(self, language: str) -> None:
         """Set the text-to-speech language (e.g. 'English', 'French')."""
         await self._act("set_tts_language", lambda r: r.set_language(language))
@@ -404,6 +416,7 @@ class NaoBridge:
         await self._act("rest", lambda r: r.rest())
 
     async def _go_to_posture(self, verb: str, posture: str) -> None:
+        await self._require_awake(verb)
         reached = await self._act(
             verb, lambda r: r.go_to_posture(posture, POSTURE_SPEED, POSTURE_MAX_TRIES)
         )
@@ -434,13 +447,21 @@ class NaoBridge:
         )
 
     async def set_breathing_enabled(self, enabled: bool, chain_name: str) -> None:
-        """Enable or disable breathing on a chain (e.g. 'Body')."""
+        """Enable or disable breathing on a chain (e.g. 'Body'); enabling it needs the
+        motors on."""
+        if enabled:
+            await self._require_awake("set_breathing_enabled")
         await self._act(
             "set_breathing_enabled", lambda r: r.set_breathing(chain_name, enabled)
         )
 
     async def run_behavior(self, behavior_name: str) -> None:
-        """Run an installed behavior; returns when it ends."""
+        """Run an installed behavior (motors on); returns when it ends."""
+        await self._require_awake("run_behavior")
+        await self._run_behavior(behavior_name)
+
+    async def _run_behavior(self, behavior_name: str) -> None:
+        """Run a behavior, tracked in ``current_behaviors`` until it ends."""
         self._running_behaviors.append(behavior_name)
         try:
             await self._act("run_behavior", lambda r: r.run_behavior(behavior_name))
@@ -466,13 +487,16 @@ class NaoBridge:
             raise ValueError(f"unknown {kind} '{item_id}' (known: {known})")
         return entry
 
-    async def _play(self, kind: str, item_id: str, behavior_name: str) -> None:
-        """Run ``behavior_name`` for the catalog item ``(kind, item_id)``, tracked as
-        playing until it ends."""
+    async def _play(
+        self, verb: str, kind: str, item_id: str, behavior_name: str
+    ) -> None:
+        """Run ``behavior_name`` for the catalog item ``(kind, item_id)`` (motors on),
+        tracked as playing until it ends."""
+        await self._require_awake(verb)
         key = (kind, item_id)
         self._running[key] = behavior_name
         try:
-            await self.run_behavior(behavior_name)
+            await self._run_behavior(behavior_name)
         finally:
             if self._running.get(key) == behavior_name:
                 del self._running[key]
@@ -523,7 +547,7 @@ class NaoBridge:
     async def dance(self, dance_id: str) -> None:
         """Run a dance from ``get_dance_behaviors``; returns when it ends."""
         dance = self._entry("dance", self._catalog.dances, dance_id)
-        await self._play("dance", dance_id, dance.behavior_name)
+        await self._play("dance", "dance", dance_id, dance.behavior_name)
 
     async def stop_dance(self, dance_id: str) -> None:
         await self._stop("dance", self._catalog.dances, dance_id)
@@ -539,7 +563,9 @@ class NaoBridge:
                 f"no behaviors installed for reaction type '{reaction_type}'"
             )
         behavior_name = random.choice(reactions).behavior_name
-        await self._play("reaction type", reaction_type, behavior_name)
+        await self._play(
+            "expressive_reaction", "reaction type", reaction_type, behavior_name
+        )
 
     async def stop_expressive_reaction(self, reaction_type: str) -> None:
         """Stop the reaction ``expressive_reaction`` is playing for ``reaction_type``."""
@@ -551,7 +577,9 @@ class NaoBridge:
     async def body_action(self, body_action_id: str) -> None:
         """Run a body action from ``get_body_action_behaviors``; returns when it ends."""
         action = self._entry("body action", self._catalog.body_actions, body_action_id)
-        await self._play("body action", body_action_id, action.behavior_name)
+        await self._play(
+            "body_action", "body action", body_action_id, action.behavior_name
+        )
 
     async def stop_body_action(self, body_action_id: str) -> None:
         await self._stop("body action", self._catalog.body_actions, body_action_id)
@@ -562,7 +590,7 @@ class NaoBridge:
     async def run_app(self, app_id: str) -> None:
         """Run an installed app from ``get_app_behaviors``; returns when it ends."""
         app = self._entry("app", self._catalog.apps, app_id)
-        await self._play("app", app_id, app.behavior_name)
+        await self._play("run_app", "app", app_id, app.behavior_name)
 
     async def stop_app(self, app_id: str) -> None:
         await self._stop("app", self._catalog.apps, app_id)

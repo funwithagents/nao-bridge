@@ -159,6 +159,9 @@ class RealNaoRobot:
     def rest(self) -> None:
         self._service("ALMotion").rest()
 
+    def is_awake(self) -> bool:
+        return bool(self._service("ALMotion").robotIsWakeUp())
+
     def go_to_posture(self, posture: str, speed: float, max_tries: int) -> bool:
         robot_posture = self._service("ALRobotPosture")
         robot_posture.setMaxTryNumber(max_tries)

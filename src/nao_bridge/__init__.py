@@ -11,7 +11,13 @@ from .config import (
     StreamSettings,
     TouchStream,
 )
-from .errors import BridgeError, CommandFailedError, NotPlayingError, NotRunningError
+from .errors import (
+    BridgeError,
+    CommandFailedError,
+    MotorsOffError,
+    NotPlayingError,
+    NotRunningError,
+)
 from .events import Event
 from .microphone import MicChunk
 from .observable import Observable
@@ -29,6 +35,7 @@ __all__ = [
     "JointsStream",
     "LocalizedString",
     "MicChunk",
+    "MotorsOffError",
     "NaoBridge",
     "NaoBridgeConfig",
     "NotPlayingError",

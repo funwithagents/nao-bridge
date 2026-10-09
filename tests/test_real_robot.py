@@ -197,6 +197,15 @@ def test_real_backend_close_forgets_its_subscriptions(stub_qi: type[_StubSession
     assert stub_qi.calls == []
 
 
+def test_real_backend_asks_motion_whether_the_robot_is_awake(
+    stub_qi: type[_StubSession],
+):
+    robot = RealNaoRobot("10.0.0.5")
+    robot.connect()
+    assert robot.is_awake() is True
+    assert stub_qi.calls == [("ALMotion", "robotIsWakeUp", ())]
+
+
 def test_real_backend_sets_posture_retries_before_moving(stub_qi: type[_StubSession]):
     robot = RealNaoRobot("10.0.0.5")
     robot.connect()

@@ -183,8 +183,14 @@ def test_a_failed_ritual_step_is_a_warning_and_the_session_goes_on(
         "log": "Session ritual step skipped: wake_up failed: motors too hot",
         "logLevel": "WARNING",
     } in socket.of("Log")
-    # The steps after the failed one still ran, on connect and on disconnect.
-    assert robot_calls.count("set_breathing") == 2
+    # The steps after the failed one still ran: breathing on, refused with the motors
+    # off, then the whole disconnect ritual.
+    assert {
+        "log": "Session ritual step skipped: set_breathing_enabled: the motors are "
+        "off; call wake_up() first",
+        "logLevel": "WARNING",
+    } in socket.of("Log")
+    assert robot_calls.count("set_breathing") == 1
     assert robot_calls[-3:] == ["rest", "unsubscribe_touch", "close"]
 
 

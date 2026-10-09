@@ -147,7 +147,7 @@ class FakeNaoRobot:
     """Offline ``NaoRobot``: records commands, serves a fixed package list.
 
     Tests reach it through ``bridge.robot`` to assert on ``commands``, tune
-    ``behavior_duration_s`` / ``posture_succeeds``, and fire sensor events with
+    ``behavior_duration_s`` / ``posture_succeeds`` / ``awake``, and fire sensor events with
     ``touch`` / ``emit_audio``. While audio is subscribed, a thread pushes a silent
     mono chunk every ``audio_chunk_s`` seconds, as Naoqi pushes its buffers; setting
     ``audio_chunk_s`` to ``None`` pauses it, so a test pushes only what it emits.
@@ -160,6 +160,7 @@ class FakeNaoRobot:
     def __init__(self) -> None:
         self.commands: list[tuple[str, dict[str, Any]]] = []
         self.connected = False
+        self.awake = False  # motors at rest, as a robot starts
         self.behavior_duration_s = self.DEFAULT_BEHAVIOR_DURATION_S
         self.posture_succeeds = True
         self.joint_names = ["HeadYaw", "HeadPitch"]
@@ -203,9 +204,14 @@ class FakeNaoRobot:
 
     def wake_up(self) -> None:
         self._record("wake_up")
+        self.awake = True
 
     def rest(self) -> None:
         self._record("rest")
+        self.awake = False
+
+    def is_awake(self) -> bool:
+        return self.awake
 
     def go_to_posture(self, posture: str, speed: float, max_tries: int) -> bool:
         self._record("go_to_posture", posture=posture, speed=speed, max_tries=max_tries)

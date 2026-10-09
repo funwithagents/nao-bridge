@@ -59,14 +59,21 @@ def test_action_tools_report_success_and_failure_with_its_reason():
     async def run() -> list[str]:
         server = NaoMcpServer()
         async with server.nao_bridge:
+            asleep = await call(server, "dance", dance_id="gangnam-style")
+            await call(server, "wake_up")
             return [
+                asleep,
                 await call(server, "say", text="Hello"),
                 await call(server, "dance", dance_id="gangnam-style"),
                 await call(server, "dance", dance_id="macarena"),
                 await call(server, "stop_app", app_id="follow-me"),
             ]
 
-    said, danced, unknown, idle = asyncio.run(run())
+    asleep, said, danced, unknown, idle = asyncio.run(run())
+    assert asleep == (
+        "Nao failed to dance the dance with id 'gangnam-style': "
+        "dance: the motors are off; call wake_up() first"
+    )
     assert said == "Nao said Hello"
     assert danced == "Nao has danced the dance with id 'gangnam-style'"
     # The model reads why, and the ids it can use instead.
@@ -92,6 +99,7 @@ def test_list_tools_return_json_the_model_can_feed_back():
         async with server.nao_bridge:
             dances = json.loads(await call(server, "get_dance_list"))
             reactions = json.loads(await call(server, "get_expressive_reaction_types"))
+            await call(server, "wake_up")
             actions = json.loads(await call(server, "get_body_actions_list"))
             # An id read from the list is accepted by the matching action tool.
             assert await call(

@@ -31,6 +31,7 @@ tests:
 Every action is `async`, returns `None` when it succeeded, and **raises** to say why it didn't, so a caller (an agent through a server, above all) can act on the reason. Blocking robot calls run in `asyncio.to_thread`. There's no special fake-mode branch: on `fake`, the `FakeNaoRobot` answers.
 
 - A verb on a bridge that isn't running raises `NotRunningError`, before anything else is checked.
+- **A verb that moves the body needs the motors on.** Before sending its command it asks the robot (`is_awake()`, [robot.md](robot.md)) and raises `MotorsOffError("<verb>: the motors are off; call wake_up() first")` when they're off. The robot is asked every time rather than the bridge tracking `wake_up()` / `rest()`, since the robot can go to rest without the bridge (fall manager, chest button, another client). The check guides the caller; it isn't a guarantee: if the motors go off between the check and the command, Naoqi's own failure arrives as `CommandFailedError`. It runs after the catalog lookup, so an unknown id is still a `ValueError`. The verbs that check: `stand_up`, `sit_down`, `set_breathing_enabled(True, …)`, `run_behavior`, and the catalog verbs `dance`, `expressive_reaction`, `body_action`, `run_app`. The others (`say`, the eyes, the TTS language, basic awareness, `set_breathing_enabled(False, …)`, `wake_up` / `rest` and every stop verb) don't.
 - A robot call that raises is re-raised as `CommandFailedError("<verb> failed: <reason>")`, chained to the Naoqi exception (`__cause__`). So is a posture the robot didn't reach (`go_to_posture` returning `False`).
 - Cancellation (`CancelledError`) passes through untouched.
 
@@ -84,6 +85,7 @@ Defined in `errors.py`, so the bridge's modules share them; `bridge.py` doesn't 
 | `BridgeError(RuntimeError)` | The base of the bridge's own errors. Raised as such for lifecycle and stream misuse: a double `start()`, a disabled stream's API. |
 | `NotRunningError(BridgeError)` | A verb, `robot` or `audio_input()` on a bridge that isn't running. |
 | `NotPlayingError(BridgeError)` | A catalog stop verb for an item that isn't playing. |
+| `MotorsOffError(BridgeError)` | A verb that moves the body while the motors are off (see "Action verb contract"). |
 | `CommandFailedError(BridgeError)` | The robot failed a verb: a Naoqi exception (chained), or a posture not reached. |
 | `ValueError` | Bad input: a catalog id or reaction type the catalog doesn't hold, or a reaction type with no behaviors installed. |
 
@@ -96,7 +98,7 @@ So `except (BridgeError, ValueError)` catches every expected verb failure, and t
 - the config classes (`NaoBridgeConfig`, `RobotSettings`, `StreamSettings`, `TouchStream`, `JointsStream`, `AudioStream`, `Backend`);
 - the stream values (`TouchEvent`, `TouchPart`, `JointsState`, `MicChunk`) and the `Event` / `Observable` types;
 - `BehaviorInfos`, `LocalizedString`;
-- the errors (`BridgeError`, `NotRunningError`, `NotPlayingError`, `CommandFailedError`, `ConfigError`, `RobotConnectionError`). Library modules only use `logging.getLogger(__name__)`; `logging.basicConfig` belongs to the CLIs.
+- the errors (`BridgeError`, `NotRunningError`, `NotPlayingError`, `MotorsOffError`, `CommandFailedError`, `ConfigError`, `RobotConnectionError`). Library modules only use `logging.getLogger(__name__)`; `logging.basicConfig` belongs to the CLIs.
 
 ## Open questions
 

@@ -59,6 +59,7 @@ Every method is **blocking** (the bridge calls them via `asyncio.to_thread`) and
 | `say(text)` | `ALAnimatedSpeech.say` (returns when spoken) |
 | `stop_speech()` | `ALTextToSpeech.stopAll` |
 | `wake_up()` / `rest()` | `ALMotion.wakeUp` / `rest` |
+| `is_awake() -> bool` | `ALMotion.robotIsWakeUp` (motors stiff; asked each time, since the robot can go to rest on its own: fall manager, chest button, another client) |
 | `go_to_posture(posture, speed, max_tries) -> bool` | `ALRobotPosture.setMaxTryNumber` + `goToPosture` |
 | `set_breathing(chain_name, enabled)` | `ALMotion.setBreathEnabled` |
 | `fade_eyes(color)` | `ALLeds.fadeRGB("FaceLeds", color, 0)` |
@@ -92,6 +93,7 @@ What the fake does is set by what the tests exercise:
 - **Recording:** each Protocol call appends `(method_name, {args})` to `commands`; `connected` mirrors `connect()`/`close()`.
 - **Package list:** `list_packages()` returns a fixed `packages2`-shaped list. The bridge classifies it with the same code it uses for a real robot. It yields 4 dances, 4 apps, 6 arm actions, and reactions for every type (`Happy`, `Proud`, `Laugh`, `Sad`, `HeadTouched`), plus a `Sit/` emotion that the classifier must ignore. Every package has an `en_US`/`fr_FR` name and an `en_US` description, and comes in one of two shapes: root packages (one behavior at `path == "."`, which takes the package's name and description, as dances and apps do) and sub-behavior packages (several behaviors at their own paths, as `animations`, `dialog_touch` and `dialog_move_arms` are).
 - **Behavior runs:** a behavior takes time, as on a robot. `run_behavior` blocks for `behavior_duration_s`, which defaults to `DEFAULT_BEHAVIOR_DURATION_S = 5.0` s, or until `stop_behavior(name)` (or `close()`) ends it. So on the fake, dances, body actions, apps and reactions can be seen running (`running_behaviors`, the bridge's `current_*` tracking) and stopped, and a long-running verb holds its caller, as it would on the robot. The fast tier makes them instant; [testing.md](testing.md) "Instant fake behaviors" explains how.
+- **Motors:** `is_awake()` returns `awake`, which starts `False` (a robot at rest) and which `wake_up()` / `rest()` set and clear. Like `list_packages()` and `get_joints()`, it's a read and isn't recorded in `commands`.
 - **Posture:** `go_to_posture` returns `posture_succeeds` (default `True`).
 - **Joints:** `get_joints()` returns fixed `joint_names` / `joint_angles`.
 - **Sensor events:** test helpers `touch(key, value)` and `emit_audio(channels, samples_per_channel, buffer)` call the subscribed callback the way Naoqi's threads would. With nothing subscribed they do nothing.

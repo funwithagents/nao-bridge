@@ -23,6 +23,7 @@ Implementation plans for Nao Bridge — each plan turns a settled part of a spec
 | [202610081850_config-defaults-and-errors.md](202610081850_config-defaults-and-errors.md) | Config defaults declared once on the dataclass; `ConfigError.key` instead of message-prefix key paths | Done |
 | [202610081855_bridge-mcp-and-robot-cleanups.md](202610081855_bridge-mcp-and-robot-cleanups.md) | One running-items tracker and read-only views in the bridge, tolerant package parsing, `TouchPart`; MCP `_status` helper; real backend audio guard and `close()` cleanup | Done |
 | [202610090919_verbs-raise-why-they-failed.md](202610090919_verbs-raise-why-they-failed.md) | `NaoBridge` verbs raise (`ValueError` naming the known ids, `NotRunningError`, `NotPlayingError`, `CommandFailedError` chained to Naoqi's error) instead of returning `bool`; the MCP result string and `CommandEnded.message` carry the reason | Done |
+| [202610090937_motors-off-error.md](202610090937_motors-off-error.md) | Verbs that move the body (postures, breathing on, behaviors, dances, reactions, body actions, apps) ask the robot `is_awake()` and raise `MotorsOffError` ("call wake_up() first") when the motors are off | Done |
 
 ## Status legend
 
