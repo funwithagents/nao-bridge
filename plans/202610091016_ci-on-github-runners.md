@@ -45,3 +45,5 @@ What the runner found that the Mac never had — one line per finding: the sympt
 ## Measurements
 
 Run `37904491769`, second attempt (warm caches, cache restored in both jobs): `check` 14 s, `fast-tier` 16 s (pytest 4.2 s, 139 passed), the run about 16 s end to end, both jobs side by side. The first, cold attempt took 14 s per job as well: the environment is small enough that the cache hardly matters.
+
+After the fake fix, run `37904872868` was green on five attempts in a row (both jobs 12 s on the last, pytest 3.5 s).
