@@ -1,5 +1,5 @@
-"""The fake backend (specs/robot.md): behavior runs, timed speech and postures, package
-list and sensor simulation.
+"""The fake backend (specs/robot.md): behavior runs, timed speech and postures, the
+joints of its posture, package list and sensor simulation.
 
 Async runs via ``asyncio.run``.
 """
@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 import pytest
 
-from nao_bridge.fake_robot import FakeNaoRobot
+from nao_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoRobot
 
 
 def test_fake_behavior_runs_until_stopped():
@@ -94,6 +94,47 @@ def test_fake_motors_start_off_and_follow_wake_up_and_rest():
     states.append(robot.is_awake())
     assert states == [False, True, False]
     assert [name for name, _ in robot.commands] == ["wake_up", "rest"]
+
+
+def test_fake_joints_follow_its_posture_and_wake_up_keeps_it():
+    robot = FakeNaoRobot()
+
+    def angles() -> tuple[float, ...]:
+        names, values = robot.get_joints()
+        assert tuple(names) == JOINT_NAMES
+        return tuple(values)
+
+    poses = [angles()]
+    robot.wake_up()
+    poses.append(angles())
+    robot.go_to_posture("Stand", 0.8, 3)
+    poses.append(angles())
+    robot.go_to_posture("Sit", 0.8, 3)
+    poses.append(angles())
+    robot.rest()
+    poses.append(angles())
+    crouch, stand, sit = (POSTURE_ANGLES[p] for p in ("Crouch", "Stand", "Sit"))
+    assert poses == [crouch, crouch, stand, sit, crouch]
+    assert len({crouch, stand, sit}) == 3
+
+
+def test_fake_posture_is_kept_by_a_failed_stopped_or_unknown_move():
+    robot = FakeNaoRobot()
+    robot.posture_succeeds = False
+    robot.go_to_posture("Stand", 0.8, 3)
+    failed = robot.posture
+    robot.posture_succeeds = True
+    robot.go_to_posture(
+        "LyingBack", 0.8, 3
+    )  # a Naoqi posture the fake has no angles for
+    unknown = robot.posture
+    robot.posture_duration_s = 5.0
+    runner = run_in_thread(
+        lambda: robot.go_to_posture("Stand", 0.8, 3), lambda: robot.moving_posture
+    )
+    robot.stop_posture()
+    runner.join(timeout=1.0)
+    assert (failed, unknown, robot.posture) == ("Crouch", "Crouch", "Crouch")
 
 
 def test_fake_close_ends_running_behaviors():

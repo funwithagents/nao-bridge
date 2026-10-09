@@ -26,7 +26,7 @@ from nao_bridge.config import (
     StreamSettings,
     TouchStream,
 )
-from nao_bridge.fake_robot import FakeNaoRobot
+from nao_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoRobot
 from nao_bridge.nao_websocket_server import (
     ClientSession,
     NaoWebsocketServer,
@@ -309,8 +309,8 @@ def test_joints_and_audio_stream_to_the_client_during_its_session():
     socket, late = asyncio.run(run())
     assert late == 0
     assert socket.of("Joints")[0] == {
-        "jointsNames": ["HeadYaw", "HeadPitch"],
-        "jointsAngles": [0.0, 0.1],
+        "jointsNames": list(JOINT_NAMES),
+        "jointsAngles": list(POSTURE_ANGLES["Crouch"]),
     }
     audio = socket.of("Audio")[-1]
     assert (audio["rate"], audio["channels"]) == (16000, 1)

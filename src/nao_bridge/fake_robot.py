@@ -2,7 +2,7 @@
 
 Specified by [specs/robot.md](../../specs/robot.md). It serves a fixed ``packages2``-shaped
 package list, simulates behavior runs, speech and posture moves that take time, and
-sensor events, and pushes silent audio.
+sensor events, reports the joints of the posture it's in, and pushes silent audio.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any
 from .config import AudioChannel
 from .robot import AUDIO_SAMPLE_RATE, AudioCallback, TouchCallback, TouchPart
 
-__all__ = ["FakeNaoRobot"]
+__all__ = ["JOINT_NAMES", "POSTURE_ANGLES", "REST_POSTURE", "FakeNaoRobot"]
 
 
 def _root_package(
@@ -143,14 +143,57 @@ _FAKE_PACKAGES: list[dict[str, Any]] = [
     ),
 ]
 
+# The postures the fake can be in, as joint angles (radians), one row per joint in
+# Naoqi's ``getBodyNames("Body")`` order. Measured on a simulated Nao (nao-sim):
+# each posture reached with ``ALRobotPosture``, then read with ``get_joints()``.
+_POSTURE_TABLE: list[tuple[str, float, float, float]] = [
+    # joint, Crouch, Stand, Sit
+    ("HeadYaw", 0.00, 0.00, -0.03),
+    ("HeadPitch", 0.10, -0.17, -0.04),
+    ("LShoulderPitch", 1.41, 1.47, 0.88),
+    ("LShoulderRoll", 0.19, 0.18, 0.25),
+    ("LElbowYaw", -0.80, -1.19, -0.45),
+    ("LElbowRoll", -1.06, -0.42, -1.21),
+    ("LWristYaw", 0.15, 0.10, 0.04),
+    ("LHand", 0.00, 0.30, 0.30),
+    ("LHipYawPitch", -0.25, -0.17, -0.62),
+    ("LHipRoll", -0.08, 0.10, 0.28),
+    ("LHipPitch", -0.70, 0.13, -1.54),
+    ("LKneePitch", 2.11, -0.09, 1.40),
+    ("LAnklePitch", -1.18, 0.09, 0.84),
+    ("LAnkleRoll", 0.08, -0.13, -0.01),
+    ("RHipYawPitch", -0.25, -0.17, -0.62),
+    ("RHipRoll", 0.08, -0.10, -0.27),
+    ("RHipPitch", -0.70, 0.13, -1.54),
+    ("RKneePitch", 2.11, -0.09, 1.41),
+    ("RAnklePitch", -1.18, 0.09, 0.85),
+    ("RAnkleRoll", -0.08, 0.13, 0.02),
+    ("RShoulderPitch", 1.41, 1.47, 0.94),
+    ("RShoulderRoll", -0.19, -0.18, -0.29),
+    ("RElbowYaw", 0.80, 1.19, 0.51),
+    ("RElbowRoll", 1.06, 0.42, 1.25),
+    ("RWristYaw", -0.15, 0.10, -0.03),
+    ("RHand", 0.00, 0.30, 0.30),
+]
+JOINT_NAMES = tuple(row[0] for row in _POSTURE_TABLE)
+POSTURE_ANGLES: dict[str, tuple[float, ...]] = {
+    "Crouch": tuple(crouch for _, crouch, _, _ in _POSTURE_TABLE),
+    "Stand": tuple(stand for _, _, stand, _ in _POSTURE_TABLE),
+    "Sit": tuple(sit for _, _, _, sit in _POSTURE_TABLE),
+}
+# Where a robot is when it starts and after rest(): Naoqi's rest posture on a Nao.
+REST_POSTURE = "Crouch"
+
 
 class FakeNaoRobot:
     """Offline ``NaoRobot``: records commands, serves a fixed package list.
 
     Tests reach it through ``bridge.robot`` to assert on ``commands``, tune
     ``behavior_duration_s`` / ``speech_duration_s`` / ``posture_duration_s`` /
-    ``posture_succeeds`` / ``awake``, and fire sensor events with
-    ``touch`` / ``emit_audio``. While audio is subscribed, a thread pushes a silent
+    ``posture_succeeds`` / ``awake`` / ``posture``, and fire sensor events with
+    ``touch`` / ``emit_audio``. ``get_joints()`` reports the angles of ``posture``,
+    which starts at ``REST_POSTURE`` and follows ``rest()`` and completed
+    ``go_to_posture`` moves; ``wake_up()`` keeps it, as on a Nao. While audio is subscribed, a thread pushes a silent
     mono chunk every ``audio_chunk_s`` seconds, as Naoqi pushes its buffers; setting
     ``audio_chunk_s`` to ``None`` pauses it, so a test pushes only what it emits.
     """
@@ -170,8 +213,7 @@ class FakeNaoRobot:
         self.speech_duration_s = self.DEFAULT_SPEECH_DURATION_S
         self.posture_duration_s = self.DEFAULT_POSTURE_DURATION_S
         self.posture_succeeds = True
-        self.joint_names = ["HeadYaw", "HeadPitch"]
-        self.joint_angles = [0.0, 0.1]
+        self.posture = REST_POSTURE
         self._running: dict[str, threading.Event] = {}
         self._speeches: set[threading.Event] = set()
         self._posture_moves: set[threading.Event] = set()
@@ -187,13 +229,14 @@ class FakeNaoRobot:
 
     def _wait_unless_ended(
         self, pending: set[threading.Event], duration: float
-    ) -> None:
-        """Block for ``duration`` s, or until ``_end_all(pending)`` ends the wait."""
+    ) -> bool:
+        """Block for ``duration`` s, or until ``_end_all(pending)`` ends the wait;
+        ``True`` when it was ended early."""
         ended = threading.Event()
         with self._lock:
             pending.add(ended)
         try:
-            ended.wait(duration)
+            return ended.wait(duration)
         finally:
             with self._lock:
                 pending.discard(ended)
@@ -254,13 +297,16 @@ class FakeNaoRobot:
     def rest(self) -> None:
         self._record("rest")
         self.awake = False
+        self.posture = REST_POSTURE
 
     def is_awake(self) -> bool:
         return self.awake
 
     def go_to_posture(self, posture: str, speed: float, max_tries: int) -> bool:
         self._record("go_to_posture", posture=posture, speed=speed, max_tries=max_tries)
-        self._wait_unless_ended(self._posture_moves, self.posture_duration_s)
+        stopped = self._wait_unless_ended(self._posture_moves, self.posture_duration_s)
+        if self.posture_succeeds and not stopped and posture in POSTURE_ANGLES:
+            self.posture = posture
         return self.posture_succeeds
 
     def stop_posture(self) -> None:
@@ -306,7 +352,7 @@ class FakeNaoRobot:
             stop.set()
 
     def get_joints(self) -> tuple[list[str], list[float]]:
-        return list(self.joint_names), list(self.joint_angles)
+        return list(JOINT_NAMES), list(POSTURE_ANGLES[self.posture])
 
     def subscribe_touch(self, callback: TouchCallback) -> None:
         self._record("subscribe_touch")

@@ -27,7 +27,7 @@ from nao_bridge.config import (
     StreamSettings,
     TouchStream,
 )
-from nao_bridge.fake_robot import FakeNaoRobot
+from nao_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoRobot
 
 ALL_STREAMS = NaoBridgeConfig(
     streams=StreamSettings(
@@ -837,7 +837,31 @@ def test_joints_are_published_while_running_and_reset_at_stop():
     before, sample, after = asyncio.run(run())
     assert before is None and after is None
     assert sample is not None
-    assert (sample.names, sample.angles) == (("HeadYaw", "HeadPitch"), (0.0, 0.1))
+    # a fake starts at rest, crouched
+    assert (sample.names, sample.angles) == (JOINT_NAMES, POSTURE_ANGLES["Crouch"])
+
+
+def test_joints_follow_the_posture_verbs():
+    crouch, stand, sit = (POSTURE_ANGLES[p] for p in ("Crouch", "Stand", "Sit"))
+
+    async def run() -> None:
+        async with NaoBridge(ALL_STREAMS) as bridge:
+            steps = [
+                (bridge.wake_up, crouch),  # waking keeps the rest posture
+                (bridge.stand_up, stand),
+                (bridge.sit_down, sit),
+                (bridge.rest, crouch),
+            ]
+            for verb, expected in steps:
+                await verb()
+                await asyncio.wait_for(
+                    bridge.joints.wait_for(
+                        lambda s, e=expected: s is not None and s.angles == e
+                    ),
+                    1.0,
+                )
+
+    asyncio.run(run())  # a pose that never shows up times out
 
 
 def test_audio_input_streams_the_robot_microphone_to_several_subscribers():

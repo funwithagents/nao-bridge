@@ -29,6 +29,7 @@ Implementation plans for Nao Bridge — each plan turns a settled part of a spec
 | [202610091016_ci-on-github-runners.md](202610091016_ci-on-github-runners.md) | `.github/workflows/ci.yml`: `check` and `fast-tier` side by side on GitHub's Linux runners for every pull request and push to `main`; the project's first Linux run | Done |
 | [202610091714_cancellable-verbs.md](202610091714_cancellable-verbs.md) | Every verb cancellable: a cancelled `say` / posture / behavior / catalog verb sends its stop (re-sent if Naoqi hadn't started yet, owned past a second cancel) and waits for the robot call to end before re-raising; tracking honest until then; `stop_posture` on the seam; timed, stoppable fake speech and postures; cancel-safe `start()` / `stop()` | Done |
 | [202610091738_live-tier-coverage.md](202610091738_live-tier-coverage.md) | Live tier in three opt-in levels (safe `NAO_IP`, motion `NAO_ALLOW_MOTION`, interactive `NAO_INTERACTIVE`): verbs, streams, cancellation with measured latencies, both servers against a real Nao; not yet run on a robot | Done |
+| [202610091900_fake-joints-follow-its-posture.md](202610091900_fake-joints-follow-its-posture.md) | The fake reports all 26 `Body` joints at the angles of its posture (`Crouch` at rest, `Stand`, `Sit`), following `rest()` and `go_to_posture`; angles measured on a simulated Nao | Done |
 
 ## Status legend
 
