@@ -10,34 +10,34 @@ Where things live. This is a coarse, module-level map — for the full file inve
 
 | Path | What's there |
 |---|---|
-| `src/nao_bridge/` | The library itself — one module per core concept (see below) |
+| `src/naoqi_bridge/` | The library itself — one module per core concept (see below) |
 | `specs/` | Pre-implementation design docs, one per concept, each with a `**Status:**` — indexed by [specs/_index.md](specs/_index.md) |
 | `plans/` | Implementation plans turning settled specs into buildable steps — indexed by [plans/_index.md](plans/_index.md) |
-| `tests/` | Fast, deterministic, no-network tests; mirrors the `src/nao_bridge/` module structure |
+| `tests/` | Fast, deterministic, no-network tests; mirrors the `src/naoqi_bridge/` module structure |
 | `tests-e2e/` | Opt-in live tests that call real external services (not collected by default `pytest`) |
 | `.github/workflows/` | The CI workflow: lint, format, types and the fast tier on every pull request and push to `main` — [ci.md](specs/ci.md) |
 | `examples/configs/` | Ready-to-use server config files (fake and real, MCP and WebSocket), kept in sync with [config.md](specs/config.md) |
 
-### `src/nao_bridge/` modules
+### `src/naoqi_bridge/` modules
 
 <!-- One row per concept module. Keep this in sync with the code (a test enforces it). -->
 
 | Module | Role | Spec |
 |---|---|---|
-| [`src/nao_bridge/__init__.py`](src/nao_bridge/__init__.py) | Front door: re-exports what a caller needs — `NaoBridge`, the config classes, the stream values (`TouchEvent`, `JointsState`, `MicChunk`), `Event` / `Observable`, the errors | [bridge.md](specs/bridge.md) |
-| [`src/nao_bridge/config.py`](src/nao_bridge/config.py) | `NaoBridgeConfig` (backend, robot, streams), the `from_dict` / `from_json` / `from_json_file` loaders, `ConfigError`, field readers reused by server configs | [config.md](specs/config.md) |
-| [`src/nao_bridge/errors.py`](src/nao_bridge/errors.py) | `BridgeError`, shared by the bridge's modules | [bridge.md](specs/bridge.md) |
-| [`src/nao_bridge/events.py`](src/nao_bridge/events.py) | `Event[T]`: synchronous pub/sub primitive (`bridge.on_touch`) | [events.md](specs/events.md) |
-| [`src/nao_bridge/observable.py`](src/nao_bridge/observable.py) | `Observable[T]`: readable, subscribable state (`bridge.joints`) | [observable.md](specs/observable.md) |
-| [`src/nao_bridge/microphone.py`](src/nao_bridge/microphone.py) | `MicFeed` / `MicChunk`: the one subscription to Naoqi's pushed audio, a ring, any number of `audio_input()` subscribers | [microphone.md](specs/microphone.md) |
-| [`src/nao_bridge/robot.py`](src/nao_bridge/robot.py) | Connection seam: the `NaoRobot` Protocol, the types/constants both backends share, `RobotConnectionError`, `build_robot(config)` | [robot.md](specs/robot.md) |
-| [`src/nao_bridge/real_robot.py`](src/nao_bridge/real_robot.py) | `RealNaoRobot`: the `real` backend, over a `qi` session (lazy import) | [robot.md](specs/robot.md) |
-| [`src/nao_bridge/fake_robot.py`](src/nao_bridge/fake_robot.py) | `FakeNaoRobot`: the `fake` backend — records commands, fixed package list, simulated behavior runs and sensor events | [robot.md](specs/robot.md) |
-| [`src/nao_bridge/bridge.py`](src/nao_bridge/bridge.py) | `NaoBridge`: built from a `NaoBridgeConfig`; `start()`/`stop()` lifecycle, intent-level verbs, behavior catalog, stream APIs (`on_touch`, `joints`, `mic` / `audio_input()`) over the robot seam | [bridge.md](specs/bridge.md) |
-| [`src/nao_bridge/nao_mcp_server.py`](src/nao_bridge/nao_mcp_server.py) | `NaoMcpServer` + `NaoMcpServerConfig`: exposes `NaoBridge` actions as MCP tools for LLM agents (`--config`) | [nao-mcp-server.md](specs/nao-mcp-server.md) |
-| [`src/nao_bridge/nao_websocket_server.py`](src/nao_bridge/nao_websocket_server.py) | `NaoWebsocketServer` (bridge + listener, one client at a time) + `ClientSession` (the JSON protocol over one connection: commands in, touch/joints/audio/log events out) + `NaoWebsocketServerConfig` (`--config`) | [nao-websocket-server.md](specs/nao-websocket-server.md) |
+| [`src/naoqi_bridge/__init__.py`](src/naoqi_bridge/__init__.py) | Front door: re-exports what a caller needs — `NaoqiBridge`, the config classes, the stream values (`TouchEvent`, `JointsState`, `MicChunk`), `Event` / `Observable`, the errors | [bridge.md](specs/bridge.md) |
+| [`src/naoqi_bridge/config.py`](src/naoqi_bridge/config.py) | `NaoqiBridgeConfig` (backend, robot, streams), the `from_dict` / `from_json` / `from_json_file` loaders, `ConfigError`, field readers reused by server configs | [config.md](specs/config.md) |
+| [`src/naoqi_bridge/errors.py`](src/naoqi_bridge/errors.py) | `BridgeError`, shared by the bridge's modules | [bridge.md](specs/bridge.md) |
+| [`src/naoqi_bridge/events.py`](src/naoqi_bridge/events.py) | `Event[T]`: synchronous pub/sub primitive (`bridge.on_touch`) | [events.md](specs/events.md) |
+| [`src/naoqi_bridge/observable.py`](src/naoqi_bridge/observable.py) | `Observable[T]`: readable, subscribable state (`bridge.joints`) | [observable.md](specs/observable.md) |
+| [`src/naoqi_bridge/microphone.py`](src/naoqi_bridge/microphone.py) | `MicFeed` / `MicChunk`: the one subscription to Naoqi's pushed audio, a ring, any number of `audio_input()` subscribers | [microphone.md](specs/microphone.md) |
+| [`src/naoqi_bridge/robot.py`](src/naoqi_bridge/robot.py) | Connection seam: the `NaoRobot` Protocol, the types/constants both backends share, `RobotConnectionError`, `build_robot(config)` | [robot.md](specs/robot.md) |
+| [`src/naoqi_bridge/real_robot.py`](src/naoqi_bridge/real_robot.py) | `RealNaoRobot`: the `real` backend, over a `qi` session (lazy import) | [robot.md](specs/robot.md) |
+| [`src/naoqi_bridge/fake_robot.py`](src/naoqi_bridge/fake_robot.py) | `FakeNaoRobot`: the `fake` backend — records commands, fixed package list, simulated behavior runs and sensor events | [robot.md](specs/robot.md) |
+| [`src/naoqi_bridge/bridge.py`](src/naoqi_bridge/bridge.py) | `NaoqiBridge`: built from a `NaoqiBridgeConfig`; `start()`/`stop()` lifecycle, intent-level verbs, behavior catalog, stream APIs (`on_touch`, `joints`, `mic` / `audio_input()`) over the robot seam | [bridge.md](specs/bridge.md) |
+| [`src/naoqi_bridge/naoqi_mcp_server.py`](src/naoqi_bridge/naoqi_mcp_server.py) | `NaoqiMcpServer` + `NaoqiMcpServerConfig`: exposes `NaoqiBridge` actions as MCP tools for LLM agents (`--config`) | [naoqi-mcp-server.md](specs/naoqi-mcp-server.md) |
+| [`src/naoqi_bridge/naoqi_websocket_server.py`](src/naoqi_bridge/naoqi_websocket_server.py) | `NaoqiWebsocketServer` (bridge + listener, one client at a time) + `ClientSession` (the JSON protocol over one connection: commands in, touch/joints/audio/log events out) + `NaoqiWebsocketServerConfig` (`--config`) | [naoqi-websocket-server.md](specs/naoqi-websocket-server.md) |
 
-**Keep this map current:** when you add, rename, or remove a top-level `src/nao_bridge/` module or a root directory, update the map in the same change — same discipline as keeping spec/plan statuses honest (below). A test (`tests/test_project_map.py`) enforces that every `src/nao_bridge/*.py` module appears here and vice-versa — and that the spec frontmatter (see below) stays honest too.
+**Keep this map current:** when you add, rename, or remove a top-level `src/naoqi_bridge/` module or a root directory, update the map in the same change — same discipline as keeping spec/plan statuses honest (below). A test (`tests/test_project_map.py`) enforces that every `src/naoqi_bridge/*.py` module appears here and vice-versa — and that the spec frontmatter (see below) stays honest too.
 
 ## Keeping statuses current
 
@@ -58,7 +58,7 @@ Every spec opens with a YAML frontmatter block naming the code and tests it gove
 ```
 ---
 code:
-  - src/nao_bridge/<module>.py
+  - src/naoqi_bridge/<module>.py
 tests:
   - tests/test_<module>.py
 ---
@@ -68,7 +68,7 @@ This is the **spec → code/tests** mapping — the inverse of the module → sp
 
 The mapping is **many-to-many**: a file can be governed by several specs, so the same path legitimately appears in more than one spec's frontmatter.
 
-**Keep it current** (same discipline as statuses): when you move, rename, or delete a file a spec governs — or add a new `src/nao_bridge/` module — update the affected spec's `code:`/`tests:` in the same change. `tests/test_project_map.py` enforces three invariants: every listed path exists, every spec declares a non-empty `code:` list, and every concept module in `src/nao_bridge/` is named by at least one spec (`__init__.py` is exempt as package glue).
+**Keep it current** (same discipline as statuses): when you move, rename, or delete a file a spec governs — or add a new `src/naoqi_bridge/` module — update the affected spec's `code:`/`tests:` in the same change. `tests/test_project_map.py` enforces three invariants: every listed path exists, every spec declares a non-empty `code:` list, and every concept module in `src/naoqi_bridge/` is named by at least one spec (`__init__.py` is exempt as package glue).
 
 ## Testing
 

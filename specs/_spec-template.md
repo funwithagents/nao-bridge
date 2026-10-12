@@ -1,6 +1,6 @@
 ---
 code:
-  - src/nao_bridge/example.py
+  - src/naoqi_bridge/example.py
 tests:
   - tests/test_example.py
 ---

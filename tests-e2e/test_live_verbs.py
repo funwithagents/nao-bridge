@@ -10,7 +10,7 @@ import time
 import pytest
 from support import live_config, live_session
 
-from nao_bridge import CommandFailedError, MotorsOffError
+from naoqi_bridge import CommandFailedError, MotorsOffError
 
 pytest.importorskip("qi")
 

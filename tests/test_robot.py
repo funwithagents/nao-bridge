@@ -1,14 +1,14 @@
 """Backend selection in the robot seam (specs/robot.md)."""
 
-from nao_bridge.config import NaoBridgeConfig, RobotSettings
-from nao_bridge.fake_robot import FakeNaoRobot
-from nao_bridge.real_robot import RealNaoRobot
-from nao_bridge.robot import build_robot
+from naoqi_bridge.config import NaoqiBridgeConfig, RobotSettings
+from naoqi_bridge.fake_robot import FakeNaoRobot
+from naoqi_bridge.real_robot import RealNaoRobot
+from naoqi_bridge.robot import build_robot
 
 
 def test_build_robot_follows_the_config():
-    assert isinstance(build_robot(NaoBridgeConfig()), FakeNaoRobot)
-    config = NaoBridgeConfig(
+    assert isinstance(build_robot(NaoqiBridgeConfig()), FakeNaoRobot)
+    config = NaoqiBridgeConfig(
         backend="real",
         robot=RobotSettings(
             ip="10.0.0.5", port=9600, connect_tries=3, connect_timeout_s=2.5
@@ -25,5 +25,5 @@ def test_build_robot_follows_the_config():
 
 
 def test_fake_ignores_the_robot_block():
-    config = NaoBridgeConfig(backend="fake", robot=RobotSettings(ip="10.0.0.5"))
+    config = NaoqiBridgeConfig(backend="fake", robot=RobotSettings(ip="10.0.0.5"))
     assert isinstance(build_robot(config), FakeNaoRobot)

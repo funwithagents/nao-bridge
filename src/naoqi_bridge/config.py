@@ -1,4 +1,4 @@
-"""Bridge configuration: ``NaoBridgeConfig`` and its blocks (specs/config.md).
+"""Bridge configuration: ``NaoqiBridgeConfig`` and its blocks (specs/config.md).
 
 One declarative description of which robot to drive and what to stream from it, built
 in code or loaded with the ``from_dict`` / ``from_json`` / ``from_json_file`` trio.
@@ -8,7 +8,7 @@ its own ranges on construction; the loaders also check shape, types and unknown 
 A default is declared once, on the dataclass field: ``parse_block`` reads only the
 keys present in the JSON and lets the dataclass apply its defaults for the rest. The
 value readers (``as_*``), ``parse_block`` and the ``JsonConfig`` base are public so
-configs that wrap a ``NaoBridgeConfig`` (the servers') validate the same way. This
+configs that wrap a ``NaoqiBridgeConfig`` (the servers') validate the same way. This
 module imports neither ``qi`` nor ``mcp`` nor ``websockets``.
 """
 
@@ -30,7 +30,7 @@ __all__ = [
     "ConfigError",
     "JointsStream",
     "JsonConfig",
-    "NaoBridgeConfig",
+    "NaoqiBridgeConfig",
     "Reader",
     "RobotSettings",
     "StreamSettings",
@@ -284,7 +284,7 @@ class StreamSettings(JsonConfig):
 
 
 @dataclass(frozen=True)
-class NaoBridgeConfig(JsonConfig):
+class NaoqiBridgeConfig(JsonConfig):
     """Which robot and what to stream (specs/config.md). Defaults to the offline fake."""
 
     backend: Backend = "fake"

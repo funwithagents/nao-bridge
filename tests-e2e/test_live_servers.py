@@ -19,10 +19,10 @@ from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
 from support import live_config, require_flag
 
-from nao_bridge import AudioStream, JointsStream, StreamSettings, TouchStream
-from nao_bridge.nao_websocket_server import (
-    NaoWebsocketServer,
-    NaoWebsocketServerConfig,
+from naoqi_bridge import AudioStream, JointsStream, StreamSettings, TouchStream
+from naoqi_bridge.naoqi_websocket_server import (
+    NaoqiWebsocketServer,
+    NaoqiWebsocketServerConfig,
     WebsocketServerSettings,
 )
 
@@ -50,7 +50,7 @@ def test_the_mcp_server_drives_the_robot_over_stdio(tmp_path: Path):
     )
     server = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "nao_bridge.nao_mcp_server", "--config", str(path)],
+        args=["-m", "naoqi_bridge.naoqi_mcp_server", "--config", str(path)],
     )
 
     async def run() -> tuple[set[str], list[Any], str]:
@@ -73,7 +73,7 @@ def test_the_mcp_server_drives_the_robot_over_stdio(tmp_path: Path):
 
 def test_the_websocket_server_streams_the_robot_to_its_client():
     require_flag("NAO_ALLOW_MOTION")
-    config = NaoWebsocketServerConfig(
+    config = NaoqiWebsocketServerConfig(
         bridge=live_config(
             StreamSettings(
                 touch=TouchStream(enabled=True),
@@ -85,7 +85,7 @@ def test_the_websocket_server_streams_the_robot_to_its_client():
     )
 
     async def run() -> tuple[dict[str, Any], set[str], list[str]]:
-        server = NaoWebsocketServer(config)
+        server = NaoqiWebsocketServer(config)
         assert await server.start_connection()
         try:
             address = server.address

@@ -1,7 +1,7 @@
 """The ``real`` backend: ``NaoRobot`` over a ``qi`` session to a Nao.
 
 Specified by [specs/robot.md](../../specs/robot.md). ``qi`` is imported lazily on
-``connect()``, so this module (and ``nao_bridge``) imports where ``qi`` isn't installed.
+``connect()``, so this module (and ``naoqi_bridge``) imports where ``qi`` isn't installed.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ class _AudioSink:
 class RealNaoRobot:
     """``NaoRobot`` over a ``qi`` session to a real (or Choregraphe-simulated) robot."""
 
-    AUDIO_SERVICE_NAME = "NaoBridgeAudio"
+    AUDIO_SERVICE_NAME = "NaoqiBridgeAudio"
 
     def __init__(
         self,
@@ -76,7 +76,7 @@ class RealNaoRobot:
             qi = importlib.import_module("qi")
         except ImportError as e:
             raise RobotConnectionError(
-                "the real backend needs the `qi` package, which nao-bridge installs on "
+                "the real backend needs the `qi` package, which naoqi-bridge installs on "
                 "macOS arm64 and Linux x86_64 with CPython 3.12 / 3.13 (run `uv sync`); "
                 "there is no qi wheel for other platforms, which run the fake backend only"
             ) from e

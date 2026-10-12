@@ -1,7 +1,7 @@
 """Nao MCP Server Module.
 
-Exposes NaoBridge actions as MCP tools for LLM agents (specs/nao-mcp-server.md),
-built from a ``NaoMcpServerConfig``: the bridge's config plus the server's own.
+Exposes NaoqiBridge actions as MCP tools for LLM agents (specs/naoqi-mcp-server.md),
+built from a ``NaoqiMcpServerConfig``: the bridge's config plus the server's own.
 """
 
 import argparse
@@ -17,8 +17,8 @@ from typing import Any, Literal, Self
 
 from mcp.server.fastmcp import FastMCP
 
-from .bridge import NaoBridge
-from .config import ConfigError, JsonConfig, NaoBridgeConfig, as_choice, parse_block
+from .bridge import NaoqiBridge
+from .config import ConfigError, JsonConfig, NaoqiBridgeConfig, as_choice, parse_block
 from .errors import BridgeError
 from .robot import RobotConnectionError
 
@@ -43,10 +43,10 @@ class McpServerSettings(JsonConfig):
 
 
 @dataclass(frozen=True)
-class NaoMcpServerConfig(JsonConfig):
-    """``{"bridge": NaoBridgeConfig, "server": McpServerSettings}``; both optional."""
+class NaoqiMcpServerConfig(JsonConfig):
+    """``{"bridge": NaoqiBridgeConfig, "server": McpServerSettings}``; both optional."""
 
-    bridge: NaoBridgeConfig = field(default_factory=NaoBridgeConfig)
+    bridge: NaoqiBridgeConfig = field(default_factory=NaoqiBridgeConfig)
     server: McpServerSettings = field(default_factory=McpServerSettings)
 
     @classmethod
@@ -55,7 +55,7 @@ class NaoMcpServerConfig(JsonConfig):
             cls,
             data,
             path,
-            bridge=NaoBridgeConfig.parse,
+            bridge=NaoqiBridgeConfig.parse,
             server=McpServerSettings.parse,
         )
 
@@ -91,7 +91,7 @@ def stdout_reserved_for_protocol() -> Iterator[None]:
 
 async def _attempt(action: Awaitable[None], success: str, failure: str) -> str:
     """Await a bridge verb; the tool's result is the status line the model reads, with
-    the reason when the verb failed (specs/nao-mcp-server.md "Failure reporting")."""
+    the reason when the verb failed (specs/naoqi-mcp-server.md "Failure reporting")."""
     try:
         await action
     except (BridgeError, ValueError) as e:
@@ -110,13 +110,13 @@ def _log_run_failure(failure: str, task: asyncio.Task[None]) -> None:
         logger.error("%s", failure, exc_info=error)
 
 
-class NaoMcpServer:
-    """``NaoBridge`` as MCP tools: one FastMCP server over one bridge session."""
+class NaoqiMcpServer:
+    """``NaoqiBridge`` as MCP tools: one FastMCP server over one bridge session."""
 
-    def __init__(self, config: NaoMcpServerConfig | None = None) -> None:
+    def __init__(self, config: NaoqiMcpServerConfig | None = None) -> None:
         """Build the server and its bridge from ``config`` (default: the fake robot)."""
-        self.config = config or NaoMcpServerConfig()
-        self.nao_bridge = NaoBridge(self.config.bridge)
+        self.config = config or NaoqiMcpServerConfig()
+        self.naoqi_bridge = NaoqiBridge(self.config.bridge)
         self.mcp = FastMCP("Nao")
         # Behaviors started by a tool, still running (strong references).
         self._runs: set[asyncio.Task[None]] = set()
@@ -158,7 +158,7 @@ class NaoMcpServer:
             await self._serve(self.mcp.run_stdio_async)
 
     async def _serve(self, transport: Callable[[], Awaitable[None]]) -> None:
-        async with self.nao_bridge:
+        async with self.naoqi_bridge:
             try:
                 await transport()
             finally:
@@ -180,7 +180,7 @@ class NaoMcpServer:
         failure: str,
     ) -> str:
         """Run a long bridge verb in a task of its own, as the WebSocket server does,
-        and return once it is ``playing()`` or has ended (specs/nao-mcp-server.md
+        and return once it is ``playing()`` or has ended (specs/naoqi-mcp-server.md
         "Behaviors return once started"): the model learns why it couldn't start,
         without holding the call for the length of the behavior."""
         task = asyncio.create_task(action)
@@ -194,7 +194,7 @@ class NaoMcpServer:
         return success
 
     def run(self) -> bool:
-        """Run the NaoMcpServer.
+        """Run the NaoqiMcpServer.
 
         Returns:
             bool: False if Nao could not be reached, True once the server has ended
@@ -217,7 +217,7 @@ class NaoMcpServer:
             str: Status message indicating success or failure
         """
         return await _attempt(
-            self.nao_bridge.set_tts_language(language),
+            self.naoqi_bridge.set_tts_language(language),
             f"Nao switched language to {language}",
             f"Nao failed to switch language to {language}",
         )
@@ -232,7 +232,7 @@ class NaoMcpServer:
             str: Status message indicating success or failure
         """
         return await _attempt(
-            self.nao_bridge.say(text),
+            self.naoqi_bridge.say(text),
             f"Nao said {text}",
             f"Nao failed to say {text}",
         )
@@ -246,7 +246,7 @@ class NaoMcpServer:
             str: Status message indicating success or failure
         """
         return await _attempt(
-            self.nao_bridge.wake_up(),
+            self.naoqi_bridge.wake_up(),
             "Nao motors are enabled",
             "Failed to enable Nao motors",
         )
@@ -259,7 +259,7 @@ class NaoMcpServer:
             str: Status message indicating success or failure
         """
         return await _attempt(
-            self.nao_bridge.rest(),
+            self.naoqi_bridge.rest(),
             "Nao motors are disabled",
             "Failed to disable Nao motors",
         )
@@ -271,7 +271,7 @@ class NaoMcpServer:
             str: Status message indicating success or failure
         """
         return await _attempt(
-            self.nao_bridge.stand_up(), "Nao stood up", "Nao failed to stand up"
+            self.naoqi_bridge.stand_up(), "Nao stood up", "Nao failed to stand up"
         )
 
     async def sit_down(self) -> str:
@@ -281,7 +281,7 @@ class NaoMcpServer:
             str: Status message indicating success or failure
         """
         return await _attempt(
-            self.nao_bridge.sit_down(), "Nao sat down", "Nao failed to sit down"
+            self.naoqi_bridge.sit_down(), "Nao sat down", "Nao failed to sit down"
         )
 
     def get_dance_list(self) -> str:
@@ -297,7 +297,7 @@ class NaoMcpServer:
                 - the description of the dance
         """
         logger.debug("Retrieving dance list")
-        dance_behaviors = self.nao_bridge.get_dance_behaviors()
+        dance_behaviors = self.naoqi_bridge.get_dance_behaviors()
         return json.dumps([asdict(b) for b in dance_behaviors])
 
     async def dance(self, dance_id: str) -> str:
@@ -313,8 +313,8 @@ class NaoMcpServer:
             str: Status message indicating it started, or why it failed to
         """
         return await self._start(
-            self.nao_bridge.dance(dance_id),
-            lambda: dance_id in self.nao_bridge.current_dances,
+            self.naoqi_bridge.dance(dance_id),
+            lambda: dance_id in self.naoqi_bridge.current_dances,
             f"Nao started dancing the dance with id '{dance_id}'",
             f"Nao failed to dance the dance with id '{dance_id}'",
         )
@@ -329,7 +329,7 @@ class NaoMcpServer:
             str: Status message indicating success or failure
         """
         return await _attempt(
-            self.nao_bridge.stop_dance(dance_id),
+            self.naoqi_bridge.stop_dance(dance_id),
             f"Nao has stopped the dance with id '{dance_id}'",
             f"Nao failed to stop the dance with id '{dance_id}'",
         )
@@ -342,7 +342,7 @@ class NaoMcpServer:
         Returns:
             str: JSON string containing the list of reaction types
         """
-        return json.dumps(self.nao_bridge.get_expressive_reaction_types())
+        return json.dumps(self.naoqi_bridge.get_expressive_reaction_types())
 
     async def expressive_reaction(self, reaction_type: str) -> str:
         """Make Nao start reacting to a specific emotion/situation.
@@ -357,8 +357,8 @@ class NaoMcpServer:
             str: Status message indicating it started, or why it failed to
         """
         return await self._start(
-            self.nao_bridge.expressive_reaction(reaction_type),
-            lambda: reaction_type in self.nao_bridge.current_expressive_reactions,
+            self.naoqi_bridge.expressive_reaction(reaction_type),
+            lambda: reaction_type in self.naoqi_bridge.current_expressive_reactions,
             f"Nao started reacting for type '{reaction_type}'",
             f"Nao failed to react for type '{reaction_type}'",
         )
@@ -373,7 +373,7 @@ class NaoMcpServer:
             str: Status message indicating success or failure
         """
         return await _attempt(
-            self.nao_bridge.stop_expressive_reaction(reaction_type),
+            self.naoqi_bridge.stop_expressive_reaction(reaction_type),
             f"Nao has stopped reacting for type '{reaction_type}'",
             f"Nao failed to stop reacting for type '{reaction_type}'",
         )
@@ -387,7 +387,7 @@ class NaoMcpServer:
             str: JSON string containing the list of body actions
         """
         logger.debug("Retrieving body actions list")
-        body_action_behaviors = self.nao_bridge.get_body_action_behaviors()
+        body_action_behaviors = self.naoqi_bridge.get_body_action_behaviors()
         return json.dumps([asdict(b) for b in body_action_behaviors])
 
     async def body_action(self, body_action_id: str) -> str:
@@ -403,8 +403,8 @@ class NaoMcpServer:
             str: Status message indicating it started, or why it failed to
         """
         return await self._start(
-            self.nao_bridge.body_action(body_action_id),
-            lambda: body_action_id in self.nao_bridge.current_body_actions,
+            self.naoqi_bridge.body_action(body_action_id),
+            lambda: body_action_id in self.naoqi_bridge.current_body_actions,
             f"Nao started the body action with id '{body_action_id}'",
             f"Nao failed to perform the body action with id '{body_action_id}'",
         )
@@ -419,7 +419,7 @@ class NaoMcpServer:
             str: Status message indicating success or failure
         """
         return await _attempt(
-            self.nao_bridge.stop_body_action(body_action_id),
+            self.naoqi_bridge.stop_body_action(body_action_id),
             f"Nao has stopped the body action with id '{body_action_id}'",
             f"Nao failed to stop the body action with id '{body_action_id}'",
         )
@@ -437,7 +437,7 @@ class NaoMcpServer:
                 - the description of the app
         """
         logger.debug("Retrieving app list")
-        app_behaviors = self.nao_bridge.get_app_behaviors()
+        app_behaviors = self.naoqi_bridge.get_app_behaviors()
         return json.dumps([asdict(b) for b in app_behaviors])
 
     async def run_app(self, app_id: str) -> str:
@@ -453,8 +453,8 @@ class NaoMcpServer:
             str: Status message indicating it started, or why it failed to
         """
         return await self._start(
-            self.nao_bridge.run_app(app_id),
-            lambda: app_id in self.nao_bridge.current_apps,
+            self.naoqi_bridge.run_app(app_id),
+            lambda: app_id in self.naoqi_bridge.current_apps,
             f"Nao started the app with id '{app_id}'",
             f"Nao failed to run the app with id '{app_id}'",
         )
@@ -470,7 +470,7 @@ class NaoMcpServer:
             str: Status message indicating success or failure
         """
         return await _attempt(
-            self.nao_bridge.stop_app(app_id),
+            self.naoqi_bridge.stop_app(app_id),
             f"Nao has stopped the app with id '{app_id}'",
             f"Nao failed to stop the app with id '{app_id}'",
         )
@@ -483,7 +483,7 @@ class NaoMcpServer:
             str: JSON object with the lists "dances", "expressive_reactions",
                 "body_actions" and "apps" (ids; reaction types for reactions)
         """
-        bridge = self.nao_bridge
+        bridge = self.naoqi_bridge
         return json.dumps(
             {
                 "dances": list(bridge.current_dances),
@@ -506,9 +506,9 @@ def main() -> None:
     args = parser.parse_args()
     try:
         config = (
-            NaoMcpServerConfig.from_json_file(args.config)
+            NaoqiMcpServerConfig.from_json_file(args.config)
             if args.config
-            else NaoMcpServerConfig()
+            else NaoqiMcpServerConfig()
         )
     except ConfigError as e:
         parser.error(str(e))
@@ -518,7 +518,7 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
-    if not NaoMcpServer(config).run():
+    if not NaoqiMcpServer(config).run():
         raise SystemExit(1)
 
 

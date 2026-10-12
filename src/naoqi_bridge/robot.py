@@ -1,4 +1,4 @@
-"""Connection seam between Nao Bridge and a Naoqi robot.
+"""Connection seam between naoqi-bridge and a Naoqi robot.
 
 Specified by [specs/robot.md](../../specs/robot.md). ``NaoRobot`` is the Protocol listing
 the Naoqi capabilities the bridge consumes, with the types and constants both
@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Literal, Protocol
 
-from .config import AudioChannel, NaoBridgeConfig
+from .config import AudioChannel, NaoqiBridgeConfig
 
 __all__ = [
     "AUDIO_CHANNEL_CODES",
@@ -84,7 +84,7 @@ class NaoRobot(Protocol):
     def unsubscribe_audio(self) -> None: ...
 
 
-def build_robot(config: NaoBridgeConfig) -> NaoRobot:
+def build_robot(config: NaoqiBridgeConfig) -> NaoRobot:
     """Build (not connect) the robot for ``config.backend``: ``fake`` or ``real``."""
     # Imported here: both modules import this one for the shared types.
     from .fake_robot import FakeNaoRobot

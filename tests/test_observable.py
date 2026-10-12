@@ -6,7 +6,7 @@ import threading
 
 import pytest
 
-from nao_bridge.observable import Observable
+from naoqi_bridge.observable import Observable
 
 
 async def drain(

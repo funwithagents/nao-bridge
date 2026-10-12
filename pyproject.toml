@@ -1,5 +1,5 @@
 [project]
-name = "nao_bridge"
+name = "naoqi-bridge"
 version = "0.1.0"
 description = "High-level async API, MCP server and WebSocket server bridging AI agents to Naoqi robots (Nao), with a fake-robot mode for hardware-free use."
 readme = "README.md"
@@ -12,8 +12,8 @@ dependencies = [
 ]
 
 [project.scripts]
-nao-mcp-server = "nao_bridge.nao_mcp_server:main"
-nao-websocket-server = "nao_bridge.nao_websocket_server:main"
+naoqi-mcp-server = "naoqi_bridge.naoqi_mcp_server:main"
+naoqi-websocket-server = "naoqi_bridge.naoqi_websocket_server:main"
 
 [build-system]
 requires = ["uv_build>=0.11.29,<0.12.0"]

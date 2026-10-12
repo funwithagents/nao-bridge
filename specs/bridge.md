@@ -1,8 +1,8 @@
 ---
 code:
-  - src/nao_bridge/__init__.py
-  - src/nao_bridge/bridge.py
-  - src/nao_bridge/errors.py
+  - src/naoqi_bridge/__init__.py
+  - src/naoqi_bridge/bridge.py
+  - src/naoqi_bridge/errors.py
 tests:
   - tests/test_bridge.py
   - tests-e2e/test_live_verbs.py
@@ -11,22 +11,22 @@ tests:
   - tests-e2e/test_live_streams.py
 ---
 
-# The bridge (`NaoBridge`)
+# The bridge (`NaoqiBridge`)
 
 **Status:** Implemented
 
 ## Purpose
 
-`NaoBridge` is the object a caller holds to drive Nao: intent-level async verbs (say, stand up, dance, react, run an installed app) plus the robot's touch, joint and audio streams. It is built from a [config](config.md) and sits on top of the [robot.md](robot.md) seam, so it runs unchanged on a real robot or the fake. Every client — the [MCP server](nao-mcp-server.md), the [WebSocket server](nao-websocket-server.md), or a Python caller — shares this one implementation. It replaces the earlier `NaoAPI` class.
+`NaoqiBridge` is the object a caller holds to drive Nao: intent-level async verbs (say, stand up, dance, react, run an installed app) plus the robot's touch, joint and audio streams. It is built from a [config](config.md) and sits on top of the [robot.md](robot.md) seam, so it runs unchanged on a real robot or the fake. Every client — the [MCP server](naoqi-mcp-server.md), the [WebSocket server](naoqi-websocket-server.md), or a Python caller — shares this one implementation. It replaces the earlier `NaoAPI` class.
 
 ## Core concepts / Decided
 
 ### Construction and lifecycle
 
-- `NaoBridge(config: NaoBridgeConfig | Backend | None = None)` ([config.md](config.md)). With no argument it uses `NaoBridgeConfig()`, the offline fake. A bare backend string is shorthand for `NaoBridgeConfig(backend=...)`. `NaoBridge.from_dict` / `from_json` / `from_json_file` load the config, then build the bridge. Constructing the bridge does nothing else: no connection, no task.
+- `NaoqiBridge(config: NaoqiBridgeConfig | Backend | None = None)` ([config.md](config.md)). With no argument it uses `NaoqiBridgeConfig()`, the offline fake. A bare backend string is shorthand for `NaoqiBridgeConfig(backend=...)`. `NaoqiBridge.from_dict` / `from_json` / `from_json_file` load the config, then build the bridge. Constructing the bridge does nothing else: no connection, no task.
 - **`await start()`** builds the robot with `build_robot(config)` ([robot.md](robot.md)) and connects it off the event loop. It subscribes the streams the config enables (touch; audio through the mic feed, [microphone.md](microphone.md)), loads the behavior catalog, and starts the joints task when joints are enabled. If any step fails, what already started is torn down (the robot closed) and the error propagates (`RobotConnectionError` for an unreachable robot). Calling `start()` on a running bridge raises `BridgeError`.
 - **`await stop()`** cancels the joints task and publishes `None` on `joints`. It then stops the mic feed (which ends every `audio_input()` subscriber), unsubscribes touch, closes the robot, and clears the running-item tracking. It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it. Cancelling `start()` or `stop()` follows "Cancellation" below: neither leaves anything half up.
-- **`async with NaoBridge(...) as bridge:`** is shorthand for the pair, and runs `stop()` on every way out.
+- **`async with NaoqiBridge(...) as bridge:`** is shorthand for the pair, and runs `stop()` on every way out.
 - `running: bool`. `config` and `backend` (read-only).
 - **Escape hatch:** `bridge.robot` is the `NaoRobot` — the `FakeNaoRobot` on `fake`, which tests use to assert on recorded commands. It raises `NotRunningError` when the bridge isn't running.
 
@@ -137,9 +137,9 @@ So `except (BridgeError, ValueError)` catches every expected verb failure, and t
 
 ### Front door and logging
 
-`from nao_bridge import NaoBridge` re-exports what a caller needs:
-- `NaoBridge`;
-- the config classes (`NaoBridgeConfig`, `RobotSettings`, `StreamSettings`, `TouchStream`, `JointsStream`, `AudioStream`, `Backend`);
+`from naoqi_bridge import NaoqiBridge` re-exports what a caller needs:
+- `NaoqiBridge`;
+- the config classes (`NaoqiBridgeConfig`, `RobotSettings`, `StreamSettings`, `TouchStream`, `JointsStream`, `AudioStream`, `Backend`);
 - the stream values (`TouchEvent`, `TouchPart`, `JointsState`, `MicChunk`) and the `Event` / `Observable` types;
 - `BehaviorInfos`, `LocalizedString`;
 - the errors (`BridgeError`, `NotRunningError`, `NotPlayingError`, `MotorsOffError`, `CommandFailedError`, `ConfigError`, `RobotConnectionError`). Library modules only use `logging.getLogger(__name__)`; `logging.basicConfig` belongs to the CLIs.

@@ -12,7 +12,7 @@ import time
 import pytest
 from support import MEASUREMENTS, live_config, live_session, require_flag
 
-from nao_bridge import (
+from naoqi_bridge import (
     AudioStream,
     JointsState,
     JointsStream,

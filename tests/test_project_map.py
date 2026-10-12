@@ -3,11 +3,11 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _AGENTS_MD = _REPO_ROOT / "AGENTS.md"
-_PKG = _REPO_ROOT / "src" / "nao_bridge"
+_PKG = _REPO_ROOT / "src" / "naoqi_bridge"
 _SPECS_DIR = _REPO_ROOT / "specs"
 
-# Matches link targets like `src/nao_bridge/foo.py` anywhere in AGENTS.md.
-_MODULE_LINK = re.compile(r"src/nao_bridge/([A-Za-z_][A-Za-z0-9_]*\.py)")
+# Matches link targets like `src/naoqi_bridge/foo.py` anywhere in AGENTS.md.
+_MODULE_LINK = re.compile(r"src/naoqi_bridge/([A-Za-z_][A-Za-z0-9_]*\.py)")
 
 # Package glue that isn't a spec'd concept, so it needs no owning spec.
 _NON_CONCEPT_MODULES = {"__init__.py"}
@@ -49,7 +49,7 @@ def test_agents_md_maps_exactly_the_package_modules():
 #
 #     ---
 #     code:
-#       - src/nao_bridge/example.py
+#       - src/naoqi_bridge/example.py
 #     tests:
 #       - tests/test_example.py
 #     ---
@@ -123,7 +123,7 @@ def test_every_concept_module_is_governed_by_a_spec():
     governed: set[str] = set()
     for spec in _spec_files():
         for rel in _parse_frontmatter(spec).get("code", []):
-            if rel.startswith("src/nao_bridge/"):
+            if rel.startswith("src/naoqi_bridge/"):
                 governed.add(Path(rel).name)
 
     ungoverned = _concept_modules() - governed

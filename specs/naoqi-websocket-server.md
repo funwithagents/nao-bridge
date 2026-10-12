@@ -1,8 +1,8 @@
 ---
 code:
-  - src/nao_bridge/nao_websocket_server.py
+  - src/naoqi_bridge/naoqi_websocket_server.py
 tests:
-  - tests/test_nao_websocket_server.py
+  - tests/test_naoqi_websocket_server.py
   - tests-e2e/test_live_servers.py
 ---
 
@@ -12,18 +12,18 @@ tests:
 
 ## Purpose
 
-Gives non-MCP clients (a game engine, a web app, a custom agent loop) network access to [NaoBridge](bridge.md) over a JSON WebSocket protocol — commands in, results and live robot events (touch, joints, audio, logs) out. Like the MCP server, it is an adapter with no robot logic of its own.
+Gives non-MCP clients (a game engine, a web app, a custom agent loop) network access to [NaoqiBridge](bridge.md) over a JSON WebSocket protocol — commands in, results and live robot events (touch, joints, audio, logs) out. Like the MCP server, it is an adapter with no robot logic of its own.
 
 ## Core concepts / Decided
 
 ### Lifecycle
 
-- **Config:** `NaoWebsocketServerConfig` is `{"bridge": NaoBridgeConfig, "server": WebsocketServerSettings}`, with `WebsocketServerSettings(host: str = "", port: int = 8002)` (port 0–65535; `0` lets the OS pick a free port, which `address` then reports). `host` is the address to bind; empty means the host's **LAN IP** (found via a UDP socket towards 8.8.8.8; with no route out, e.g. offline, it falls back to `127.0.0.1` with a warning, so local clients can still connect), `"0.0.0.0"` every interface, `"127.0.0.1"` local only. Both blocks are optional and share the loaders and `ConfigError` rules of [config.md](config.md). The bridge's `streams` decide which events the server streams to its client: none is forced on.
-- `NaoWebsocketServer(config=None)` (default: `NaoWebsocketServerConfig()`, the fake with no streams) builds a `NaoBridge(config.bridge)`.
-- **Two objects.** `NaoWebsocketServer` owns the bridge and the listener; `ClientSession` is the protocol over one connection — it takes the bridge, the config and a *connection-like* object (anything with `send(str)`, `close()` and `async for` over incoming text, which is what `websockets` gives and what a test can fake in memory) and runs `serve()` until the connection ends. The server builds one session per accepted connection. So the protocol is tested through its public surface without a network listener.
+- **Config:** `NaoqiWebsocketServerConfig` is `{"bridge": NaoqiBridgeConfig, "server": WebsocketServerSettings}`, with `WebsocketServerSettings(host: str = "", port: int = 8002)` (port 0–65535; `0` lets the OS pick a free port, which `address` then reports). `host` is the address to bind; empty means the host's **LAN IP** (found via a UDP socket towards 8.8.8.8; with no route out, e.g. offline, it falls back to `127.0.0.1` with a warning, so local clients can still connect), `"0.0.0.0"` every interface, `"127.0.0.1"` local only. Both blocks are optional and share the loaders and `ConfigError` rules of [config.md](config.md). The bridge's `streams` decide which events the server streams to its client: none is forced on.
+- `NaoqiWebsocketServer(config=None)` (default: `NaoqiWebsocketServerConfig()`, the fake with no streams) builds a `NaoqiBridge(config.bridge)`.
+- **Two objects.** `NaoqiWebsocketServer` owns the bridge and the listener; `ClientSession` is the protocol over one connection — it takes the bridge, the config and a *connection-like* object (anything with `send(str)`, `close()` and `async for` over incoming text, which is what `websockets` gives and what a test can fake in memory) and runs `serve()` until the connection ends. The server builds one session per accepted connection. So the protocol is tested through its public surface without a network listener.
 - `async start_connection()` starts the bridge. On `RobotConnectionError` it logs and returns `False`. Otherwise it listens on `server.host` (the LAN IP when empty) at `server.port`; `address` then gives the `(host, port)` actually bound. If the listener can't bind (port in use, an address that isn't this host's), it logs the error naming `host:port`, stops the bridge again and returns `False`: a `False` start leaves nothing running. The listener is the `websockets` `Server` object, held by the server and closed with it. Each accepted connection goes to `attach(connection)`, which is public: a host with its own transport can hand the server any connection-like object and get the same single-client policy.
 - `async stop_connection()` ends the client's session, closes the listener, then stops the bridge.
-- CLI: the `nao-websocket-server` console script (also `python -m nao_bridge.nao_websocket_server`) takes `--config path.json` only; without it the server runs on its default config. An invalid config exits 2 with the `ConfigError` message. It runs until Enter is pressed and exits 1 if the robot is unreachable. Ready-made files: `examples/configs/websocket-fake.json`, `websocket-real.json` (every stream on).
+- CLI: the `naoqi-websocket-server` console script (also `python -m naoqi_bridge.naoqi_websocket_server`) takes `--config path.json` only; without it the server runs on its default config. An invalid config exits 2 with the `ConfigError` message. It runs until Enter is pressed and exits 1 if the robot is unreachable. Ready-made files: `examples/configs/websocket-fake.json`, `websocket-real.json` (every stream on).
 
 ### Single client
 
@@ -58,7 +58,7 @@ Every message, both directions, is `{"id": <string>, "data": <object>}`.
 | `Audio` | `{rate, channels, nbSamplesPerChannel, data: base64 PCM16LE}`, one per mic chunk |
 | `Log` | `{log, logLevel}` — the session's own log lines (connection, each command's start and result, bad input) mirrored to the client; the listener's and the library's logs aren't |
 
-### Commands (`commandId` → `commandData` → `NaoBridge` verb)
+### Commands (`commandId` → `commandData` → `NaoqiBridge` verb)
 
 | commandId | commandData | Result `data` |
 |---|---|---|

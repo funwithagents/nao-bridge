@@ -1,4 +1,4 @@
-"""NaoBridgeConfig and the server configs (specs/config.md): defaults, the loader trio,
+"""NaoqiBridgeConfig and the server configs (specs/config.md): defaults, the loader trio,
 and every validation error naming its key path."""
 
 import json
@@ -6,19 +6,19 @@ from pathlib import Path
 
 import pytest
 
-from nao_bridge.config import (
+from naoqi_bridge.config import (
     AudioStream,
     ConfigError,
     JointsStream,
     JsonConfig,
-    NaoBridgeConfig,
+    NaoqiBridgeConfig,
     RobotSettings,
     StreamSettings,
     TouchStream,
 )
-from nao_bridge.nao_mcp_server import McpServerSettings, NaoMcpServerConfig
-from nao_bridge.nao_websocket_server import (
-    NaoWebsocketServerConfig,
+from naoqi_bridge.naoqi_mcp_server import McpServerSettings, NaoqiMcpServerConfig
+from naoqi_bridge.naoqi_websocket_server import (
+    NaoqiWebsocketServerConfig,
     WebsocketServerSettings,
 )
 
@@ -26,14 +26,14 @@ EXAMPLES = Path(__file__).resolve().parent.parent / "examples" / "configs"
 
 
 def test_the_default_config_is_the_offline_fake_with_no_streams():
-    config = NaoBridgeConfig()
+    config = NaoqiBridgeConfig()
     assert config.backend == "fake"
     assert not (
         config.streams.touch.enabled
         or config.streams.joints.enabled
         or config.streams.audio.enabled
     )
-    assert NaoBridgeConfig.from_dict({}) == config
+    assert NaoqiBridgeConfig.from_dict({}) == config
 
 
 @pytest.mark.parametrize(
@@ -44,11 +44,11 @@ def test_the_default_config_is_the_offline_fake_with_no_streams():
         JointsStream,
         AudioStream,
         StreamSettings,
-        NaoBridgeConfig,
+        NaoqiBridgeConfig,
         McpServerSettings,
         WebsocketServerSettings,
-        NaoMcpServerConfig,
-        NaoWebsocketServerConfig,
+        NaoqiMcpServerConfig,
+        NaoqiWebsocketServerConfig,
     ],
 )
 def test_an_empty_object_loads_as_the_blocks_own_defaults(block: type[JsonConfig]):
@@ -57,7 +57,7 @@ def test_an_empty_object_loads_as_the_blocks_own_defaults(block: type[JsonConfig
 
 
 def test_a_full_config_loads_every_field():
-    config = NaoBridgeConfig.from_dict(
+    config = NaoqiBridgeConfig.from_dict(
         {
             "backend": "real",
             "robot": {"ip": "192.168.1.42", "port": 9600, "connect_tries": 3},
@@ -119,12 +119,12 @@ def test_a_full_config_loads_every_field():
 )
 def test_invalid_configs_name_the_offending_key(data: object, message: str):
     with pytest.raises(ConfigError, match=message):
-        NaoBridgeConfig.from_dict(data)
+        NaoqiBridgeConfig.from_dict(data)
 
 
 def test_a_config_error_carries_its_key_path():
     with pytest.raises(ConfigError) as caught:
-        NaoWebsocketServerConfig.from_dict(
+        NaoqiWebsocketServerConfig.from_dict(
             {"bridge": {"streams": {"joints": {"period_s": 0}}}}
         )
     assert caught.value.key == "bridge.streams.joints.period_s"
@@ -134,70 +134,72 @@ def test_a_config_error_carries_its_key_path():
 
 def test_direct_construction_validates_too():
     with pytest.raises(ConfigError, match="robot.ip is required"):
-        NaoBridgeConfig(backend="real")
+        NaoqiBridgeConfig(backend="real")
     with pytest.raises(ConfigError, match="period_s"):
         JointsStream(period_s=0)
 
 
 def test_a_robot_block_on_fake_is_validated_but_unused():
-    config = NaoBridgeConfig.from_dict({"backend": "fake", "robot": {"ip": "10.0.0.5"}})
+    config = NaoqiBridgeConfig.from_dict(
+        {"backend": "fake", "robot": {"ip": "10.0.0.5"}}
+    )
     assert config.backend == "fake" and config.robot.ip == "10.0.0.5"
     with pytest.raises(ConfigError, match="robot.port"):
-        NaoBridgeConfig.from_dict({"backend": "fake", "robot": {"port": -1}})
+        NaoqiBridgeConfig.from_dict({"backend": "fake", "robot": {"port": -1}})
 
 
 def test_json_loaders(tmp_path: Path):
     text = json.dumps({"backend": "real", "robot": {"ip": "10.0.0.5"}})
-    assert NaoBridgeConfig.from_json(text).robot.ip == "10.0.0.5"
+    assert NaoqiBridgeConfig.from_json(text).robot.ip == "10.0.0.5"
     with pytest.raises(ConfigError, match="invalid JSON"):
-        NaoBridgeConfig.from_json("{backend: real}")
+        NaoqiBridgeConfig.from_json("{backend: real}")
 
     file = tmp_path / "nao.json"
     file.write_text(text)
-    assert NaoBridgeConfig.from_json_file(file).backend == "real"
+    assert NaoqiBridgeConfig.from_json_file(file).backend == "real"
     broken = tmp_path / "broken.json"
     broken.write_text("{")
     with pytest.raises(ConfigError, match="broken.json"):
-        NaoBridgeConfig.from_json_file(broken)
+        NaoqiBridgeConfig.from_json_file(broken)
     with pytest.raises(ConfigError, match="cannot read config file"):
-        NaoBridgeConfig.from_json_file(tmp_path / "missing.json")
+        NaoqiBridgeConfig.from_json_file(tmp_path / "missing.json")
 
 
 def test_server_configs_nest_the_bridge_and_their_own_settings():
-    config = NaoWebsocketServerConfig.from_dict(
+    config = NaoqiWebsocketServerConfig.from_dict(
         {"bridge": {"streams": {"touch": {"enabled": True}}}, "server": {"port": 9000}}
     )
     assert config.server.port == 9000
     assert config.server.host == ""  # the default: the LAN IP, found at start
     assert config.bridge.streams.touch.enabled
-    local = NaoWebsocketServerConfig.from_dict(
+    local = NaoqiWebsocketServerConfig.from_dict(
         {"server": {"host": "127.0.0.1", "port": 0}}
     )
     assert (local.server.host, local.server.port) == ("127.0.0.1", 0)
-    assert NaoMcpServerConfig.from_dict({}).server.transport == "stdio"
+    assert NaoqiMcpServerConfig.from_dict({}).server.transport == "stdio"
 
 
 @pytest.mark.parametrize(
     ("factory", "data", "message"),
     [
         (
-            NaoWebsocketServerConfig,
+            NaoqiWebsocketServerConfig,
             {"server": {"port": 70000}},
             "server.port must be between",
         ),
         (
-            NaoWebsocketServerConfig,
+            NaoqiWebsocketServerConfig,
             {"server": {"host": 1}},
             "server.host must be a string",
         ),
         (
-            NaoWebsocketServerConfig,
+            NaoqiWebsocketServerConfig,
             {"bridge": {"backend": "real"}},
             "bridge.robot.ip is required",
         ),
-        (NaoWebsocketServerConfig, {"port": 8002}, "unknown key 'port'"),
+        (NaoqiWebsocketServerConfig, {"port": 8002}, "unknown key 'port'"),
         (
-            NaoMcpServerConfig,
+            NaoqiMcpServerConfig,
             {"server": {"transport": "http"}},
             "server.transport must be one of",
         ),
@@ -212,12 +214,12 @@ def test_server_config_errors_carry_the_full_path(
 
 @pytest.mark.parametrize("name", ["mcp-fake", "mcp-real"])
 def test_mcp_examples_load(name: str):
-    NaoMcpServerConfig.from_json_file(EXAMPLES / f"{name}.json")
+    NaoqiMcpServerConfig.from_json_file(EXAMPLES / f"{name}.json")
 
 
 @pytest.mark.parametrize("name", ["websocket-fake", "websocket-real"])
 def test_websocket_examples_load_with_every_stream(name: str):
-    streams = NaoWebsocketServerConfig.from_json_file(
+    streams = NaoqiWebsocketServerConfig.from_json_file(
         EXAMPLES / f"{name}.json"
     ).bridge.streams
     assert streams.touch.enabled and streams.joints.enabled and streams.audio.enabled

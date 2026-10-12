@@ -1,9 +1,9 @@
 ---
 code:
-  - src/nao_bridge/config.py
-  - src/nao_bridge/bridge.py
-  - src/nao_bridge/nao_mcp_server.py
-  - src/nao_bridge/nao_websocket_server.py
+  - src/naoqi_bridge/config.py
+  - src/naoqi_bridge/bridge.py
+  - src/naoqi_bridge/naoqi_mcp_server.py
+  - src/naoqi_bridge/naoqi_websocket_server.py
 tests:
   - tests/test_config.py
   - tests/test_bridge.py
@@ -15,13 +15,13 @@ tests:
 
 ## Purpose
 
-One declarative description of *which robot and what to stream*. A `NaoBridge` is built from it, and each server wraps it in its own config. Today the same facts are spread over `NaoBridge` keyword arguments, server arguments and CLI flags. A config file makes a setup reproducible: switching from the robot to the fake becomes a one-word change in one file.
+One declarative description of *which robot and what to stream*. A `NaoqiBridge` is built from it, and each server wraps it in its own config. Today the same facts are spread over `NaoqiBridge` keyword arguments, server arguments and CLI flags. A config file makes a setup reproducible: switching from the robot to the fake becomes a one-word change in one file.
 
 The first version deliberately covers only the **backend**, the **robot connection** and the **streams**. Other blocks are open questions below.
 
 ## Core concepts / Decided
 
-### `NaoBridgeConfig` — top-level structure
+### `NaoqiBridgeConfig` — top-level structure
 
 ```json
 {
@@ -37,7 +37,7 @@ The first version deliberately covers only the **backend**, the **robot connecti
 
 ```python
 @dataclass
-class NaoBridgeConfig:
+class NaoqiBridgeConfig:
     backend: Backend = "fake"         # "real" | "fake"
     robot: RobotSettings = field(default_factory=RobotSettings)
     streams: StreamSettings = field(default_factory=StreamSettings)
@@ -57,7 +57,7 @@ class StreamSettings:
 ```
 
 - Every block is optional. Missing blocks and fields take the defaults above. **A default is declared once**, on the dataclass field; the loaders read it from there (`dataclasses.fields`), so a default can't drift between direct construction and JSON.
-- **The default backend is `fake`.** A real Nao has no usable default address, so `NaoBridgeConfig()` is valid and offline. A real robot always means an explicit config with `robot.ip`.
+- **The default backend is `fake`.** A real Nao has no usable default address, so `NaoqiBridgeConfig()` is valid and offline. A real robot always means an explicit config with `robot.ip`.
 
 ### Constructors and validation
 
@@ -82,20 +82,20 @@ The callbacks (`on_touch`, `on_joints`, `on_audio`) are **removed**. The config 
 - **Using a disabled stream's API raises `BridgeError`.** For joints and audio that's at the call. For touch, `on_touch` always exists and simply never emits.
 - Because nothing is a callback any more, a server's config can't contradict its code. The MCP server just leaves streams disabled.
 
-### `NaoBridge` construction
+### `NaoqiBridge` construction
 
-- `NaoBridge(config: NaoBridgeConfig | Backend | None = None)`; with no argument it uses `NaoBridgeConfig()`. A bare backend string is shorthand for `NaoBridgeConfig(backend=...)`, so `NaoBridge("fake")` stays the one-liner. `NaoBridge("real")` alone is a `ConfigError` (no IP).
-- `NaoBridge.from_dict(data)`, `from_json(text)` and `from_json_file(path)` build the config, then the bridge.
+- `NaoqiBridge(config: NaoqiBridgeConfig | Backend | None = None)`; with no argument it uses `NaoqiBridgeConfig()`. A bare backend string is shorthand for `NaoqiBridgeConfig(backend=...)`, so `NaoqiBridge("fake")` stays the one-liner. `NaoqiBridge("real")` alone is a `ConfigError` (no IP).
+- `NaoqiBridge.from_dict(data)`, `from_json(text)` and `from_json_file(path)` build the config, then the bridge.
 - The `ip=` / `port=` / `on_*=` keyword arguments are **removed**.
 - `bridge.config` exposes the config, read-only.
 - `build_robot(config)` replaces `build_robot(backend, ip=..., port=...)` ([robot.md](robot.md)), and `RealNaoRobot` takes `connect_tries` from it.
 
 ### Server configs: `{"bridge": …, "server": …}`
 
-Each server has its own config object, wrapping a `NaoBridgeConfig` under `bridge` next to its own settings object under `server`. Both use the same three constructors and the same `ConfigError` rules.
+Each server has its own config object, wrapping a `NaoqiBridgeConfig` under `bridge` next to its own settings object under `server`. Both use the same three constructors and the same `ConfigError` rules.
 
 ```json
-// NaoWebsocketServerConfig
+// NaoqiWebsocketServerConfig
 {
   "bridge": {
     "backend": "real",
@@ -105,20 +105,20 @@ Each server has its own config object, wrapping a `NaoBridgeConfig` under `bridg
   "server": { "host": "", "port": 8002 }
 }
 
-// NaoMcpServerConfig
+// NaoqiMcpServerConfig
 {
   "bridge": { "backend": "fake" },
   "server": { "transport": "stdio" }
 }
 ```
 
-- `NaoWebsocketServerConfig(bridge, server: WebsocketServerSettings(host="", port=8002))`. `host` is the bind address; empty (the default) means the host's LAN IP, found at start (`127.0.0.1` when there's no route out); `port` 0 means an OS-assigned port ([nao-websocket-server.md](nao-websocket-server.md)). Its bridge streams replace `--with-joints-data` / `--with-audio-data`. Touch is no longer forced on: it's on when the config says so. The server subscribes to `on_touch`, follows `bridge.joints.changes()`, and drains one `audio_input()` per client.
-- `NaoMcpServerConfig(bridge, server: McpServerSettings(transport="stdio" | "sse"))`.
-- The `bridge` block is exactly a `NaoBridgeConfig`, so it can be copied between files. Each server config class lives in its server module; `NaoBridgeConfig` and `ConfigError` live in `config.py`.
+- `NaoqiWebsocketServerConfig(bridge, server: WebsocketServerSettings(host="", port=8002))`. `host` is the bind address; empty (the default) means the host's LAN IP, found at start (`127.0.0.1` when there's no route out); `port` 0 means an OS-assigned port ([naoqi-websocket-server.md](naoqi-websocket-server.md)). Its bridge streams replace `--with-joints-data` / `--with-audio-data`. Touch is no longer forced on: it's on when the config says so. The server subscribes to `on_touch`, follows `bridge.joints.changes()`, and drains one `audio_input()` per client.
+- `NaoqiMcpServerConfig(bridge, server: McpServerSettings(transport="stdio" | "sse"))`.
+- The `bridge` block is exactly a `NaoqiBridgeConfig`, so it can be copied between files. Each server config class lives in its server module; `NaoqiBridgeConfig` and `ConfigError` live in `config.py`.
 
 ### CLIs: `--config` only
 
-- `nao-mcp-server --config path.json` and `nao-websocket-server --config path.json`. The `--fake-robot`, `--ip`, `--port`, `--websocket-port`, `--with-joints-data` and `--with-audio-data` flags are **removed**.
+- `naoqi-mcp-server --config path.json` and `naoqi-websocket-server --config path.json`. The `--fake-robot`, `--ip`, `--port`, `--websocket-port`, `--with-joints-data` and `--with-audio-data` flags are **removed**.
 - Without `--config`, the server runs on its default config, which is the `fake` backend.
 - A config error exits 2 with the `ConfigError` message. An unreachable robot still exits 1.
 

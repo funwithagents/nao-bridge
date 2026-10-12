@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 import pytest
 
-from nao_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoRobot
+from naoqi_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoRobot
 
 
 def test_fake_behavior_runs_until_stopped():

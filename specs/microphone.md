@@ -1,14 +1,14 @@
 ---
 code:
-  - src/nao_bridge/microphone.py
-  - src/nao_bridge/robot.py
-  - src/nao_bridge/fake_robot.py
-  - src/nao_bridge/bridge.py
-  - src/nao_bridge/nao_websocket_server.py
+  - src/naoqi_bridge/microphone.py
+  - src/naoqi_bridge/robot.py
+  - src/naoqi_bridge/fake_robot.py
+  - src/naoqi_bridge/bridge.py
+  - src/naoqi_bridge/naoqi_websocket_server.py
 tests:
   - tests/test_microphone.py
   - tests/test_bridge.py
-  - tests/test_nao_websocket_server.py
+  - tests/test_naoqi_websocket_server.py
   - tests-e2e/test_live_streams.py
 ---
 
@@ -61,7 +61,7 @@ MicFeed()
 
 - **Publishing.** `start()` subscribes to the robot's audio (`robot.subscribe_audio(self._publish)`). `_publish(channels, samples_per_channel, buffer)` runs on Naoqi's thread. Under the feed's lock it stamps the chunk (`seq`, `ts`), writes it into the ring and advances `head`. Outside the lock it wakes the waiting subscribers. The lock is held for the write only.
 - **The ring.** The feed keeps the last `MIC_RING_CHUNKS = 200` chunks in a fixed array: chunk `seq` lives in slot `seq % MIC_RING_CHUNKS`. Its span in seconds is 200 chunk durations — about 17 s with the fake's 85 ms chunks — so it is sized in chunks, not seconds; open question 1 covers Naoqi's real chunk size.
-- **Bound per session, alive per bridge.** `bridge.mic` exists from construction, with `latest()` returning `None`. `start()` / `stop()` are the bridge's to call: `NaoBridge.start()` starts the feed when `streams.audio.enabled` ([config.md](config.md)), and `NaoBridge.stop()` stops it before closing the robot. Stopping unsubscribes from the robot, ends every subscriber, and resets `latest()` to `None`.
+- **Bound per session, alive per bridge.** `bridge.mic` exists from construction, with `latest()` returning `None`. `start()` / `stop()` are the bridge's to call: `NaoqiBridge.start()` starts the feed when `streams.audio.enabled` ([config.md](config.md)), and `NaoqiBridge.stop()` stops it before closing the robot. Stopping unsubscribes from the robot, ends every subscriber, and resets `latest()` to `None`.
 
 ### Subscribers — `audio_input()`
 
@@ -107,7 +107,7 @@ MicFeed()
 - **[config.md](config.md):** `streams.audio.enabled` and `streams.audio.channel` decide whether, and from which microphone, the feed subscribes.
 - **[bridge.md](bridge.md):** `bridge.mic`, `audio_input(preroll_s)`, `MicChunk` exported.
 - **[robot.md](robot.md):** `subscribe_audio(callback, channel)`, whose only caller is the feed; the fake's paced push.
-- **[nao-websocket-server.md](nao-websocket-server.md):** the `Audio` message is produced by an `audio_input()` subscriber; its wire format is unchanged.
+- **[naoqi-websocket-server.md](naoqi-websocket-server.md):** the `Audio` message is produced by an `audio_input()` subscriber; its wire format is unchanged.
 
 ## Open questions
 

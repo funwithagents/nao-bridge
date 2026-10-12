@@ -1,4 +1,4 @@
-"""The MCP server (specs/nao-mcp-server.md) on the ``fake`` backend, driven through
+"""The MCP server (specs/naoqi-mcp-server.md) on the ``fake`` backend, driven through
 FastMCP's own tool registry the way an MCP client's calls arrive.
 
 No robot needed. Async runs via ``asyncio.run``.
@@ -16,11 +16,11 @@ from typing import Any
 import pytest
 from mcp.types import TextContent
 
-from nao_bridge.fake_robot import FakeNaoRobot
-from nao_bridge.nao_mcp_server import NaoMcpServer
+from naoqi_bridge.fake_robot import FakeNaoRobot
+from naoqi_bridge.naoqi_mcp_server import NaoqiMcpServer
 
 
-async def call(server: NaoMcpServer, tool: str, **arguments: Any) -> str:
+async def call(server: NaoqiMcpServer, tool: str, **arguments: Any) -> str:
     result = await server.mcp.call_tool(tool, arguments)
     assert isinstance(result, tuple)
     content, _ = result
@@ -30,17 +30,17 @@ async def call(server: NaoMcpServer, tool: str, **arguments: Any) -> str:
     return block.text
 
 
-def fake(server: NaoMcpServer) -> FakeNaoRobot:
-    robot = server.nao_bridge.robot
+def fake(server: NaoqiMcpServer) -> FakeNaoRobot:
+    robot = server.naoqi_bridge.robot
     assert isinstance(robot, FakeNaoRobot)
     return robot
 
 
-async def running(server: NaoMcpServer) -> dict[str, list[str]]:
+async def running(server: NaoqiMcpServer) -> dict[str, list[str]]:
     return json.loads(await call(server, "get_running"))
 
 
-async def wait_until_idle(server: NaoMcpServer, timeout: float = 2.0) -> None:
+async def wait_until_idle(server: NaoqiMcpServer, timeout: float = 2.0) -> None:
     async with asyncio.timeout(timeout):
         while any((await running(server)).values()):
             await asyncio.sleep(0.01)
@@ -48,7 +48,7 @@ async def wait_until_idle(server: NaoMcpServer, timeout: float = 2.0) -> None:
 
 def test_tools_are_described_by_their_docstrings():
     async def run() -> dict[str, Any]:
-        server = NaoMcpServer()
+        server = NaoqiMcpServer()
         return {tool.name: tool for tool in await server.mcp.list_tools()}
 
     tools = asyncio.run(run())
@@ -81,8 +81,8 @@ def test_tools_are_described_by_their_docstrings():
 
 def test_action_tools_report_success_and_failure_with_its_reason():
     async def run() -> list[str]:
-        server = NaoMcpServer()
-        async with server.nao_bridge:
+        server = NaoqiMcpServer()
+        async with server.naoqi_bridge:
             asleep = await call(server, "dance", dance_id="gangnam-style")
             await call(server, "wake_up")
             return [
@@ -111,7 +111,7 @@ def test_action_tools_report_success_and_failure_with_its_reason():
 
 
 def test_a_tool_on_a_stopped_bridge_says_it_is_not_running():
-    result = asyncio.run(call(NaoMcpServer(), "wake_up"))
+    result = asyncio.run(call(NaoqiMcpServer(), "wake_up"))
     assert result == (
         "Failed to enable Nao motors: the bridge is not running; call start() first"
     )
@@ -119,8 +119,8 @@ def test_a_tool_on_a_stopped_bridge_says_it_is_not_running():
 
 def test_list_tools_return_json_the_model_can_feed_back():
     async def run() -> tuple[list[dict[str, Any]], list[str], list[dict[str, Any]]]:
-        server = NaoMcpServer()
-        async with server.nao_bridge:
+        server = NaoqiMcpServer()
+        async with server.naoqi_bridge:
             dances = json.loads(await call(server, "get_dance_list"))
             reactions = json.loads(await call(server, "get_expressive_reaction_types"))
             await call(server, "wake_up")
@@ -144,8 +144,8 @@ def test_list_tools_return_json_the_model_can_feed_back():
 
 def test_a_dance_returns_while_it_plays_and_stop_dance_ends_it():
     async def run() -> tuple[str, float, dict[str, list[str]], str, list[str]]:
-        server = NaoMcpServer()
-        async with server.nao_bridge:
+        server = NaoqiMcpServer()
+        async with server.naoqi_bridge:
             await call(server, "wake_up")
             fake(server).behavior_duration_s = 5.0
             started = time.monotonic()
@@ -171,8 +171,8 @@ def test_a_dance_returns_while_it_plays_and_stop_dance_ends_it():
 
 def test_reactions_and_body_actions_start_and_stop_through_their_tools():
     async def run() -> tuple[list[str], dict[str, list[str]], list[str]]:
-        server = NaoMcpServer()
-        async with server.nao_bridge:
+        server = NaoqiMcpServer()
+        async with server.naoqi_bridge:
             await call(server, "wake_up")
             fake(server).behavior_duration_s = 5.0
             started = [
@@ -210,8 +210,8 @@ def test_reactions_and_body_actions_start_and_stop_through_their_tools():
 
 def test_stop_tools_say_when_nothing_is_playing():
     async def run() -> list[str]:
-        server = NaoMcpServer()
-        async with server.nao_bridge:
+        server = NaoqiMcpServer()
+        async with server.naoqi_bridge:
             return [
                 await call(server, "stop_dance", dance_id="eagle-dance"),
                 await call(server, "stop_expressive_reaction", reaction_type="Sad"),
@@ -240,15 +240,15 @@ def test_a_behavior_failing_after_it_started_is_logged(
         raise RuntimeError(f"{name} fell over")
 
     async def run() -> tuple[str, dict[str, list[str]]]:
-        server = NaoMcpServer()
-        async with server.nao_bridge:
+        server = NaoqiMcpServer()
+        async with server.naoqi_bridge:
             await call(server, "wake_up")
             fake(server).run_behavior = failing_run
             result = await call(server, "dance", dance_id="eagle-dance")
             await wait_until_idle(server)
             return result, await running(server)
 
-    with caplog.at_level(logging.ERROR, logger="nao_bridge.nao_mcp_server"):
+    with caplog.at_level(logging.ERROR, logger="naoqi_bridge.naoqi_mcp_server"):
         result, after = asyncio.run(run())
     assert result == "Nao started dancing the dance with id 'eagle-dance'"
     assert after["dances"] == []
@@ -260,7 +260,7 @@ def test_a_behavior_failing_after_it_started_is_logged(
 
 def test_leaving_serve_cancels_the_behaviors_still_running():
     async def run() -> tuple[str, float, bool, list[str], list[str]]:
-        server = NaoMcpServer()
+        server = NaoqiMcpServer()
         results: list[str] = []
         robots: list[FakeNaoRobot] = []
 
@@ -277,7 +277,7 @@ def test_leaving_serve_cancels_the_behaviors_still_running():
         return (
             results[0],
             elapsed,
-            server.nao_bridge.running or bool(left),
+            server.naoqi_bridge.running or bool(left),
             robots[0].running_behaviors,
             [name for name, _ in robots[0].commands],
         )
@@ -300,7 +300,7 @@ def run_cli(
     path = tmp_path / "config.json"
     path.write_text(json.dumps(config))
     return subprocess.run(
-        [sys.executable, "-m", "nao_bridge.nao_mcp_server", "--config", str(path)],
+        [sys.executable, "-m", "naoqi_bridge.naoqi_mcp_server", "--config", str(path)],
         input=stdin,
         capture_output=True,
         text=True,
@@ -312,7 +312,7 @@ def run_cli(
 def test_native_writes_to_fd_1_go_to_stderr_while_reserved():
     script = (
         "import os, sys\n"
-        "from nao_bridge.nao_mcp_server import stdout_reserved_for_protocol\n"
+        "from naoqi_bridge.naoqi_mcp_server import stdout_reserved_for_protocol\n"
         "with stdout_reserved_for_protocol():\n"
         "    os.write(1, b'native\\n')\n"
         "    sys.stdout.write('protocol\\n')\n"

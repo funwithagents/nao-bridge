@@ -1,6 +1,6 @@
-"""The WebSocket server (specs/nao-websocket-server.md) on the ``fake`` backend: the
+"""The WebSocket server (specs/naoqi-websocket-server.md) on the ``fake`` backend: the
 JSON protocol through ``ClientSession`` over an in-memory connection, and the
-listener / single-client policy through ``NaoWebsocketServer`` on a loopback socket.
+listener / single-client policy through ``NaoqiWebsocketServer`` on a loopback socket.
 
 No robot or external network needed. Async runs via ``asyncio.run``.
 """
@@ -17,32 +17,32 @@ from typing import Any, Self
 import pytest
 import websockets
 
-from nao_bridge import nao_websocket_server
-from nao_bridge.bridge import NaoBridge
-from nao_bridge.config import (
+from naoqi_bridge import naoqi_websocket_server
+from naoqi_bridge.bridge import NaoqiBridge
+from naoqi_bridge.config import (
     AudioStream,
     JointsStream,
-    NaoBridgeConfig,
+    NaoqiBridgeConfig,
     StreamSettings,
     TouchStream,
 )
-from nao_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoRobot
-from nao_bridge.nao_websocket_server import (
+from naoqi_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoRobot
+from naoqi_bridge.naoqi_websocket_server import (
     ClientSession,
-    NaoWebsocketServer,
-    NaoWebsocketServerConfig,
+    NaoqiWebsocketServer,
+    NaoqiWebsocketServerConfig,
     WebsocketServerSettings,
 )
 
 LOOPBACK = WebsocketServerSettings(host="127.0.0.1", port=0)
 # The version is part of the contract: bumping it should take a test change too.
 NAO_STATE = {"protocolVersion": 1, "connected": True, "fakeRobot": True}
-TOUCH_ONLY = NaoWebsocketServerConfig(
-    bridge=NaoBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True))),
+TOUCH_ONLY = NaoqiWebsocketServerConfig(
+    bridge=NaoqiBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True))),
     server=LOOPBACK,
 )
-ALL_STREAMS = NaoWebsocketServerConfig(
-    bridge=NaoBridgeConfig(
+ALL_STREAMS = NaoqiWebsocketServerConfig(
+    bridge=NaoqiBridgeConfig(
         streams=StreamSettings(
             touch=TouchStream(enabled=True),
             joints=JointsStream(enabled=True, period_s=0.02),
@@ -113,7 +113,7 @@ def command(uuid: str, command_id: str, **data: Any) -> dict[str, Any]:
     }
 
 
-def fake(bridge: NaoBridge) -> FakeNaoRobot:
+def fake(bridge: NaoqiBridge) -> FakeNaoRobot:
     robot = bridge.robot
     assert isinstance(robot, FakeNaoRobot)
     return robot
@@ -122,13 +122,13 @@ def fake(bridge: NaoBridge) -> FakeNaoRobot:
 def session(
     incoming: Sequence[dict[str, Any] | str],
     answers: int,
-    config: NaoWebsocketServerConfig = TOUCH_ONLY,
+    config: NaoqiWebsocketServerConfig = TOUCH_ONLY,
 ) -> tuple[MemorySocket, list[str]]:
     """Serve one in-memory client over a started bridge; the robot calls it made."""
     socket = MemorySocket(incoming, answers)
 
     async def run() -> list[str]:
-        async with NaoBridge(config.bridge) as bridge:
+        async with NaoqiBridge(config.bridge) as bridge:
             robot = fake(bridge)
             await ClientSession(bridge, config, socket).serve()
         return [name for name, _ in robot.commands]
@@ -248,7 +248,7 @@ def test_catalog_commands_use_camel_case_payloads():
 
 def test_a_stop_command_ends_a_running_dance():
     async def run() -> MemorySocket:
-        async with NaoBridge(TOUCH_ONLY.bridge) as bridge:
+        async with NaoqiBridge(TOUCH_ONLY.bridge) as bridge:
             robot = fake(bridge)
             robot.behavior_duration_s = 5.0
             socket = MemorySocket(
@@ -271,7 +271,7 @@ def test_a_stop_command_ends_a_running_dance():
 
 def test_touch_events_are_streamed_only_during_the_session():
     async def run() -> tuple[MemorySocket, int]:
-        async with NaoBridge(TOUCH_ONLY.bridge) as bridge:
+        async with NaoqiBridge(TOUCH_ONLY.bridge) as bridge:
             robot = fake(bridge)
             socket = MemorySocket([], until=lambda s: bool(s.of("Touch")))
             serving = asyncio.create_task(
@@ -292,7 +292,7 @@ def test_touch_events_are_streamed_only_during_the_session():
 
 def test_joints_and_audio_stream_to_the_client_during_its_session():
     async def run() -> tuple[MemorySocket, int]:
-        async with NaoBridge(ALL_STREAMS.bridge) as bridge:
+        async with NaoqiBridge(ALL_STREAMS.bridge) as bridge:
             fake(bridge).audio_chunk_s = 0.01
             socket = MemorySocket(
                 [],
@@ -329,9 +329,9 @@ def test_a_second_client_replaces_the_first_one_cleanly(
     caplog: pytest.LogCaptureFixture,
 ):
     async def run() -> tuple[MemorySocket, MemorySocket, list[str]]:
-        server = NaoWebsocketServer(TOUCH_ONLY)
+        server = NaoqiWebsocketServer(TOUCH_ONLY)
         assert await server.start_connection()
-        robot = fake(server.nao_bridge)
+        robot = fake(server.naoqi_bridge)
         first = MemorySocket([], until=lambda s: s.closed)
         first_serving = asyncio.create_task(server.attach(first))
         await wait_until(lambda: bool(first.of("NaoState")))
@@ -354,7 +354,7 @@ def test_a_second_client_replaces_the_first_one_cleanly(
 
 def test_the_listener_serves_a_real_websocket_client_on_the_configured_host():
     async def run() -> tuple[tuple[str, int] | None, dict[str, Any], dict[str, Any]]:
-        server = NaoWebsocketServer(TOUCH_ONLY)
+        server = NaoqiWebsocketServer(TOUCH_ONLY)
         assert await server.start_connection()
         address = server.address
         assert address is not None
@@ -383,7 +383,7 @@ def test_the_listener_serves_a_real_websocket_client_on_the_configured_host():
 
 def test_stopping_the_server_ends_the_client_and_the_bridge():
     async def run() -> tuple[bool, bool, bool]:
-        server = NaoWebsocketServer(TOUCH_ONLY)
+        server = NaoqiWebsocketServer(TOUCH_ONLY)
         assert await server.start_connection()
         socket = MemorySocket([], until=lambda s: s.closed)
         serving = asyncio.create_task(server.attach(socket))
@@ -391,14 +391,14 @@ def test_stopping_the_server_ends_the_client_and_the_bridge():
         await server.stop_connection()
         async with asyncio.timeout(2.0):
             await serving
-        return socket.closed, server.address is None, server.nao_bridge.running
+        return socket.closed, server.address is None, server.naoqi_bridge.running
 
     assert asyncio.run(run()) == (True, True, False)
 
 
 def test_an_unreachable_robot_is_reported_not_raised():
-    config = NaoWebsocketServerConfig(
-        bridge=NaoBridgeConfig.from_dict(
+    config = NaoqiWebsocketServerConfig(
+        bridge=NaoqiBridgeConfig.from_dict(
             {
                 "backend": "real",
                 "robot": {"ip": "127.0.0.1", "port": 1, "connect_tries": 1},
@@ -407,7 +407,7 @@ def test_an_unreachable_robot_is_reported_not_raised():
         server=LOOPBACK,
     )
     pytest.importorskip("qi")
-    server = NaoWebsocketServer(config)
+    server = NaoqiWebsocketServer(config)
     assert asyncio.run(server.start_connection()) is False
     assert server.address is None
 
@@ -437,18 +437,18 @@ def test_with_no_route_out_an_empty_host_listens_on_loopback(
         AF_INET=socket_module.AF_INET,
         SOCK_DGRAM=socket_module.SOCK_DGRAM,
     )
-    monkeypatch.setattr(nao_websocket_server, "socket", offline)
+    monkeypatch.setattr(naoqi_websocket_server, "socket", offline)
 
     async def run() -> tuple[str, int] | None:
-        server = NaoWebsocketServer(
-            NaoWebsocketServerConfig(server=WebsocketServerSettings(port=0))
+        server = NaoqiWebsocketServer(
+            NaoqiWebsocketServerConfig(server=WebsocketServerSettings(port=0))
         )
         assert await server.start_connection()
         address = server.address
         await server.stop_connection()
         return address
 
-    with caplog.at_level(logging.WARNING, logger="nao_bridge.nao_websocket_server"):
+    with caplog.at_level(logging.WARNING, logger="naoqi_bridge.naoqi_websocket_server"):
         address = asyncio.run(run())
     assert address is not None and address[0] == "127.0.0.1"
     assert any("listening on 127.0.0.1 only" in m for m in caplog.messages)
@@ -461,14 +461,16 @@ def test_a_port_already_in_use_fails_the_start_and_stops_the_bridge(
         taken.bind(("127.0.0.1", 0))
         taken.listen()
         port = taken.getsockname()[1]
-        server = NaoWebsocketServer(
-            NaoWebsocketServerConfig(
+        server = NaoqiWebsocketServer(
+            NaoqiWebsocketServerConfig(
                 server=WebsocketServerSettings(host="127.0.0.1", port=port)
             )
         )
-        with caplog.at_level(logging.ERROR, logger="nao_bridge.nao_websocket_server"):
+        with caplog.at_level(
+            logging.ERROR, logger="naoqi_bridge.naoqi_websocket_server"
+        ):
             started = asyncio.run(server.start_connection())
     assert started is False
     assert server.address is None
-    assert not server.nao_bridge.running
+    assert not server.naoqi_bridge.running
     assert any(f"Could not listen on 127.0.0.1:{port}" in m for m in caplog.messages)

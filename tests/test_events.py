@@ -3,7 +3,7 @@ subscriber isolation."""
 
 import pytest
 
-from nao_bridge.events import Event
+from naoqi_bridge.events import Event
 
 
 def test_handlers_receive_each_value_in_subscription_order():

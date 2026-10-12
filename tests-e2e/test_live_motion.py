@@ -19,7 +19,7 @@ from support import (
     wait_until,
 )
 
-from nao_bridge import MotorsOffError
+from naoqi_bridge import MotorsOffError
 
 pytest.importorskip("qi")
 

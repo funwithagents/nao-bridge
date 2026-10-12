@@ -144,7 +144,7 @@ _FAKE_PACKAGES: list[dict[str, Any]] = [
 ]
 
 # The postures the fake can be in, as joint angles (radians), one row per joint in
-# Naoqi's ``getBodyNames("Body")`` order. Measured on a simulated Nao (nao-sim):
+# Naoqi's ``getBodyNames("Body")`` order. Measured on a simulated Nao (naoqi-sim):
 # each posture reached with ``ALRobotPosture``, then read with ``get_joints()``.
 _POSTURE_TABLE: list[tuple[str, float, float, float]] = [
     # joint, Crouch, Stand, Sit

@@ -1,6 +1,6 @@
 ---
 code:
-  - src/nao_bridge/observable.py
+  - src/naoqi_bridge/observable.py
 tests:
   - tests/test_observable.py
 ---

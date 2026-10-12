@@ -29,7 +29,7 @@ from support import (
     wait_until,
 )
 
-from nao_bridge import NaoBridge, NaoBridgeConfig, RobotSettings
+from naoqi_bridge import NaoqiBridge, NaoqiBridgeConfig, RobotSettings
 
 pytest.importorskip("qi")
 
@@ -41,7 +41,7 @@ LONG_SENTENCE = (
 
 @pytest.fixture(autouse=True)
 def bridge_warnings(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.WARNING, logger="nao_bridge.bridge")
+    caplog.set_level(logging.WARNING, logger="naoqi_bridge.bridge")
 
 
 # --- Safe ---------------------------------------------------------------------
@@ -63,13 +63,13 @@ def test_a_cancelled_say_stops_the_speech(caplog: pytest.LogCaptureFixture):
 
 def test_a_start_cancelled_while_connecting_comes_back_not_running():
     # A non-routable address: each attempt runs into its timeout. Needs qi, no robot.
-    config = NaoBridgeConfig(
+    config = NaoqiBridgeConfig(
         backend="real",
         robot=RobotSettings(ip="10.255.255.1", connect_tries=1, connect_timeout_s=2.0),
     )
 
     async def run() -> tuple[float, bool]:
-        bridge = NaoBridge(config)
+        bridge = NaoqiBridge(config)
         starting = asyncio.create_task(bridge.start())
         await asyncio.sleep(0.3)
         started = time.monotonic()
@@ -92,7 +92,7 @@ def test_a_start_cancelled_while_connecting_comes_back_not_running():
 
 
 async def cancel_behavior_verb(
-    bridge: NaoBridge,
+    bridge: NaoqiBridge,
     label: str,
     verb: asyncio.Task[None],
     behavior_name: str,

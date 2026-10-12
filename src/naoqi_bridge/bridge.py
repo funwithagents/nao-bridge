@@ -1,11 +1,11 @@
 """The bridge: the object a caller holds to drive Nao.
 
-Specified by [specs/bridge.md](../../specs/bridge.md). ``NaoBridge`` owns the
+Specified by [specs/bridge.md](../../specs/bridge.md). ``NaoqiBridge`` owns the
 ``start()`` / ``stop()`` lifecycle (``async with`` over it) and exposes intent-level
 async verbs that raise why they failed (``errors.py``), the behavior catalog, and the robot's streams — touch
 as an ``Event``, joints as an ``Observable``, the microphone as ``audio_input()``
 subscribers over the mic feed — over the robot seam in [robot.py](robot.py), a real
-Nao or the fake, as the ``NaoBridgeConfig`` says.
+Nao or the fake, as the ``NaoqiBridgeConfig`` says.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Self
 
-from .config import Backend, NaoBridgeConfig
+from .config import Backend, NaoqiBridgeConfig
 from .errors import (
     BridgeError,
     CommandFailedError,
@@ -41,7 +41,7 @@ __all__ = [
     "JointsState",
     "LocalizedString",
     "NaoBehavior",
-    "NaoBridge",
+    "NaoqiBridge",
     "TouchEvent",
     "TouchPart",
     "build_catalog",
@@ -240,20 +240,20 @@ def _drop_outcome(future: asyncio.Future[Any]) -> None:
         future.exception()
 
 
-class NaoBridge:
+class NaoqiBridge:
     """Drive a Nao robot (``real``) or its offline stand-in (``fake``).
 
-    Built from a ``NaoBridgeConfig`` (or a bare backend string). Use
-    ``async with NaoBridge("fake") as bridge:`` or the ``start()`` / ``stop()`` pair.
+    Built from a ``NaoqiBridgeConfig`` (or a bare backend string). Use
+    ``async with NaoqiBridge("fake") as bridge:`` or the ``start()`` / ``stop()`` pair.
     Action verbs return ``None`` on success and raise why they failed: a
     ``BridgeError`` subclass, or ``ValueError`` for an id the catalog doesn't hold.
     """
 
-    def __init__(self, config: NaoBridgeConfig | Backend | None = None) -> None:
+    def __init__(self, config: NaoqiBridgeConfig | Backend | None = None) -> None:
         if config is None:
-            config = NaoBridgeConfig()
+            config = NaoqiBridgeConfig()
         elif isinstance(config, str):
-            config = NaoBridgeConfig(backend=config)
+            config = NaoqiBridgeConfig(backend=config)
         self._config = config
 
         self._robot: NaoRobot | None = None
@@ -271,20 +271,20 @@ class NaoBridge:
 
     @classmethod
     def from_dict(cls, data: Any) -> Self:
-        return cls(NaoBridgeConfig.from_dict(data))
+        return cls(NaoqiBridgeConfig.from_dict(data))
 
     @classmethod
     def from_json(cls, text: str) -> Self:
-        return cls(NaoBridgeConfig.from_json(text))
+        return cls(NaoqiBridgeConfig.from_json(text))
 
     @classmethod
     def from_json_file(cls, path: str | Path) -> Self:
-        return cls(NaoBridgeConfig.from_json_file(path))
+        return cls(NaoqiBridgeConfig.from_json_file(path))
 
     # region Lifecycle
 
     @property
-    def config(self) -> NaoBridgeConfig:
+    def config(self) -> NaoqiBridgeConfig:
         return self._config
 
     @property

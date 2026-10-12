@@ -1,12 +1,12 @@
-"""Nao Bridge: drive a Naoqi robot (or its offline fake) from Python, MCP or WebSocket."""
+"""naoqi-bridge: drive a Naoqi robot (or its offline fake) from Python, MCP or WebSocket."""
 
-from .bridge import BehaviorInfos, JointsState, LocalizedString, NaoBridge, TouchEvent
+from .bridge import BehaviorInfos, JointsState, LocalizedString, NaoqiBridge, TouchEvent
 from .config import (
     AudioStream,
     Backend,
     ConfigError,
     JointsStream,
-    NaoBridgeConfig,
+    NaoqiBridgeConfig,
     RobotSettings,
     StreamSettings,
     TouchStream,
@@ -36,8 +36,8 @@ __all__ = [
     "LocalizedString",
     "MicChunk",
     "MotorsOffError",
-    "NaoBridge",
-    "NaoBridgeConfig",
+    "NaoqiBridge",
+    "NaoqiBridgeConfig",
     "NotPlayingError",
     "NotRunningError",
     "Observable",

@@ -1,4 +1,4 @@
-"""NaoBridge (specs/bridge.md) on the ``fake`` backend: lifecycle, the catalog
+"""NaoqiBridge (specs/bridge.md) on the ``fake`` backend: lifecycle, the catalog
 classifier, verbs, running-item tracking and stop semantics, and the streams.
 
 No robot needed. Async runs via ``asyncio.run``.
@@ -12,24 +12,24 @@ from typing import Any
 
 import pytest
 
-from nao_bridge import (
+from naoqi_bridge import (
     BridgeError,
     CommandFailedError,
     MotorsOffError,
     NotPlayingError,
     NotRunningError,
 )
-from nao_bridge.bridge import JointsState, NaoBridge, TouchEvent, build_catalog
-from nao_bridge.config import (
+from naoqi_bridge.bridge import JointsState, NaoqiBridge, TouchEvent, build_catalog
+from naoqi_bridge.config import (
     AudioStream,
     JointsStream,
-    NaoBridgeConfig,
+    NaoqiBridgeConfig,
     StreamSettings,
     TouchStream,
 )
-from nao_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoRobot
+from naoqi_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoRobot
 
-ALL_STREAMS = NaoBridgeConfig(
+ALL_STREAMS = NaoqiBridgeConfig(
     streams=StreamSettings(
         touch=TouchStream(enabled=True),
         joints=JointsStream(enabled=True, period_s=0.02),
@@ -38,7 +38,7 @@ ALL_STREAMS = NaoBridgeConfig(
 )
 
 
-def fake(bridge: NaoBridge) -> FakeNaoRobot:
+def fake(bridge: NaoqiBridge) -> FakeNaoRobot:
     robot = bridge.robot
     assert isinstance(robot, FakeNaoRobot)
     return robot
@@ -55,7 +55,7 @@ async def wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> Non
 
 def test_async_with_connects_then_closes_the_robot():
     async def run() -> tuple[FakeNaoRobot, bool, bool]:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             robot = fake(bridge)
             connected_inside = robot.connected
         return robot, connected_inside, bridge.running
@@ -67,14 +67,14 @@ def test_async_with_connects_then_closes_the_robot():
 
 
 def test_robot_is_only_reachable_while_running():
-    bridge = NaoBridge("fake")
+    bridge = NaoqiBridge("fake")
     with pytest.raises(NotRunningError):
         _ = bridge.robot
 
 
 def test_starting_twice_is_an_error_and_restart_after_stop_works():
     async def run() -> None:
-        bridge = NaoBridge("fake")
+        bridge = NaoqiBridge("fake")
         await bridge.start()
         with pytest.raises(BridgeError):
             await bridge.start()
@@ -88,7 +88,7 @@ def test_starting_twice_is_an_error_and_restart_after_stop_works():
 
 
 def test_verbs_raise_not_running_when_the_bridge_is_stopped():
-    bridge = NaoBridge("fake")
+    bridge = NaoqiBridge("fake")
     with pytest.raises(NotRunningError, match="call start"):
         asyncio.run(bridge.say("hello"))
     # Checked before the catalog: a stopped bridge doesn't call an id unknown.
@@ -155,7 +155,7 @@ def test_catalog_tolerates_sub_behaviors_without_names_or_tags():
 
 def test_getters_serve_the_robot_catalog_once_started():
     async def run() -> tuple[int, int, list[str]]:
-        bridge = NaoBridge("fake")
+        bridge = NaoqiBridge("fake")
         before = len(bridge.get_dance_behaviors())
         async with bridge:
             return (
@@ -174,7 +174,7 @@ def test_getters_serve_the_robot_catalog_once_started():
 
 def test_verbs_drive_the_robot():
     async def run() -> list[tuple[str, dict[str, Any]]]:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             robot = fake(bridge)
             await bridge.wake_up()
             robot.commands.clear()
@@ -196,7 +196,7 @@ def test_verbs_drive_the_robot():
 
 def test_a_posture_not_reached_raises_command_failed():
     async def run() -> None:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             await bridge.wake_up()
             fake(bridge).posture_succeeds = False
             await bridge.sit_down()
@@ -214,7 +214,7 @@ def test_a_robot_error_is_raised_with_its_reason_and_chained(
         raise naoqi_error
 
     async def run() -> None:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             monkeypatch.setattr(fake(bridge), "say", broken_say)
             await bridge.say("hello")
 
@@ -227,7 +227,7 @@ def test_a_robot_error_is_raised_with_its_reason_and_chained(
 def test_verbs_that_move_the_body_need_the_motors_on():
     async def run() -> tuple[list[str], list[tuple[str, dict[str, Any]]]]:
         messages: list[str] = []
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             robot = fake(bridge)
             robot.commands.clear()
             for verb in (
@@ -269,7 +269,7 @@ def test_verbs_that_move_the_body_need_the_motors_on():
 
 def test_the_motors_are_asked_each_time_not_remembered():
     async def run() -> None:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             await bridge.wake_up()
             await bridge.stand_up()
             await bridge.rest()
@@ -289,7 +289,7 @@ def test_the_motors_are_asked_each_time_not_remembered():
 def test_unknown_catalog_ids_raise_value_error_naming_the_known_ones():
     async def run() -> list[str]:
         messages: list[str] = []
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             for verb in (
                 bridge.dance("macarena"),
                 bridge.run_app("nope"),
@@ -324,7 +324,7 @@ def test_a_reaction_type_without_behaviors_raises_value_error(
     monkeypatch.setattr(FakeNaoRobot, "list_packages", lambda self: packages)
 
     async def run() -> None:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             assert "Proud" in bridge.get_expressive_reaction_types()
             await bridge.expressive_reaction("Proud")
 
@@ -334,7 +334,7 @@ def test_a_reaction_type_without_behaviors_raises_value_error(
 
 def test_a_dance_runs_the_behavior_and_untracks_it_when_done():
     async def run() -> tuple[list[str], list[tuple[str, dict[str, Any]]]]:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             await bridge.wake_up()
             await bridge.dance("gangnam-style")
             return list(bridge.current_dances), fake(bridge).commands
@@ -346,7 +346,7 @@ def test_a_dance_runs_the_behavior_and_untracks_it_when_done():
 
 def test_stop_dance_ends_a_running_dance_but_not_an_idle_one():
     async def run() -> list[str]:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             await bridge.wake_up()
             fake(bridge).behavior_duration_s = 5.0
             with pytest.raises(NotPlayingError, match="dance 'eagle-dance' is not"):
@@ -363,7 +363,7 @@ def test_stop_dance_ends_a_running_dance_but_not_an_idle_one():
 
 def test_stop_expressive_reaction_stops_the_behavior_that_is_playing():
     async def run() -> tuple[str, list[tuple[str, dict[str, Any]]], set[str]]:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             robot = fake(bridge)
             await bridge.wake_up()
             robot.behavior_duration_s = 5.0
@@ -386,7 +386,7 @@ def test_stop_expressive_reaction_stops_the_behavior_that_is_playing():
 @pytest.mark.fake_behavior_durations
 def test_on_a_fresh_fake_behaviors_run_until_stopped():
     async def run() -> tuple[float, list[str], float]:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             await bridge.wake_up()
             duration = fake(bridge).behavior_duration_s
             started = time.monotonic()
@@ -405,7 +405,7 @@ def test_on_a_fresh_fake_behaviors_run_until_stopped():
 
 def test_stop_releases_long_running_behaviors_and_clears_tracking():
     async def run() -> tuple[bool, tuple[str, ...]]:
-        bridge = NaoBridge("fake")
+        bridge = NaoqiBridge("fake")
         await bridge.start()
         await bridge.wake_up()
         fake(bridge).behavior_duration_s = 5.0
@@ -421,8 +421,8 @@ def test_stop_releases_long_running_behaviors_and_clears_tracking():
 
 # --- Cancellation -------------------------------------------------------------
 
-Verb = Callable[[NaoBridge], Coroutine[Any, Any, None]]
-Tracking = Callable[[NaoBridge], Collection[str]]
+Verb = Callable[[NaoqiBridge], Coroutine[Any, Any, None]]
+Tracking = Callable[[NaoqiBridge], Collection[str]]
 
 SPANNING_BEHAVIOR_VERBS: list[tuple[Verb, Tracking]] = [
     (lambda b: b.dance("eagle-dance"), lambda b: b.current_dances),
@@ -440,7 +440,7 @@ def command_names(robot: FakeNaoRobot) -> list[str]:
     return [name for name, _ in robot.commands]
 
 
-async def start_dancing(bridge: NaoBridge) -> asyncio.Task[None]:
+async def start_dancing(bridge: NaoqiBridge) -> asyncio.Task[None]:
     """Wake the robot and start a 5 s ``eagle-dance``, returned once it's playing."""
     await bridge.wake_up()
     fake(bridge).behavior_duration_s = 5.0
@@ -465,7 +465,7 @@ async def cancel_and_wait(task: asyncio.Task[None]) -> float:
 )
 def test_a_cancelled_behavior_verb_stops_its_behavior(verb: Verb, tracking: Tracking):
     async def run() -> tuple[str, float, list[str], Any, Any]:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             robot = fake(bridge)
             await bridge.wake_up()
             robot.behavior_duration_s = 5.0
@@ -492,7 +492,7 @@ def test_a_cancelled_behavior_verb_stops_its_behavior(verb: Verb, tracking: Trac
 
 def test_a_timeout_around_a_dance_stops_it():
     async def run() -> list[str]:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             await bridge.wake_up()
             fake(bridge).behavior_duration_s = 5.0
             with pytest.raises(TimeoutError):
@@ -514,7 +514,7 @@ def test_a_cancelled_dance_stays_tracked_until_it_has_stopped(
 
     async def run() -> tuple[tuple[str, ...], tuple[str, ...]]:
         monkeypatch.setattr(FakeNaoRobot, "stop_behavior", slow_stop)
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             dancing = await start_dancing(bridge)
             dancing.cancel()
             await asyncio.sleep(0.05)
@@ -528,7 +528,7 @@ def test_a_cancelled_dance_stays_tracked_until_it_has_stopped(
 
 def test_a_cancelled_say_stops_the_speech():
     async def run() -> tuple[float, bool, list[str]]:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             robot = fake(bridge)
             robot.speech_duration_s = 5.0
             saying = asyncio.create_task(bridge.say("A very long story"))
@@ -544,7 +544,7 @@ def test_a_cancelled_say_stops_the_speech():
 
 def test_a_cancelled_posture_move_stops_and_raises_only_the_cancel():
     async def run() -> tuple[float, bool, list[str]]:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             robot = fake(bridge)
             await bridge.wake_up()
             robot.posture_duration_s = 5.0
@@ -572,9 +572,9 @@ def test_a_stop_that_finds_nothing_yet_is_sent_again(monkeypatch: pytest.MonkeyP
             stop_behavior(self, name)
 
     async def run() -> list[str]:
-        monkeypatch.setattr("nao_bridge.bridge.STOP_RETRY_S", 0.05)
+        monkeypatch.setattr("naoqi_bridge.bridge.STOP_RETRY_S", 0.05)
         monkeypatch.setattr(FakeNaoRobot, "stop_behavior", stop_missing_the_first_time)
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             await cancel_and_wait(await start_dancing(bridge))
             return fake(bridge).running_behaviors
 
@@ -589,9 +589,9 @@ def test_a_stop_the_robot_never_confirms_gives_up_in_bounded_time(
         self.commands.append(("stop_behavior", {"name": name}))
 
     async def run() -> tuple[float, int, tuple[str, ...]]:
-        monkeypatch.setattr("nao_bridge.bridge.STOP_RETRY_S", 0.02)
+        monkeypatch.setattr("naoqi_bridge.bridge.STOP_RETRY_S", 0.02)
         monkeypatch.setattr(FakeNaoRobot, "stop_behavior", ignored_stop)
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             elapsed = await cancel_and_wait(await start_dancing(bridge))
             stops = command_names(fake(bridge)).count("stop_behavior")
             return elapsed, stops, bridge.current_dances
@@ -614,7 +614,7 @@ def test_a_failing_stop_is_logged_and_the_caller_still_gets_the_cancel(
 
     async def run() -> tuple[str, ...]:
         monkeypatch.setattr(FakeNaoRobot, "stop_behavior", broken_stop)
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             await cancel_and_wait(await start_dancing(bridge))
             return bridge.current_dances
 
@@ -631,7 +631,7 @@ def test_a_second_cancel_does_not_cut_the_stop_short(monkeypatch: pytest.MonkeyP
 
     async def run() -> list[str]:
         monkeypatch.setattr(FakeNaoRobot, "stop_behavior", slow_stop)
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             dancing = await start_dancing(bridge)
             dancing.cancel()
             await asyncio.sleep(0.02)
@@ -656,7 +656,7 @@ def test_a_cancel_during_the_motors_check_sends_nothing(
 
     async def run() -> list[str]:
         monkeypatch.setattr(FakeNaoRobot, "is_awake", slow_is_awake)
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             dancing = asyncio.create_task(bridge.dance("eagle-dance"))
             await wait_until(asked.is_set)
             await cancel_and_wait(dancing)
@@ -671,7 +671,7 @@ def test_a_cancel_during_the_motors_check_sends_nothing(
 
 def test_the_session_is_usable_right_after_a_cancel():
     async def run() -> tuple[list[str], bool]:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             await cancel_and_wait(await start_dancing(bridge))
             fake(bridge).behavior_duration_s = 0.0
             await bridge.dance("gangnam-style")
@@ -694,7 +694,7 @@ def test_a_cancelled_instant_verb_returns_at_once_and_its_command_completes(
 
     async def run() -> tuple[float, list[str]]:
         monkeypatch.setattr(FakeNaoRobot, "fade_eyes", slow_fade)
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             fading = asyncio.create_task(bridge.change_eyes_color("red"))
             await asyncio.sleep(0.05)
             elapsed = await cancel_and_wait(fading)
@@ -719,7 +719,7 @@ def test_a_start_cancelled_while_connecting_closes_the_robot(
 
     async def run() -> tuple[bool, float]:
         monkeypatch.setattr(FakeNaoRobot, "connect", slow_connect)
-        bridge = NaoBridge("fake")
+        bridge = NaoqiBridge("fake")
         starting = asyncio.create_task(bridge.start())
         await asyncio.sleep(0.05)
         elapsed = await cancel_and_wait(starting)
@@ -743,8 +743,8 @@ def test_a_cancelled_stop_still_runs_every_teardown_step(
 
     async def run() -> tuple[bool, list[str]]:
         monkeypatch.setattr(FakeNaoRobot, "unsubscribe_touch", slow_unsubscribe)
-        bridge = NaoBridge(
-            NaoBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True)))
+        bridge = NaoqiBridge(
+            NaoqiBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True)))
         )
         await bridge.start()
         robot = fake(bridge)
@@ -762,11 +762,11 @@ def test_a_cancelled_stop_still_runs_every_teardown_step(
 
 
 def test_construction_from_a_config_a_backend_string_or_nothing():
-    assert NaoBridge().backend == "fake"
-    assert NaoBridge("fake").config == NaoBridgeConfig()
-    from_dict = NaoBridge.from_dict({"streams": {"touch": {"enabled": True}}})
+    assert NaoqiBridge().backend == "fake"
+    assert NaoqiBridge("fake").config == NaoqiBridgeConfig()
+    from_dict = NaoqiBridge.from_dict({"streams": {"touch": {"enabled": True}}})
     assert from_dict.config.streams.touch.enabled
-    assert NaoBridge.from_json('{"backend": "fake"}').backend == "fake"
+    assert NaoqiBridge.from_json('{"backend": "fake"}').backend == "fake"
 
 
 # --- Streams ------------------------------------------------------------------
@@ -774,7 +774,7 @@ def test_construction_from_a_config_a_backend_string_or_nothing():
 
 def test_disabled_streams_are_not_subscribed_and_their_apis_refuse():
     async def run() -> list[str]:
-        async with NaoBridge("fake") as bridge:
+        async with NaoqiBridge("fake") as bridge:
             with pytest.raises(BridgeError, match="joints"):
                 _ = bridge.joints
             with pytest.raises(BridgeError, match="audio"):
@@ -786,7 +786,7 @@ def test_disabled_streams_are_not_subscribed_and_their_apis_refuse():
 
 def test_enabled_streams_are_subscribed_at_start_and_released_at_stop():
     async def run() -> list[tuple[str, dict[str, Any]]]:
-        async with NaoBridge(ALL_STREAMS) as bridge:
+        async with NaoqiBridge(ALL_STREAMS) as bridge:
             robot = fake(bridge)
         return robot.commands
 
@@ -803,7 +803,7 @@ def test_enabled_streams_are_subscribed_at_start_and_released_at_stop():
 def test_touch_events_are_emitted_on_the_event_loop():
     async def run() -> list[tuple[TouchEvent, bool]]:
         received: list[tuple[TouchEvent, bool]] = []
-        async with NaoBridge(ALL_STREAMS) as bridge:
+        async with NaoqiBridge(ALL_STREAMS) as bridge:
             loop = asyncio.get_running_loop()
 
             def on_touch(event: TouchEvent) -> None:
@@ -825,7 +825,7 @@ def test_joints_are_published_while_running_and_reset_at_stop():
     async def run() -> tuple[
         JointsState | None, JointsState | None, JointsState | None
     ]:
-        bridge = NaoBridge(ALL_STREAMS)
+        bridge = NaoqiBridge(ALL_STREAMS)
         before = bridge.joints.value
         await bridge.start()
         sample = await asyncio.wait_for(
@@ -845,7 +845,7 @@ def test_joints_follow_the_posture_verbs():
     crouch, stand, sit = (POSTURE_ANGLES[p] for p in ("Crouch", "Stand", "Sit"))
 
     async def run() -> None:
-        async with NaoBridge(ALL_STREAMS) as bridge:
+        async with NaoqiBridge(ALL_STREAMS) as bridge:
             steps = [
                 (bridge.wake_up, crouch),  # waking keeps the rest posture
                 (bridge.stand_up, stand),
@@ -866,7 +866,7 @@ def test_joints_follow_the_posture_verbs():
 
 def test_audio_input_streams_the_robot_microphone_to_several_subscribers():
     async def run() -> tuple[int, int, bool, bool]:
-        async with NaoBridge(ALL_STREAMS) as bridge:
+        async with NaoqiBridge(ALL_STREAMS) as bridge:
             fake(bridge).audio_chunk_s = 0.01
 
             async def count(n: int) -> int:

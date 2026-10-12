@@ -13,7 +13,7 @@ tests:
 
 ## Purpose
 
-Nao Bridge's testing strategy — the two-tier structure and what a good test looks like. It's a **cross-cutting practice**, not a runtime concept: nothing here ships in the library. It exists as a spec so the decisions have one honest home that stays in sync with the setup, rather than living half in [project.md](project.md) (the tooling choices) and half in [AGENTS.md](../AGENTS.md) (the operational how-to). The concrete shell commands to run each tier live in [AGENTS.md](../AGENTS.md) "Testing".
+naoqi-bridge's testing strategy — the two-tier structure and what a good test looks like. It's a **cross-cutting practice**, not a runtime concept: nothing here ships in the library. It exists as a spec so the decisions have one honest home that stays in sync with the setup, rather than living half in [project.md](project.md) (the tooling choices) and half in [AGENTS.md](../AGENTS.md) (the operational how-to). The concrete shell commands to run each tier live in [AGENTS.md](../AGENTS.md) "Testing".
 
 ## Two tiers, physically separated
 
@@ -27,7 +27,7 @@ Tests split into two directories, and the split is structural — a directory bo
 - **`tests/` is the normal dev loop.** Fast, deterministic, no real network, no credentials. `pyproject.toml`'s `testpaths = ["tests"]` points the default `uv run pytest` here, so this is what runs on every change and what any contributor or CI can run with zero credentials.
 - **`tests-e2e/` is opt-in.** It calls a real external service — network, credentials, non-deterministic output — so it is deliberately *not* collected by the default run. Because `testpaths` already excludes it, no pytest marker or `--run-e2e` flag is needed: the physical separation is the whole mechanism. Run it explicitly (`uv run pytest tests-e2e`).
 
-The `tests/` tier mirrors the `src/nao_bridge/` module layout (`test_<module>.py`, plus the `test_project_map.py` drift-guard); `tests-e2e/` is organized around live scenarios rather than modules.
+The `tests/` tier mirrors the `src/naoqi_bridge/` module layout (`test_<module>.py`, plus the `test_project_map.py` drift-guard); `tests-e2e/` is organized around live scenarios rather than modules.
 
 ## What a good test asserts
 
@@ -50,7 +50,7 @@ The package holds no process-global or singleton state, so neither tier has a re
 
 A live test needs real credentials, and it must **skip — never fail** — when they're absent, so you exercise only the services you hold keys for and a contributor (or CI) with none is never broken. `tests-e2e/support.require_env(NAME)` implements this: it returns the env var or calls `pytest.skip(...)` when it's unset. Credentials come from the environment, never committed.
 
-For Nao Bridge the live service is a **real Nao robot**: e2e tests take its address from `require_env("NAO_IP")` (optional `NAO_PORT`, default 9559) and also need the `qi` wheel installed. The fast tier never needs a robot — it runs `NaoBridge` and both servers on the `fake` backend (`FakeNaoRobot`, reached through `bridge.robot`), and checks `RealNaoRobot`'s connection rules against a stub `qi` module.
+For naoqi-bridge the live service is a **real Nao robot**: e2e tests take its address from `require_env("NAO_IP")` (optional `NAO_PORT`, default 9559) and also need the `qi` wheel installed. The fast tier never needs a robot — it runs `NaoqiBridge` and both servers on the `fake` backend (`FakeNaoRobot`, reached through `bridge.robot`), and checks `RealNaoRobot`'s connection rules against a stub `qi` module.
 
 ## Live tier: levels of risk
 
@@ -64,7 +64,7 @@ A live test that moves the robot needs more than its address: someone has to hav
 
 A flag is on when it's `1`, `true` or `yes`. `tests-e2e/support.py` holds what the levels share:
 - `require_env(name)` and `require_flag(name)`, which skip when the variable or the flag is missing;
-- `live_config(...)`, a `real` `NaoBridgeConfig` from `NAO_IP` / `NAO_PORT` with the streams a test asks for;
+- `live_config(...)`, a `real` `NaoqiBridgeConfig` from `NAO_IP` / `NAO_PORT` with the streams a test asks for;
 - `live_session(...)`, which runs a bridge on it and leaves the robot as it found it: eyes white and, at the motion level, `rest`;
 - the catalog pickers, which take ids from the robot's own catalog (installed dances and apps differ per robot) and skip when it has none.
 

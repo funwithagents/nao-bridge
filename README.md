@@ -1,12 +1,12 @@
-# Nao Bridge - Robot Interaction API & Servers
+# naoqi-bridge - Robot Interaction API & Servers
 
 This repository provides a set of tools to communicate with Nao robots and their API (it should work with any robot running Naoqi, the OS embedded in all Aldebaran robots).
 The focus is on providing interactive high-level APIs to enable AI agent-based interactions with the robot.
 
 It contains:
-- [NaoBridge](src/nao_bridge/bridge.py): the high-level async API to drive Nao, on top of a [robot seam](src/nao_bridge/robot.py) with a `real` backend (a Nao over `qi`) and a `fake` one (no hardware)
-- [Nao MCP server](src/nao_bridge/nao_mcp_server.py): a MCP server exposing NaoBridge as tools for LLM agents
-- [Nao websocket server](src/nao_bridge/nao_websocket_server.py): a websocket server to communicate with NaoBridge over the network
+- [NaoqiBridge](src/naoqi_bridge/bridge.py): the high-level async API to drive Nao, on top of a [robot seam](src/naoqi_bridge/robot.py) with a `real` backend (a Nao over `qi`) and a `fake` one (no hardware)
+- [Nao MCP server](src/naoqi_bridge/naoqi_mcp_server.py): a MCP server exposing NaoqiBridge as tools for LLM agents
+- [Nao websocket server](src/naoqi_bridge/naoqi_websocket_server.py): a websocket server to communicate with NaoqiBridge over the network
 
 Design docs live in [specs/](specs/_index.md); contributor and agent instructions in [AGENTS.md](AGENTS.md).
 
@@ -26,7 +26,7 @@ The project is managed with [uv](https://docs.astral.sh/uv/):
 uv sync --dev
 ```
 
-This installs the package and the `nao-mcp-server` / `nao-websocket-server` commands in `.venv`.
+This installs the package and the `naoqi-mcp-server` / `naoqi-websocket-server` commands in `.venv`.
 
 ## Dependency with qi python package
 
@@ -43,7 +43,7 @@ Communicating with a real Nao relies on the `qi` Python package. It comes from t
 > [!NOTE]
 > Install with `uv`: the wheel locations are uv settings (`[tool.uv.sources]`), which `pip` ignores.
 
-## NaoBridge
+## NaoqiBridge
 
 The high-level async API to drive Nao.
 
@@ -51,12 +51,12 @@ The high-level async API to drive Nao.
 
 ```python
 import asyncio
-from nao_bridge import NaoBridge
+from naoqi_bridge import NaoqiBridge
 
 
 async def main():
-    # NaoBridge("fake") for the offline robot
-    bridge = NaoBridge.from_dict({"backend": "real", "robot": {"ip": "<nao-ip>"}})
+    # NaoqiBridge("fake") for the offline robot
+    bridge = NaoqiBridge.from_dict({"backend": "real", "robot": {"ip": "<nao-ip>"}})
     async with bridge:
         await bridge.wake_up()
         await bridge.say("Hello!")
@@ -70,7 +70,7 @@ asyncio.run(main())
 
 ### Configuration
 
-The bridge is built from a `NaoBridgeConfig`, in code or from JSON (`NaoBridge.from_dict` / `from_json` / `from_json_file`). Every block is optional; the default is the offline fake with no streams:
+The bridge is built from a `NaoqiBridgeConfig`, in code or from JSON (`NaoqiBridge.from_dict` / `from_json` / `from_json_file`). Every block is optional; the default is the offline fake with no streams:
 
 ```json
 {
@@ -102,7 +102,7 @@ streams = {
     "joints": {"enabled": True},
     "audio": {"enabled": True},
 }
-async with NaoBridge.from_dict({"streams": streams}) as bridge:
+async with NaoqiBridge.from_dict({"streams": streams}) as bridge:
     # touch events
     bridge.on_touch.subscribe(lambda event: print(event.part, event.touched))
 
@@ -158,7 +158,7 @@ async with asyncio.timeout(10):
 
 ## Nao MCP server
 
-A MCP server linked to NaoBridge.
+A MCP server linked to NaoqiBridge.
 
 ### Usage
 
@@ -166,11 +166,11 @@ A MCP server linked to NaoBridge.
     - connect your Nao to your network
     - retrieve its IP address (by pressing its torso button) ⇒ `<nao-ip>`
     - put it in a copy of [examples/configs/mcp-real.json](examples/configs/mcp-real.json) (`bridge.robot.ip`)
-    - run the server: `uv run nao-mcp-server --config path/to/mcp-real.json`
+    - run the server: `uv run naoqi-mcp-server --config path/to/mcp-real.json`
 
 - run the server on the fake backend
   - if you don't have a Nao robot or if your current setup is not compatible with the available qi packages, you can run the MCP server on the fake ⇒ all the MCP tools will be available for execution, they will just do nothing real
-  - `uv run nao-mcp-server` (no config means the fake), or `--config examples/configs/mcp-fake.json`
+  - `uv run naoqi-mcp-server` (no config means the fake), or `--config examples/configs/mcp-fake.json`
 
 A server config has a `bridge` block (the bridge's config above) and a `server` block (`transport`: `stdio` or `sse`).
 
@@ -197,7 +197,7 @@ For a real robot (with your copy of `mcp-real.json`):
         "config": {
           "command": "uv",
           "args": [
-            "--directory", "path/to/repo", "run", "nao-mcp-server",
+            "--directory", "path/to/repo", "run", "naoqi-mcp-server",
             "--config", "path/to/mcp-real.json"
           ]
         }
@@ -217,7 +217,7 @@ For the fake backend:
         "config": {
           "command": "uv",
           "args": [
-            "--directory", "path/to/repo", "run", "nao-mcp-server",
+            "--directory", "path/to/repo", "run", "naoqi-mcp-server",
             "--config", "path/to/repo/examples/configs/mcp-fake.json"
           ]
         }
@@ -241,10 +241,10 @@ For the fake backend:
 For a real robot (with your copy of `mcp-real.json`):
 ```json
 "mcpServers": {
-  "nao-mcp": {
+  "naoqi-mcp": {
     "command": "uv",
     "args": [
-      "--directory", "path/to/repo", "run", "nao-mcp-server",
+      "--directory", "path/to/repo", "run", "naoqi-mcp-server",
       "--config", "path/to/mcp-real.json"
     ]
   }
@@ -254,10 +254,10 @@ For a real robot (with your copy of `mcp-real.json`):
 For the fake backend:
 ```json
 "mcpServers": {
-  "nao-mcp": {
+  "naoqi-mcp": {
     "command": "uv",
     "args": [
-      "--directory", "path/to/repo", "run", "nao-mcp-server",
+      "--directory", "path/to/repo", "run", "naoqi-mcp-server",
       "--config", "path/to/repo/examples/configs/mcp-fake.json"
     ]
   }
@@ -267,7 +267,7 @@ For the fake backend:
 - start Claude Desktop
 - start a new conversation with a prompt like this one
 ```
-You are incarnating Nao, a fun and witty robot from the company Aldebaran. You can only answer using the nao-mcp tools, no text output.  And when Nao speaks, use short answers.
+You are incarnating Nao, a fun and witty robot from the company Aldebaran. You can only answer using the naoqi-mcp tools, no text output.  And when Nao speaks, use short answers.
 ```
 
 ### Tools
@@ -292,8 +292,8 @@ You are incarnating Nao, a fun and witty robot from the company Aldebaran. You c
 
 ## Nao websocket server
 
-A server to communicate with NaoBridge over the network via websocket.
-It provides access to all NaoBridge features through websocket messages in JSON format.
+A server to communicate with NaoqiBridge over the network via websocket.
+It provides access to all NaoqiBridge features through websocket messages in JSON format.
 
 ### Usage
 
@@ -301,15 +301,15 @@ It provides access to all NaoBridge features through websocket messages in JSON 
     - connect your Nao to your network
     - retrieve its IP address (by pressing its torso button) ⇒ `<nao-ip>`
     - put it in a copy of [examples/configs/websocket-real.json](examples/configs/websocket-real.json) (`bridge.robot.ip`), and choose the streams sent to the client in `bridge.streams`
-    - run the server: `uv run nao-websocket-server --config path/to/websocket-real.json`
+    - run the server: `uv run naoqi-websocket-server --config path/to/websocket-real.json`
 
 - run the server on the fake backend
   - if you don't have a Nao robot or if your current setup is not compatible with the available qi packages, you can run the server on the fake ⇒ all communication with the server will work but will just do nothing real
-  - `uv run nao-websocket-server --config examples/configs/websocket-fake.json` (every stream on, the fake streams silent audio, and joints for all 26 joints at the angles of its posture: `Crouch` at rest, `Stand` / `Sit` after `StandUp` / `SitDown`. The angles were measured on a simulated Nao)
+  - `uv run naoqi-websocket-server --config examples/configs/websocket-fake.json` (every stream on, the fake streams silent audio, and joints for all 26 joints at the angles of its posture: `Crouch` at rest, `Stand` / `Sit` after `StandUp` / `SitDown`. The angles were measured on a simulated Nao)
 
 The `server` block sets the WebSocket `host` (the address to bind; empty, the default, means the machine's LAN IP, or `127.0.0.1` when offline; `"0.0.0.0"` every interface) and `port` (default 8002; `0` lets the OS pick).
 
 ### Messages
 
 > [!NOTE]
-> The full protocol (envelope, commands and their data, streamed events) is described in [specs/nao-websocket-server.md](specs/nao-websocket-server.md). The first message of every session, `NaoState`, carries `protocolVersion` (currently `1`), bumped only on incompatible changes.
+> The full protocol (envelope, commands and their data, streamed events) is described in [specs/naoqi-websocket-server.md](specs/naoqi-websocket-server.md). The first message of every session, `NaoState`, carries `protocolVersion` (currently `1`), bumped only on incompatible changes.

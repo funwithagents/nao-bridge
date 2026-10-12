@@ -1,6 +1,6 @@
 ---
 code:
-  - src/nao_bridge/events.py
+  - src/naoqi_bridge/events.py
 tests:
   - tests/test_events.py
 ---

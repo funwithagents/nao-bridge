@@ -8,8 +8,8 @@ from typing import Any, ClassVar
 
 import pytest
 
-from nao_bridge.real_robot import RealNaoRobot
-from nao_bridge.robot import RobotConnectionError
+from naoqi_bridge.real_robot import RealNaoRobot
+from naoqi_bridge.robot import RobotConnectionError
 
 
 class _StubSignal:
@@ -169,7 +169,7 @@ def test_real_backend_subscribes_to_the_configured_microphone(
     assert (
         "ALAudioDevice",
         "setClientPreferences",
-        ("NaoBridgeAudio", 16000, code, 0),
+        ("NaoqiBridgeAudio", 16000, code, 0),
     ) in (stub_qi.calls)
 
 

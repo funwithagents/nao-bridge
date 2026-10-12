@@ -1,10 +1,10 @@
-"""Nao WebSocket server: a single-client JSON protocol over ``NaoBridge``.
+"""Nao WebSocket server: a single-client JSON protocol over ``NaoqiBridge``.
 
-Specified by [specs/nao-websocket-server.md](../../specs/nao-websocket-server.md).
+Specified by [specs/naoqi-websocket-server.md](../../specs/naoqi-websocket-server.md).
 Two objects: ``ClientSession`` is the protocol over one connection-like object
 (commands in, results and the robot's touch / joints / audio / log events out), and
-``NaoWebsocketServer`` owns the bridge and the listener, serving one session at a
-time, built from a ``NaoWebsocketServerConfig``.
+``NaoqiWebsocketServer`` owns the bridge and the listener, serving one session at a
+time, built from a ``NaoqiWebsocketServerConfig``.
 """
 
 from __future__ import annotations
@@ -22,11 +22,11 @@ from typing import Any, Protocol, Self
 import websockets
 from websockets.asyncio.server import Server, ServerConnection
 
-from .bridge import BehaviorInfos, NaoBridge, TouchEvent
+from .bridge import BehaviorInfos, NaoqiBridge, TouchEvent
 from .config import (
     ConfigError,
     JsonConfig,
-    NaoBridgeConfig,
+    NaoqiBridgeConfig,
     as_int,
     as_str,
     parse_block,
@@ -38,15 +38,15 @@ __all__ = [
     "PROTOCOL_VERSION",
     "ClientSession",
     "Connection",
-    "NaoWebsocketServer",
-    "NaoWebsocketServerConfig",
+    "NaoqiWebsocketServer",
+    "NaoqiWebsocketServerConfig",
     "WebsocketServerSettings",
 ]
 
 logger = logging.getLogger(__name__)
 
 # Sent on NaoState; bumped on incompatible protocol changes only (specs/
-# nao-websocket-server.md "Protocol version").
+# naoqi-websocket-server.md "Protocol version").
 PROTOCOL_VERSION = 1
 
 # A command's ``commandData`` object.
@@ -79,10 +79,10 @@ class WebsocketServerSettings(JsonConfig):
 
 
 @dataclass(frozen=True)
-class NaoWebsocketServerConfig(JsonConfig):
-    """``{"bridge": NaoBridgeConfig, "server": WebsocketServerSettings}``; both optional."""
+class NaoqiWebsocketServerConfig(JsonConfig):
+    """``{"bridge": NaoqiBridgeConfig, "server": WebsocketServerSettings}``; both optional."""
 
-    bridge: NaoBridgeConfig = field(default_factory=NaoBridgeConfig)
+    bridge: NaoqiBridgeConfig = field(default_factory=NaoqiBridgeConfig)
     server: WebsocketServerSettings = field(default_factory=WebsocketServerSettings)
 
     @classmethod
@@ -91,7 +91,7 @@ class NaoWebsocketServerConfig(JsonConfig):
             cls,
             data,
             path,
-            bridge=NaoBridgeConfig.parse,
+            bridge=NaoqiBridgeConfig.parse,
             server=WebsocketServerSettings.parse,
         )
 
@@ -127,8 +127,8 @@ class ClientSession:
 
     def __init__(
         self,
-        bridge: NaoBridge,
-        config: NaoWebsocketServerConfig,
+        bridge: NaoqiBridge,
+        config: NaoqiWebsocketServerConfig,
         connection: Connection,
     ) -> None:
         self._bridge = bridge
@@ -390,7 +390,7 @@ def _lan_ip() -> str:
         return s.getsockname()[0]
 
 
-class NaoWebsocketServer:
+class NaoqiWebsocketServer:
     """The bridge plus a WebSocket listener serving one ``ClientSession`` at a time.
 
     ``start_connection()`` starts the bridge and listens; ``stop_connection()``
@@ -398,9 +398,9 @@ class NaoWebsocketServer:
     connection, and a host with its own transport can call it too.
     """
 
-    def __init__(self, config: NaoWebsocketServerConfig | None = None) -> None:
-        self.config = config or NaoWebsocketServerConfig()
-        self.nao_bridge = NaoBridge(self.config.bridge)
+    def __init__(self, config: NaoqiWebsocketServerConfig | None = None) -> None:
+        self.config = config or NaoqiWebsocketServerConfig()
+        self.naoqi_bridge = NaoqiBridge(self.config.bridge)
         self._server: Server | None = None
         self._session: ClientSession | None = None
 
@@ -422,7 +422,7 @@ class NaoWebsocketServer:
         robot is unreachable or the listener can't bind."""
         logger.info("Starting nao connection")
         try:
-            await self.nao_bridge.start()
+            await self.naoqi_bridge.start()
         except RobotConnectionError as e:
             logger.error("Could not connect to Nao: %s", e)
             return False
@@ -432,7 +432,7 @@ class NaoWebsocketServer:
             self._server = await websockets.serve(self.attach, host, settings.port)
         except OSError as e:
             logger.error("Could not listen on %s:%d: %s", host, settings.port, e)
-            await self.nao_bridge.stop()
+            await self.naoqi_bridge.stop()
             return False
         logger.info("WebSocket server listening on %s:%d", *(self.address or (host, 0)))
         return True
@@ -446,7 +446,7 @@ class NaoWebsocketServer:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
-        await self.nao_bridge.stop()
+        await self.naoqi_bridge.stop()
 
     async def attach(self, connection: Connection | ServerConnection) -> None:
         """Serve ``connection`` as the client until it ends, replacing the current one."""
@@ -455,7 +455,7 @@ class NaoWebsocketServer:
                 "Received connection from another client, disconnecting previous one"
             )
             await self._session.close()
-        session = ClientSession(self.nao_bridge, self.config, connection)
+        session = ClientSession(self.naoqi_bridge, self.config, connection)
         self._session = session
         try:
             await session.serve()
@@ -464,8 +464,8 @@ class NaoWebsocketServer:
                 self._session = None
 
 
-async def _main(config: NaoWebsocketServerConfig) -> None:
-    server = NaoWebsocketServer(config)
+async def _main(config: NaoqiWebsocketServerConfig) -> None:
+    server = NaoqiWebsocketServer(config)
     if not await server.start_connection():
         logger.error("failed to connect to Nao, exiting")
         raise SystemExit(1)
@@ -484,9 +484,9 @@ def main() -> None:
     args = parser.parse_args()
     try:
         config = (
-            NaoWebsocketServerConfig.from_json_file(args.config)
+            NaoqiWebsocketServerConfig.from_json_file(args.config)
             if args.config
-            else NaoWebsocketServerConfig()
+            else NaoqiWebsocketServerConfig()
         )
     except ConfigError as e:
         parser.error(str(e))

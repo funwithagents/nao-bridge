@@ -18,8 +18,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 import pytest
 
-from nao_bridge import NaoBridge, NaoBridgeConfig, RobotSettings, StreamSettings
-from nao_bridge.real_robot import RealNaoRobot
+from naoqi_bridge import NaoqiBridge, NaoqiBridgeConfig, RobotSettings, StreamSettings
+from naoqi_bridge.real_robot import RealNaoRobot
 
 logger = logging.getLogger("live")
 
@@ -49,11 +49,11 @@ def require_flag(name: str) -> None:
         pytest.skip(f"{name} not set to 1; skipping live test")
 
 
-def live_config(streams: StreamSettings | None = None) -> NaoBridgeConfig:
+def live_config(streams: StreamSettings | None = None) -> NaoqiBridgeConfig:
     """A `real` bridge config for the robot at `NAO_IP` (skips when it's unset)."""
     ip = require_env("NAO_IP")
     port = int(os.environ.get("NAO_PORT", "9559"))
-    return NaoBridgeConfig(
+    return NaoqiBridgeConfig(
         backend="real",
         robot=RobotSettings(ip=ip, port=port, connect_tries=2),
         streams=streams or StreamSettings(),
@@ -62,13 +62,13 @@ def live_config(streams: StreamSettings | None = None) -> NaoBridgeConfig:
 
 @contextlib.asynccontextmanager
 async def live_session(
-    config: NaoBridgeConfig, *, motion: bool = False
-) -> AsyncIterator[NaoBridge]:
+    config: NaoqiBridgeConfig, *, motion: bool = False
+) -> AsyncIterator[NaoqiBridge]:
     """A running bridge on the robot, left as it was found: eyes white and, at the
     motion level (motors woken on entry), at rest."""
     if motion:
         require_flag("NAO_ALLOW_MOTION")
-    async with NaoBridge(config) as bridge:
+    async with NaoqiBridge(config) as bridge:
         try:
             if motion:
                 await bridge.wake_up()
@@ -86,40 +86,40 @@ async def live_session(
                     logger.exception("Restoring the robot failed")
 
 
-def first_dance(bridge: NaoBridge) -> str:
+def first_dance(bridge: NaoqiBridge) -> str:
     dances = bridge.get_dance_behaviors()
     if not dances:
         pytest.skip("this robot has no dance installed")
     return dances[0].id
 
 
-def first_body_action(bridge: NaoBridge) -> str:
+def first_body_action(bridge: NaoqiBridge) -> str:
     actions = bridge.get_body_action_behaviors()
     if not actions:
         pytest.skip("this robot has no body action installed")
     return actions[0].id
 
 
-def dance_behavior(bridge: NaoBridge, dance_id: str) -> str:
+def dance_behavior(bridge: NaoqiBridge, dance_id: str) -> str:
     return next(
         d.behavior_name for d in bridge.get_dance_behaviors() if d.id == dance_id
     )
 
 
-def body_action_behavior(bridge: NaoBridge, action_id: str) -> str:
+def body_action_behavior(bridge: NaoqiBridge, action_id: str) -> str:
     return next(
         a.behavior_name for a in bridge.get_body_action_behaviors() if a.id == action_id
     )
 
 
-def naoqi(bridge: NaoBridge, service: str) -> object:
+def naoqi(bridge: NaoqiBridge, service: str) -> object:
     """A Naoqi service, for a test that wants the robot's own view of its state."""
     robot = bridge.robot
     assert isinstance(robot, RealNaoRobot)
     return robot._service(service)  # pyright: ignore[reportPrivateUsage]
 
 
-def behavior_running(bridge: NaoBridge, behavior_name: str) -> bool:
+def behavior_running(bridge: NaoqiBridge, behavior_name: str) -> bool:
     manager = naoqi(bridge, "ALBehaviorManager")
     return bool(manager.isBehaviorRunning(behavior_name))  # pyright: ignore[reportAttributeAccessIssue]
 
