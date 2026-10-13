@@ -53,9 +53,10 @@ logger = logging.getLogger(__name__)
 POSTURE_SPEED = 0.8
 POSTURE_MAX_TRIES = 3
 
-# A cancelled spanning verb re-sends its stop when the robot call hasn't returned
-# STOP_RETRY_S after it (the cancel may have beaten the command to Naoqi), up to
-# STOP_ATTEMPTS stops in all (specs/bridge.md "How a spanning verb stops").
+# A cancelled spanning verb, or a catalog stop verb, re-sends its stop when the robot
+# call hasn't returned STOP_RETRY_S after it (the stop may have beaten the command to
+# Naoqi), up to STOP_ATTEMPTS stops in all (specs/bridge.md "How a spanning verb
+# stops").
 STOP_RETRY_S = 0.5
 STOP_ATTEMPTS = 4
 
@@ -269,6 +270,8 @@ class NaoqiBridge:
         # What's playing: (kind, id) -> the behavior running for it.
         self._running: dict[tuple[str, str], str] = {}
         self._running_behaviors: list[str] = []
+        # behavior -> its robot call in flight, for the stop verbs to confirm the stop.
+        self._behavior_runs: dict[str, asyncio.Future[Any]] = {}
 
     @classmethod
     def from_dict(cls, data: Any) -> Self:
@@ -454,12 +457,16 @@ class NaoqiBridge:
         verb: str,
         call: Callable[[NaoRobot], T],
         stop: Callable[[NaoRobot], None],
+        started: Callable[[asyncio.Future[T]], None] | None = None,
     ) -> T:
-        """Run the spanning robot ``call`` like ``_act``. Cancelled, it sends ``stop``
-        and waits for ``call`` to return before re-raising, so the robot has stopped
-        what the verb started (specs/bridge.md "How a spanning verb stops")."""
+        """Run the spanning robot ``call`` like ``_act``; ``started`` is handed its
+        future. Cancelled, it sends ``stop`` and waits for ``call`` to return before
+        re-raising, so the robot has stopped what the verb started (specs/bridge.md
+        "How a spanning verb stops")."""
         robot = self.robot
         run = asyncio.ensure_future(asyncio.to_thread(call, robot))
+        if started is not None:
+            started(run)
         try:
             return await asyncio.shield(run)
         except asyncio.CancelledError:
@@ -476,8 +483,9 @@ class NaoqiBridge:
         robot: NaoRobot,
         run: asyncio.Future[Any],
         stop: Callable[[NaoRobot], None],
+        attempts: int = STOP_ATTEMPTS,
     ) -> None:
-        for _ in range(STOP_ATTEMPTS):
+        for _ in range(attempts):
             if run.done():
                 return
             try:
@@ -572,15 +580,25 @@ class NaoqiBridge:
         """Run a behavior, tracked in ``current_behaviors`` until it ends (or, when
         cancelled, until it has stopped)."""
         self._running_behaviors.append(behavior_name)
+        runs = self._behavior_runs
+        run: asyncio.Future[Any] | None = None
+
+        def started(future: asyncio.Future[Any]) -> None:
+            nonlocal run
+            run = runs[behavior_name] = future
+
         try:
             await self._span(
                 "run_behavior",
                 lambda r: r.run_behavior(behavior_name),
                 lambda r: r.stop_behavior(behavior_name),
+                started,
             )
         finally:
             if behavior_name in self._running_behaviors:
                 self._running_behaviors.remove(behavior_name)
+            if run is not None and runs.get(behavior_name) is run:
+                del runs[behavior_name]
 
     async def stop_behavior(self, behavior_name: str) -> None:
         """Stop a running behavior."""
@@ -622,6 +640,19 @@ class NaoqiBridge:
         if behavior_name is None:
             raise NotPlayingError(f"{kind} '{item_id}' is not playing")
         await self.stop_behavior(behavior_name)
+        # The stop may have beaten the behavior to Naoqi, which then plays it anyway:
+        # confirm the stop as a cancelled verb does (specs/bridge.md "Catalog verbs").
+        run = self._behavior_runs.get(behavior_name)
+        if run is None or run.done():
+            return
+        await asyncio.wait({run}, timeout=STOP_RETRY_S)
+        await self._stop_span(
+            f"stop {kind}",
+            self.robot,
+            run,
+            lambda r: r.stop_behavior(behavior_name),
+            attempts=STOP_ATTEMPTS - 1,
+        )
 
     def _playing(self, kind: str) -> tuple[str, ...]:
         return tuple(item_id for k, item_id in self._running if k == kind)

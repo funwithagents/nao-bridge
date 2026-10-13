@@ -10,6 +10,7 @@ import base64
 import json
 import logging
 import socket as socket_module
+import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from types import SimpleNamespace
 from typing import Any, Self
@@ -288,6 +289,34 @@ def test_touch_events_are_streamed_only_during_the_session():
     socket, touches = asyncio.run(run())
     assert socket.of("Touch") == [{"part": "MiddleTactilTouched", "touched": True}]
     assert touches == 1
+
+
+def test_a_session_closed_while_opening_streams_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    wake_up = FakeNaoRobot.wake_up
+
+    def slow_wake_up(self: FakeNaoRobot) -> None:
+        time.sleep(0.3)  # the opening ritual is still going when the session closes
+        wake_up(self)
+
+    async def run() -> MemorySocket:
+        monkeypatch.setattr(FakeNaoRobot, "wake_up", slow_wake_up)
+        async with NaoqiBridge(TOUCH_ONLY.bridge) as bridge:
+            socket = MemorySocket([], until=lambda s: s.closed)
+            session = ClientSession(bridge, TOUCH_ONLY, socket)
+            serving = asyncio.create_task(session.serve())
+            await asyncio.sleep(0.1)
+            await session.close()
+            async with asyncio.timeout(2.0):
+                await serving
+            fake(bridge).touch("MiddleTactilTouched", 1.0)  # after the session
+            await asyncio.sleep(0.05)
+        return socket
+
+    socket = asyncio.run(run())
+    assert socket.closed
+    assert socket.of("Touch") == []
 
 
 def test_joints_and_audio_stream_to_the_client_during_its_session():

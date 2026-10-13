@@ -2,7 +2,7 @@
 
 **Status:** In progress
 
-Implements [project.md](../specs/project.md) ("`qi` is a platform dependency", "Windows"), [robot.md](../specs/robot.md) (`RealNaoRobot`'s one cancellable connect), [config.md](../specs/config.md) (`robot.connect_tries` gone), [bridge.md](../specs/bridge.md) (Lifecycle: a cancelled `start()` gives up the connection) and [ci.md](../specs/ci.md) (the fast tier on three platforms). `qi>=3.1.8,<4` comes from the libqi fork's package index on GitHub Pages instead of per-wheel release URLs, Windows x64 gets the real backend beside macOS arm64 and Linux x86_64, and the connection retry goes, since libqi 3.1.8 fixed the failed connects it was there for. Other platforms still install and run the fake backend only. A live CI job against a simulated Nao stays out of scope (ci.md open question 1).
+Implements [project.md](../specs/project.md) ("`qi` is a platform dependency", "Windows"), [robot.md](../specs/robot.md) (`RealNaoRobot`'s one cancellable connect), [config.md](../specs/config.md) (`robot.connect_tries` gone), [bridge.md](../specs/bridge.md) (Lifecycle: a cancelled `start()` gives up the connection; catalog stop verbs confirm the stop), [naoqi-websocket-server.md](../specs/naoqi-websocket-server.md) (a session closed while opening) and [ci.md](../specs/ci.md) (the fast tier on three platforms). `qi>=3.1.8,<4` comes from the libqi fork's package index on GitHub Pages instead of per-wheel release URLs, Windows x64 gets the real backend beside macOS arm64 and Linux x86_64, and the connection retry goes, since libqi 3.1.8 fixed the failed connects it was there for. Other platforms still install and run the fake backend only. A live CI job against a simulated Nao stays out of scope (ci.md open question 1).
 
 ## Scope
 
@@ -14,8 +14,11 @@ Implements [project.md](../specs/project.md) ("`qi` is a platform dependency", "
 - `src/naoqi_bridge/fake_robot.py`: `connect(cancel=None)` refuses an already-set cancel
 - `src/naoqi_bridge/bridge.py`: `start()` hands `connect` a `threading.Event` and sets it on a cancel
 - `src/naoqi_bridge/config.py`: `RobotSettings.connect_tries` removed
+- `src/naoqi_bridge/bridge.py` (from CI's Windows run): a catalog stop verb re-sends `stop_behavior` until the behavior's run returns, as a cancel does
+- `src/naoqi_bridge/naoqi_websocket_server.py` (from CI's Windows run): a session closed during its connect ritual subscribes nothing and unsubscribes only what it subscribed
 - `tests/test_real_robot.py`: a failed connect is not retried; a silent host fails at the timeout; a cancel gives up the attempt in flight; an already-set cancel makes no attempt (in place of the two retry tests)
-- `tests/test_bridge.py`: a cancelled `start()` gives up a pending connection
+- `tests/test_bridge.py`: a cancelled `start()` gives up a pending connection; a `stop_dance` landing before Naoqi starts the dance still stops it
+- `tests/test_naoqi_websocket_server.py`: a session closed while opening streams nothing
 - `tests/test_config.py`, `tests/test_robot.py`, `tests/test_naoqi_mcp_server.py`, `tests/test_naoqi_websocket_server.py`: without `connect_tries`; `connect_tries` is an unknown key
 - `tests-e2e/support.py`, `tests-e2e/test_live_servers.py`, `tests-e2e/test_live_cancellation.py`: without `connect_tries`; the mid-connection cancel bound is under 1 s instead of the attempt's timeout
 - `examples/configs/*-real.json`: without `connect_tries`
@@ -28,8 +31,8 @@ Implements [project.md](../specs/project.md) ("`qi` is a platform dependency", "
 2. One connect attempt in `RealNaoRobot`, with the cancel event through the seam and the bridge; remove `connect_tries` from the config, the backend, the examples and the tests.
 3. `.gitattributes`; the fast-tier matrix.
 4. Specs, README, overview, indexes.
-5. Fix what the first CI runs on macOS and Windows show (the MCP server's stdout guard against libqi's native log on Windows is the expected risk).
-6. Statuses, once a run on GitHub is green: this plan `Done`; project.md, robot.md, config.md, bridge.md and ci.md `Implemented`.
+5. Fix what the first CI runs show. [Run 38390019808](https://github.com/funwithagents/naoqi-bridge/actions/runs/38390019808): Linux and macOS green; on Windows the MCP server's stdout guard held against libqi's real log, and 2 tests failed on races Windows' slower thread start-up exposed, both bridge bugs: a `stop_dance` landing before the behavior started was lost (the dance played on), and a WebSocket session closed during its connect ritual unsubscribed a touch handler it hadn't subscribed yet (and would have subscribed it after the close). Each now has a test that reproduces it on macOS by slowing the fake, and fails without its fix.
+6. Statuses, once a run on GitHub is green: this plan `Done`; project.md, robot.md, config.md, bridge.md, naoqi-websocket-server.md and ci.md `Implemented`.
 
 ## Verification
 

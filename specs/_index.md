@@ -20,7 +20,7 @@ naoqi-bridge connects AI agents to Aldebaran's Nao robot (and, in principle, any
 | [observable.md](observable.md) | `Observable[T]`: `value`, latest-wins `changes()`, `wait_for`, `set` vs `update` — `bridge.joints` | Implemented |
 | [microphone.md](microphone.md) | Mic feed: one subscription to Naoqi's pushed audio, a 200-chunk ring, any number of `audio_input()` subscribers each with its own cursor, lap warnings, `preroll_s`, `bridge.mic.latest()` | Implemented |
 | [naoqi-mcp-server.md](naoqi-mcp-server.md) | `NaoqiMcpServer`: the MCP tool surface over `NaoqiBridge`, one-loop serving, and the `naoqi-mcp-server` CLI | Implemented |
-| [naoqi-websocket-server.md](naoqi-websocket-server.md) | `NaoqiWebsocketServer`: single-client JSON WebSocket protocol, commands and streamed events | Implemented |
+| [naoqi-websocket-server.md](naoqi-websocket-server.md) | `NaoqiWebsocketServer`: single-client JSON WebSocket protocol, commands and streamed events | Updated |
 
 Each spec also opens with a YAML **frontmatter** block declaring the `code:` and `tests:` files it governs — the spec → code/tests mapping the spec-drift checks use to scope what they compare. Keep it current when files move, and see [AGENTS.md](../AGENTS.md) ("Spec frontmatter") for the full convention.
 

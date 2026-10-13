@@ -362,6 +362,33 @@ def test_stop_dance_ends_a_running_dance_but_not_an_idle_one():
     assert asyncio.run(run()) == []
 
 
+def test_stop_dance_landing_before_naoqi_starts_the_dance_still_stops_it(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    run_behavior = FakeNaoRobot.run_behavior
+
+    def late_run(self: FakeNaoRobot, name: str) -> None:
+        time.sleep(0.2)  # Naoqi hasn't started it yet: a first stop finds nothing
+        run_behavior(self, name)
+
+    async def run() -> tuple[float, list[str]]:
+        monkeypatch.setattr(FakeNaoRobot, "run_behavior", late_run)
+        async with NaoqiBridge("fake") as bridge:
+            await bridge.wake_up()
+            fake(bridge).behavior_duration_s = 5.0
+            dancing = asyncio.create_task(bridge.dance("eagle-dance"))
+            await wait_until(lambda: "eagle-dance" in bridge.current_dances)
+            started = time.monotonic()
+            await bridge.stop_dance("eagle-dance")
+            async with asyncio.timeout(1.0):
+                await dancing  # stopped, not played for its 5 s
+            return time.monotonic() - started, command_names(fake(bridge))
+
+    elapsed, commands = asyncio.run(run())
+    assert elapsed < 1.0  # stop_dance returned once the dance had stopped
+    assert commands.count("stop_behavior") == 2  # the first stop was re-sent
+
+
 def test_stop_expressive_reaction_stops_the_behavior_that_is_playing():
     async def run() -> tuple[str, list[tuple[str, dict[str, Any]]], set[str]]:
         async with NaoqiBridge("fake") as bridge:

@@ -135,6 +135,7 @@ class ClientSession:
         self._config = config
         self._connection = connection
         self._closing = False
+        self._touch_subscribed = False
         self._closed = False
         # Strong references so running tasks aren't garbage-collected mid-flight.
         self._tasks: set[asyncio.Task[None]] = set()
@@ -209,8 +210,9 @@ class ClientSession:
             return
         self._closing = True
         await self._stop_streams()
-        if self._config.bridge.streams.touch.enabled:
+        if self._touch_subscribed:
             self._bridge.on_touch.unsubscribe(self._on_touch)
+            self._touch_subscribed = False
         self._log(logging.INFO, "Reset Nao state after disconnection")
         await self._ritual_step(self._bridge.change_eyes_color("white"))
         await self._ritual_step(self._bridge.set_breathing_enabled(False, "Body"))
@@ -231,9 +233,12 @@ class ClientSession:
                 "fakeRobot": self._bridge.backend == "fake",
             },
         )
+        if self._closing:  # closed while opening: nothing left to stream to
+            return
         streams = self._config.bridge.streams
         if streams.touch.enabled:
             self._bridge.on_touch.subscribe(self._on_touch)
+            self._touch_subscribed = True
         if streams.joints.enabled:
             self._spawn(self._stream_joints(), self._stream_tasks)
         if streams.audio.enabled:

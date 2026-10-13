@@ -64,7 +64,7 @@ Dependencies point one way: servers → bridge → seam → backends. `events.py
 
 ## Status
 
-Every spec is `Implemented` but project.md, robot.md, config.md, bridge.md and ci.md, which are `Updated` while [the libqi index plan](../plans/202610131500_libqi-index-and-windows.md) is `In progress`; every other plan in [plans/_index.md](../plans/_index.md) is `Done`.
+Every spec is `Implemented` but project.md, robot.md, config.md, bridge.md, naoqi-websocket-server.md and ci.md, which are `Updated` while [the libqi index plan](../plans/202610131500_libqi-index-and-windows.md) is `In progress`; every other plan in [plans/_index.md](../plans/_index.md) is `Done`.
 
 | Concept | State |
 | --- | --- |
