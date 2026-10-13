@@ -8,7 +8,7 @@ tests:
 
 # Nao WebSocket server
 
-**Status:** Updated
+**Status:** Implemented
 
 ## Purpose
 

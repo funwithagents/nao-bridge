@@ -1,6 +1,6 @@
 # libqi from its package index, Windows, connect in one attempt
 
-**Status:** In progress
+**Status:** Done
 
 Implements [project.md](../specs/project.md) ("`qi` is a platform dependency", "Windows"), [robot.md](../specs/robot.md) (`RealNaoRobot`'s one cancellable connect), [config.md](../specs/config.md) (`robot.connect_tries` gone), [bridge.md](../specs/bridge.md) (Lifecycle: a cancelled `start()` gives up the connection; catalog stop verbs confirm the stop), [naoqi-websocket-server.md](../specs/naoqi-websocket-server.md) (a session closed while opening) and [ci.md](../specs/ci.md) (the fast tier on three platforms). `qi>=3.1.8,<4` comes from the libqi fork's package index on GitHub Pages instead of per-wheel release URLs, Windows x64 gets the real backend beside macOS arm64 and Linux x86_64, and the connection retry goes, since libqi 3.1.8 fixed the failed connects it was there for. Other platforms still install and run the fake backend only. A live CI job against a simulated Nao stays out of scope (ci.md open question 1).
 
@@ -36,6 +36,6 @@ Implements [project.md](../specs/project.md) ("`qi` is a platform dependency", "
 
 ## Verification
 
-- Locally on macOS arm64 with qi 3.1.8: lint, format, types, the fast tier.
+- Locally on macOS arm64 with qi 3.1.8: lint, format, types, the fast tier (171 passed). With the real wheel, `RealNaoRobot` fails at once on a refused port and after `connect_timeout_s` on a silent host, and the live tier's mid-connection cancel of `start()` returned in 21 ms (it used to wait out the attempt).
 - Step 1 measured with uv 0.11.29 and pip (CPython 3.12, fresh venv): the lock holds `qi` 3.1.8 from the index with its macOS arm64, manylinux x86_64 and Windows amd64 wheels for cp312 and cp313; pip installed naoqi-bridge with `qi` 3.1.8.
-- On GitHub: every job green, the fast tier on all three runners.
+- On GitHub: every job green on [run 38390475017](https://github.com/funwithagents/naoqi-bridge/actions/runs/38390475017), the fast tier 171 passed with no skip on Linux, macOS and Windows (the `qi`-gated tests included).

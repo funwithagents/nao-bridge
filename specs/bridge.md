@@ -13,7 +13,7 @@ tests:
 
 # The bridge (`NaoqiBridge`)
 
-**Status:** Updated
+**Status:** Implemented
 
 ## Purpose
 
