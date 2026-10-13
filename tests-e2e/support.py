@@ -44,8 +44,7 @@ logger = logging.getLogger("live")
 MEASUREMENTS: list[tuple[str, str]] = []
 
 # What a cancel may take on the robot before a test calls it slow: NAOqi's own end of
-# the stopped command (up to about 2.5 s for a posture move or animated speech,
-# measured on a simulated Nao) and one retry interval, inside the bridge's 8 × 0.5 s
+# the stopped command (about 2.4 s for a posture move, measured on a simulated Nao) and one retry interval, inside the bridge's 8 × 0.5 s
 # give-up bound.
 CANCEL_BOUND_S = 3.5
 

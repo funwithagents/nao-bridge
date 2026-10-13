@@ -70,6 +70,7 @@ class NaoqiRobot:
         # can't sit otherwise (specs/sim.md, "What a sim offers the bridge").
         self.sit_through_crouch = sit_through_crouch
         self._posture_stopped = threading.Event()
+        self._speech_stopped = threading.Event()
         self._session: Any = None
         self._services: dict[str, Any] = {}
         self._touch_links: list[tuple[Any, Any]] = []
@@ -146,9 +147,20 @@ class NaoqiRobot:
         self._service("ALTextToSpeech").setLanguage(language)
 
     def say(self, text: str) -> None:
-        self._service("ALAnimatedSpeech").say(text)
+        self._speech_stopped.clear()
+        try:
+            self._service("ALAnimatedSpeech").say(text)
+        except RuntimeError:
+            # ALAnimatedSpeech._stopAll ends a say with an error ("Future canceled"):
+            # stopped is how a say ends, not how it fails.
+            if not self._speech_stopped.is_set():
+                raise
 
     def stop_speech(self) -> None:
+        self._speech_stopped.set()
+        # ALAnimatedSpeech's own stop ends a say at once; without it, NAOqi 2.8's say
+        # waits for its current gesture, up to 2.5 s after ALTextToSpeech.stopAll.
+        self._service("ALAnimatedSpeech")._stopAll(False)
         self._service("ALTextToSpeech").stopAll()
 
     def wake_up(self) -> None:

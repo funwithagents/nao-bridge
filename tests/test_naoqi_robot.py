@@ -343,3 +343,63 @@ def test_a_stop_during_the_crouch_leg_ends_the_sit(stub_qi: type[_StubSession]):
     sitting.join(2.0)
     assert result == [False]
     assert posture.moves == ["Crouch"]  # never went on to Sit
+
+
+class _AnimatedSpeech:
+    """ALAnimatedSpeech: ``say`` runs until ``_stopAll`` ends it with Naoqi's
+    "Future canceled" error, or raises ``fails_with``."""
+
+    def __init__(self, fails_with: str = "") -> None:
+        self.fails_with = fails_with
+        self.stopped = threading.Event()
+        self.calls: list[str] = []
+
+    def say(self, text: str) -> None:
+        if self.fails_with:
+            raise RuntimeError(self.fails_with)
+        if self.stopped.wait(5.0):
+            raise RuntimeError("Future canceled.")
+
+    def _stopAll(self, blocking: bool) -> None:
+        self.calls.append(f"_stopAll({blocking})")
+        self.stopped.set()
+
+
+def _speaking_robot(stub_qi: type[_StubSession], speech: _AnimatedSpeech) -> NaoqiRobot:
+    robot = NaoqiRobot("127.0.0.1")
+    robot.connect()
+    robot._services["ALAnimatedSpeech"] = speech  # pyright: ignore[reportPrivateUsage]
+    return robot
+
+
+def test_stop_speech_ends_a_say_at_once_and_the_say_returns(
+    stub_qi: type[_StubSession],
+):
+    speech = _AnimatedSpeech()
+    robot = _speaking_robot(stub_qi, speech)
+    outcome: list[object] = []
+
+    def say() -> None:
+        try:
+            robot.say("a long sentence")
+            outcome.append("returned")
+        except RuntimeError as e:
+            outcome.append(e)
+
+    saying = threading.Thread(target=say)
+    saying.start()
+    time.sleep(0.05)
+    robot.stop_speech()
+    saying.join(1.0)
+    # Stopped is how a say ends, though Naoqi's call raised "Future canceled".
+    assert outcome == ["returned"]
+    # ALAnimatedSpeech's own stop (at once), then the TTS's.
+    assert speech.calls == ["_stopAll(False)"]
+    assert ("ALTextToSpeech", "stopAll", ()) in stub_qi.calls
+
+
+def test_a_say_naoqi_fails_without_a_stop_still_raises(stub_qi: type[_StubSession]):
+    robot = _speaking_robot(stub_qi, _AnimatedSpeech(fails_with="no voice"))
+    robot.stop_speech()  # a stop before this say does not excuse its failure
+    with pytest.raises(RuntimeError, match="no voice"):
+        robot.say("hello")

@@ -58,7 +58,7 @@ Every method is **blocking** (the bridge calls them via `asyncio.to_thread`) and
 | `connect(cancel=None)` / `close()` | open / close `tcp://<ip>:<port>` |
 | `set_language(language)` | `ALTextToSpeech.setLanguage` |
 | `say(text)` | `ALAnimatedSpeech.say` (returns when spoken) |
-| `stop_speech()` | `ALTextToSpeech.stopAll` (makes a `say` in flight return) |
+| `stop_speech()` | `ALAnimatedSpeech._stopAll(False)` then `ALTextToSpeech.stopAll` (makes a `say` in flight return, at once: with the TTS stop alone, 2.8's `say` waits for its current gesture, up to 2.5 s; `_stopAll` is a hidden method of both 2.1 and 2.8). The `say` it ends returns normally, although `_stopAll` makes Naoqi's call raise ("Future canceled") |
 | `wake_up()` / `rest()` | `ALMotion.wakeUp` / `rest` |
 | `is_awake() -> bool` | `ALMotion.robotIsWakeUp` (motors stiff; asked each time, since the robot can go to rest on its own: fall manager, chest button, another client) |
 | `go_to_posture(posture, speed, max_tries) -> bool` | `ALRobotPosture.setMaxTryNumber` + `goToPosture` (returns when the move ends); with `sit_through_crouch`, Sit goes through Crouch and is judged by `getPosture()` (below) |

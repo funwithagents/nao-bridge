@@ -59,8 +59,8 @@ POSTURE_MAX_TRIES = 3
 # Naoqi), up to STOP_ATTEMPTS stops in all (specs/bridge.md "How a spanning verb
 # stops").
 STOP_RETRY_S = 0.5
-# NAOqi itself can take about 2.5 s to end a stopped posture move or animated speech
-# (measured on a simulated Nao), so the bridge waits up to 4 s.
+# NAOqi itself takes about 2.4 s to end a stopped posture move (measured on a
+# simulated Nao), so the bridge waits up to 4 s.
 STOP_ATTEMPTS = 8
 
 REACTION_TYPES = ("Happy", "Proud", "Laugh", "Sad", "HeadTouched")
