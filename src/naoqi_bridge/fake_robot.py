@@ -1,4 +1,4 @@
-"""The ``fake`` backend: an offline ``NaoRobot`` that records every command.
+"""The ``fake`` backend: an offline ``AnyNaoqiRobot`` that records every command.
 
 Specified by [specs/robot.md](../../specs/robot.md). It serves a fixed ``packages2``-shaped
 package list, simulates behavior runs, speech and posture moves that take time, and
@@ -20,7 +20,7 @@ from .robot import (
     TouchPart,
 )
 
-__all__ = ["JOINT_NAMES", "POSTURE_ANGLES", "REST_POSTURE", "FakeNaoRobot"]
+__all__ = ["JOINT_NAMES", "POSTURE_ANGLES", "REST_POSTURE", "FakeNaoqiRobot"]
 
 
 def _root_package(
@@ -191,8 +191,8 @@ POSTURE_ANGLES: dict[str, tuple[float, ...]] = {
 REST_POSTURE = "Crouch"
 
 
-class FakeNaoRobot:
-    """Offline ``NaoRobot``: records commands, serves a fixed package list.
+class FakeNaoqiRobot:
+    """Offline ``AnyNaoqiRobot``: records commands, serves a fixed package list.
 
     Tests reach it through ``bridge.robot`` to assert on ``commands``, tune
     ``behavior_duration_s`` / ``speech_duration_s`` / ``posture_duration_s`` /
@@ -375,7 +375,7 @@ class FakeNaoRobot:
         self._audio_callback = callback
         self._audio_stop.clear()
         self._audio_thread = threading.Thread(
-            target=self._push_audio, name="fake-nao-audio", daemon=True
+            target=self._push_audio, name="fake-naoqi-audio", daemon=True
         )
         self._audio_thread.start()
 

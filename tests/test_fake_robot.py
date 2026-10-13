@@ -10,11 +10,11 @@ from collections.abc import Callable
 
 import pytest
 
-from naoqi_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoRobot
+from naoqi_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoqiRobot
 
 
 def test_fake_behavior_runs_until_stopped():
-    robot = FakeNaoRobot()
+    robot = FakeNaoqiRobot()
     robot.behavior_duration_s = 5.0
     runner = threading.Thread(target=robot.run_behavior, args=("eagle-dance",))
     runner.start()
@@ -37,7 +37,7 @@ def run_in_thread(
 
 
 def test_fake_speech_lasts_until_stopped_or_closed():
-    robot = FakeNaoRobot()
+    robot = FakeNaoqiRobot()
     robot.speech_duration_s = 5.0
     runner = run_in_thread(lambda: robot.say("Hello"), lambda: robot.speaking)
     robot.stop_speech()
@@ -51,7 +51,7 @@ def test_fake_speech_lasts_until_stopped_or_closed():
 
 
 def test_fake_posture_move_lasts_until_stopped_and_still_reports_its_outcome():
-    robot = FakeNaoRobot()
+    robot = FakeNaoqiRobot()
     robot.posture_duration_s = 5.0
     robot.posture_succeeds = False
     outcome: list[bool] = []
@@ -67,7 +67,7 @@ def test_fake_posture_move_lasts_until_stopped_and_still_reports_its_outcome():
 
 
 def test_fake_stop_before_the_call_finds_nothing_to_stop():
-    robot = FakeNaoRobot()
+    robot = FakeNaoqiRobot()
     robot.speech_duration_s = 0.2
     robot.stop_speech()  # as on the robot: a stop ahead of the call is lost
     started = time.monotonic()
@@ -77,7 +77,7 @@ def test_fake_stop_before_the_call_finds_nothing_to_stop():
 
 @pytest.mark.fake_behavior_durations
 def test_fake_durations_default_to_robot_like_times():
-    robot = FakeNaoRobot()
+    robot = FakeNaoqiRobot()
     assert (
         robot.behavior_duration_s,
         robot.speech_duration_s,
@@ -86,7 +86,7 @@ def test_fake_durations_default_to_robot_like_times():
 
 
 def test_fake_motors_start_off_and_follow_wake_up_and_rest():
-    robot = FakeNaoRobot()
+    robot = FakeNaoqiRobot()
     states = [robot.is_awake()]
     robot.wake_up()
     states.append(robot.is_awake())
@@ -97,7 +97,7 @@ def test_fake_motors_start_off_and_follow_wake_up_and_rest():
 
 
 def test_fake_joints_follow_its_posture_and_wake_up_keeps_it():
-    robot = FakeNaoRobot()
+    robot = FakeNaoqiRobot()
 
     def angles() -> tuple[float, ...]:
         names, values = robot.get_joints()
@@ -119,7 +119,7 @@ def test_fake_joints_follow_its_posture_and_wake_up_keeps_it():
 
 
 def test_fake_posture_is_kept_by_a_failed_stopped_or_unknown_move():
-    robot = FakeNaoRobot()
+    robot = FakeNaoqiRobot()
     robot.posture_succeeds = False
     robot.go_to_posture("Stand", 0.8, 3)
     failed = robot.posture
@@ -138,7 +138,7 @@ def test_fake_posture_is_kept_by_a_failed_stopped_or_unknown_move():
 
 
 def test_fake_close_ends_running_behaviors():
-    robot = FakeNaoRobot()
+    robot = FakeNaoqiRobot()
     robot.behavior_duration_s = 5.0
     runner = threading.Thread(target=robot.run_behavior, args=("presentation",))
     runner.start()
@@ -151,7 +151,7 @@ def test_fake_close_ends_running_behaviors():
 
 
 def test_fake_sensor_events_reach_only_a_subscribed_callback():
-    robot = FakeNaoRobot()
+    robot = FakeNaoqiRobot()
     touches: list[tuple[str, float]] = []
     robot.touch("FrontTactilTouched", 1.0)  # nobody subscribed yet: dropped
     robot.subscribe_touch(lambda key, value: touches.append((key, value)))
@@ -162,13 +162,13 @@ def test_fake_sensor_events_reach_only_a_subscribed_callback():
 
 
 def test_fake_package_list_is_a_fresh_copy():
-    robot = FakeNaoRobot()
+    robot = FakeNaoqiRobot()
     robot.list_packages()[0]["uuid"] = "tampered"
     assert robot.list_packages()[0]["uuid"] != "tampered"
 
 
 def test_fake_pushes_paced_silence_while_audio_is_subscribed():
-    robot = FakeNaoRobot()
+    robot = FakeNaoqiRobot()
     robot.audio_chunk_s = 0.01
     chunks: list[tuple[int, int, bytes]] = []
     robot.subscribe_audio(lambda *chunk: chunks.append(chunk), "front")
@@ -182,7 +182,7 @@ def test_fake_pushes_paced_silence_while_audio_is_subscribed():
 
 
 def test_fake_audio_push_can_be_paused_for_injected_chunks():
-    robot = FakeNaoRobot()
+    robot = FakeNaoqiRobot()
     robot.audio_chunk_s = None
     chunks: list[bytes] = []
     robot.subscribe_audio(lambda _c, _s, buffer: chunks.append(buffer), "front")

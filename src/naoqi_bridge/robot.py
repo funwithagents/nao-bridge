@@ -1,9 +1,9 @@
 """Connection seam between naoqi-bridge and a Naoqi robot.
 
-Specified by [specs/robot.md](../../specs/robot.md). ``NaoRobot`` is the Protocol listing
+Specified by [specs/robot.md](../../specs/robot.md). ``AnyNaoqiRobot`` is the Protocol listing
 the Naoqi capabilities the bridge consumes, with the types and constants both
-implementations share. ``RealNaoRobot`` ([real_robot.py](real_robot.py)) implements it
-over a ``qi`` session and ``FakeNaoRobot`` ([fake_robot.py](fake_robot.py)) offline,
+implementations share. ``NaoqiRobot`` ([naoqi_robot.py](naoqi_robot.py)) implements it
+over a ``qi`` session and ``FakeNaoqiRobot`` ([fake_robot.py](fake_robot.py)) offline,
 recording every command. ``build_robot`` selects one from the bridge config.
 """
 
@@ -19,8 +19,8 @@ __all__ = [
     "AUDIO_CHANNEL_CODES",
     "AUDIO_SAMPLE_RATE",
     "TOUCH_KEYS",
+    "AnyNaoqiRobot",
     "AudioCallback",
-    "NaoRobot",
     "RobotConnectionError",
     "TouchCallback",
     "TouchPart",
@@ -55,7 +55,7 @@ class RobotConnectionError(RuntimeError):
     """The robot could not be reached, or the real backend lacks the ``qi`` package."""
 
 
-class NaoRobot(Protocol):
+class AnyNaoqiRobot(Protocol):
     """The Naoqi slice the bridge consumes. Every method blocks and raises on failure."""
 
     def connect(self, cancel: threading.Event | None = None) -> None: ...
@@ -85,13 +85,13 @@ class NaoRobot(Protocol):
     def unsubscribe_audio(self) -> None: ...
 
 
-def build_robot(config: NaoqiBridgeConfig) -> NaoRobot:
+def build_robot(config: NaoqiBridgeConfig) -> AnyNaoqiRobot:
     """Build (not connect) the robot for ``config.backend``: ``fake`` or ``real``."""
     # Imported here: both modules import this one for the shared types.
-    from .fake_robot import FakeNaoRobot
-    from .real_robot import RealNaoRobot
+    from .fake_robot import FakeNaoqiRobot
+    from .naoqi_robot import NaoqiRobot
 
     if config.backend == "fake":
-        return FakeNaoRobot()
+        return FakeNaoqiRobot()
     robot = config.robot
-    return RealNaoRobot(robot.ip, robot.port, connect_timeout_s=robot.connect_timeout_s)
+    return NaoqiRobot(robot.ip, robot.port, connect_timeout_s=robot.connect_timeout_s)

@@ -1,4 +1,4 @@
-"""Nao WebSocket server: a single-client JSON protocol over ``NaoqiBridge``.
+"""Naoqi WebSocket server: a single-client JSON protocol over ``NaoqiBridge``.
 
 Specified by [specs/naoqi-websocket-server.md](../../specs/naoqi-websocket-server.md).
 Two objects: ``ClientSession`` is the protocol over one connection-like object
@@ -45,9 +45,9 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# Sent on NaoState; bumped on incompatible protocol changes only (specs/
+# Sent on NaoqiState; bumped on incompatible protocol changes only (specs/
 # naoqi-websocket-server.md "Protocol version").
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 # A command's ``commandData`` object.
 type CommandData = dict[str, Any]
@@ -119,7 +119,7 @@ def _behavior_payload(behavior: BehaviorInfos) -> dict[str, Any]:
 class ClientSession:
     """The protocol over one connection, for as long as it lasts.
 
-    ``serve()`` readies the robot, sends ``NaoState``, starts the streams the bridge
+    ``serve()`` readies the robot, sends ``NaoqiState``, starts the streams the bridge
     config enables, then reads commands until the connection ends; ``close()`` ends
     the session from the server's side (a newer client, shutdown). Every command runs
     as its own task, so a long one (``Dance``) doesn't block its stop command.
@@ -226,7 +226,7 @@ class ClientSession:
         await self._ritual_step(self._bridge.wake_up())
         await self._ritual_step(self._bridge.set_breathing_enabled(True, "Body"))
         await self._send(
-            "NaoState",
+            "NaoqiState",
             {
                 "protocolVersion": PROTOCOL_VERSION,
                 "connected": self._bridge.running,
@@ -481,7 +481,7 @@ async def _main(config: NaoqiWebsocketServerConfig) -> None:
 
 def main() -> None:
     """Main entry point for the application."""
-    parser = argparse.ArgumentParser(description="Nao WebSocket Server")
+    parser = argparse.ArgumentParser(description="Naoqi WebSocket server")
     parser.add_argument(
         "--config",
         help="Path to a JSON server config (default: the fake robot on port 8002)",

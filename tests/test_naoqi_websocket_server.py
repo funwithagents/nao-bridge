@@ -27,7 +27,7 @@ from naoqi_bridge.config import (
     StreamSettings,
     TouchStream,
 )
-from naoqi_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoRobot
+from naoqi_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoqiRobot
 from naoqi_bridge.naoqi_websocket_server import (
     ClientSession,
     NaoqiWebsocketServer,
@@ -37,7 +37,7 @@ from naoqi_bridge.naoqi_websocket_server import (
 
 LOOPBACK = WebsocketServerSettings(host="127.0.0.1", port=0)
 # The version is part of the contract: bumping it should take a test change too.
-NAO_STATE = {"protocolVersion": 1, "connected": True, "fakeRobot": True}
+NAOQI_STATE = {"protocolVersion": 2, "connected": True, "fakeRobot": True}
 TOUCH_ONLY = NaoqiWebsocketServerConfig(
     bridge=NaoqiBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True))),
     server=LOOPBACK,
@@ -114,9 +114,9 @@ def command(uuid: str, command_id: str, **data: Any) -> dict[str, Any]:
     }
 
 
-def fake(bridge: NaoqiBridge) -> FakeNaoRobot:
+def fake(bridge: NaoqiBridge) -> FakeNaoqiRobot:
     robot = bridge.robot
-    assert isinstance(robot, FakeNaoRobot)
+    assert isinstance(robot, FakeNaoqiRobot)
     return robot
 
 
@@ -142,7 +142,7 @@ def session(
 
 def test_a_client_session_readies_then_rests_the_robot():
     socket, robot_calls = session([], answers=0)
-    assert socket.of("NaoState") == [NAO_STATE]
+    assert socket.of("NaoqiState") == [NAOQI_STATE]
     assert robot_calls[robot_calls.index("fade_eyes") :][:3] == [
         "fade_eyes",
         "wake_up",
@@ -178,10 +178,10 @@ def test_commands_answer_with_their_uuid_and_result():
 def test_a_failed_ritual_step_is_a_warning_and_the_session_goes_on(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    def broken_wake_up(self: FakeNaoRobot) -> None:
+    def broken_wake_up(self: FakeNaoqiRobot) -> None:
         raise RuntimeError("motors too hot")
 
-    monkeypatch.setattr(FakeNaoRobot, "wake_up", broken_wake_up)
+    monkeypatch.setattr(FakeNaoqiRobot, "wake_up", broken_wake_up)
     socket, robot_calls = session([command("c1", "Say", text="Hello")], answers=1)
     [ended] = socket.of("CommandEnded")
     assert ended["resultType"] == "Success"
@@ -278,7 +278,7 @@ def test_touch_events_are_streamed_only_during_the_session():
             serving = asyncio.create_task(
                 ClientSession(bridge, TOUCH_ONLY, socket).serve()
             )
-            await wait_until(lambda: bool(socket.of("NaoState")))
+            await wait_until(lambda: bool(socket.of("NaoqiState")))
             robot.touch("MiddleTactilTouched", 1.0)
             async with asyncio.timeout(2.0):
                 await serving
@@ -294,14 +294,14 @@ def test_touch_events_are_streamed_only_during_the_session():
 def test_a_session_closed_while_opening_streams_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    wake_up = FakeNaoRobot.wake_up
+    wake_up = FakeNaoqiRobot.wake_up
 
-    def slow_wake_up(self: FakeNaoRobot) -> None:
+    def slow_wake_up(self: FakeNaoqiRobot) -> None:
         time.sleep(0.3)  # the opening ritual is still going when the session closes
         wake_up(self)
 
     async def run() -> MemorySocket:
-        monkeypatch.setattr(FakeNaoRobot, "wake_up", slow_wake_up)
+        monkeypatch.setattr(FakeNaoqiRobot, "wake_up", slow_wake_up)
         async with NaoqiBridge(TOUCH_ONLY.bridge) as bridge:
             socket = MemorySocket([], until=lambda s: s.closed)
             session = ClientSession(bridge, TOUCH_ONLY, socket)
@@ -363,7 +363,7 @@ def test_a_second_client_replaces_the_first_one_cleanly(
         robot = fake(server.naoqi_bridge)
         first = MemorySocket([], until=lambda s: s.closed)
         first_serving = asyncio.create_task(server.attach(first))
-        await wait_until(lambda: bool(first.of("NaoState")))
+        await wait_until(lambda: bool(first.of("NaoqiState")))
         robot.commands.clear()
         second = MemorySocket([])
         await server.attach(second)
@@ -377,7 +377,7 @@ def test_a_second_client_replaces_the_first_one_cleanly(
     # The first client is reset (rest) before the second is readied (wake_up).
     assert robot_calls.index("rest") < robot_calls.index("wake_up")
     assert robot_calls.count("rest") == 2
-    assert second.of("NaoState") == [NAO_STATE]
+    assert second.of("NaoqiState") == [NAOQI_STATE]
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
 
 
@@ -397,7 +397,7 @@ def test_the_listener_serves_a_real_websocket_client_on_the_configured_host():
                         if message["id"] == message_id:
                             return message["data"]
 
-            state = await receive("NaoState")
+            state = await receive("NaoqiState")
             await client.send(json.dumps(command("c1", "Say", text="over the wire")))
             ended = await receive("CommandEnded")
         await wait_until(lambda: server.session is None)
@@ -406,7 +406,7 @@ def test_the_listener_serves_a_real_websocket_client_on_the_configured_host():
 
     address, state, ended = asyncio.run(run())
     assert address is not None and address[0] == "127.0.0.1" and address[1] > 0
-    assert state == NAO_STATE
+    assert state == NAOQI_STATE
     assert (ended["commandUuid"], ended["resultType"]) == ("c1", "Success")
 
 

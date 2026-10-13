@@ -32,6 +32,7 @@ Implementation plans for naoqi-bridge — each plan turns a settled part of a sp
 | [202610091900_fake-joints-follow-its-posture.md](202610091900_fake-joints-follow-its-posture.md) | The fake reports all 26 `Body` joints at the angles of its posture (`Crouch` at rest, `Stand`, `Sit`), following `rest()` and `go_to_posture`; angles measured on a simulated Nao | Done |
 | [202610121745_rename-to-naoqi-bridge.md](202610121745_rename-to-naoqi-bridge.md) | Rename to naoqi-bridge: package, `naoqi-mcp-server`/`naoqi-websocket-server` and their modules and specs, `NaoqiBridge*` and server classes, specs and docs; robot names (`NaoRobot`, `NAO_IP`…) kept | Done |
 | [202610131500_libqi-index-and-windows.md](202610131500_libqi-index-and-windows.md) | `qi>=3.1.8,<4` from the libqi package index, Windows x64 joins the real backend (others stay fake-only); one connect attempt, `connect_tries` removed, a cancelled `start()` gives up the connection in flight; fast tier on Linux, macOS and Windows; two races Windows exposed fixed (catalog stops confirm the stop, a session closed while opening) | Done |
+| [202610131752_nao-names-to-naoqi.md](202610131752_nao-names-to-naoqi.md) | Robot names to Naoqi: `NaoqiRobot` (in `naoqi_robot.py`, was `RealNaoRobot`), `FakeNaoqiRobot`, the `AnyNaoqiRobot` Protocol, `NaoqiBehavior`; the live tier's `NAOQI_E2E_*` variables; the WebSocket protocol's `NaoqiState`, `protocolVersion` 2 | Done |
 
 ## Status legend
 

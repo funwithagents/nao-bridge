@@ -1,4 +1,4 @@
-"""The mic feed (specs/microphone.md) over a FakeNaoRobot whose paced push is paused,
+"""The mic feed (specs/microphone.md) over a FakeNaoqiRobot whose paced push is paused,
 so each test pushes numbered chunks itself: every subscriber gets every chunk in order,
 a lapped one reports the gap, pre-roll reaches back, cancellation and session end.
 
@@ -12,17 +12,17 @@ import pytest
 
 from naoqi_bridge import microphone
 from naoqi_bridge.errors import BridgeError
-from naoqi_bridge.fake_robot import FakeNaoRobot
+from naoqi_bridge.fake_robot import FakeNaoqiRobot
 from naoqi_bridge.microphone import MicFeed
 
 
-def quiet_robot() -> FakeNaoRobot:
-    robot = FakeNaoRobot()
+def quiet_robot() -> FakeNaoqiRobot:
+    robot = FakeNaoqiRobot()
     robot.audio_chunk_s = None  # only the chunks a test pushes
     return robot
 
 
-def push(robot: FakeNaoRobot, index: int) -> None:
+def push(robot: FakeNaoqiRobot, index: int) -> None:
     """Push one mono chunk whose single sample is ``index``."""
     robot.emit_audio(1, 1, index.to_bytes(2, "little"))
 
@@ -41,7 +41,7 @@ async def take(stream: AsyncIterator[bytes], n: int) -> list[int]:
     return out
 
 
-async def push_paced(robot: FakeNaoRobot, indexes: range) -> None:
+async def push_paced(robot: FakeNaoqiRobot, indexes: range) -> None:
     for i in indexes:
         push(robot, i)
         await asyncio.sleep(0.001)

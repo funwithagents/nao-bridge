@@ -28,11 +28,11 @@ tests:
 - **`await stop()`** cancels the joints task and publishes `None` on `joints`. It then stops the mic feed (which ends every `audio_input()` subscriber), unsubscribes touch, closes the robot, and clears the running-item tracking. It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it. Cancelling `start()` or `stop()` follows "Cancellation" below: neither leaves anything half up.
 - **`async with NaoqiBridge(...) as bridge:`** is shorthand for the pair, and runs `stop()` on every way out.
 - `running: bool`. `config` and `backend` (read-only).
-- **Escape hatch:** `bridge.robot` is the `NaoRobot` — the `FakeNaoRobot` on `fake`, which tests use to assert on recorded commands. It raises `NotRunningError` when the bridge isn't running.
+- **Escape hatch:** `bridge.robot` is the `AnyNaoqiRobot` — the `FakeNaoqiRobot` on `fake`, which tests use to assert on recorded commands. It raises `NotRunningError` when the bridge isn't running.
 
 ### Action verb contract
 
-Every action is `async`, returns `None` when it succeeded, and **raises** to say why it didn't, so a caller (an agent through a server, above all) can act on the reason. Blocking robot calls run in `asyncio.to_thread`. There's no special fake-mode branch: on `fake`, the `FakeNaoRobot` answers.
+Every action is `async`, returns `None` when it succeeded, and **raises** to say why it didn't, so a caller (an agent through a server, above all) can act on the reason. Blocking robot calls run in `asyncio.to_thread`. There's no special fake-mode branch: on `fake`, the `FakeNaoqiRobot` answers.
 
 - A verb on a bridge that isn't running raises `NotRunningError`, before anything else is checked.
 - **A verb that moves the body needs the motors on.** Before sending its command it asks the robot (`is_awake()`, [robot.md](robot.md)) and raises `MotorsOffError("<verb>: the motors are off; call wake_up() first")` when they're off. The robot is asked every time rather than the bridge tracking `wake_up()` / `rest()`, since the robot can go to rest without the bridge (fall manager, chest button, another client). The check guides the caller; it isn't a guarantee: if the motors go off between the check and the command, Naoqi's own failure arrives as `CommandFailedError`. It runs after the catalog lookup, so an unknown id is still a `ValueError`. The verbs that check: `stand_up`, `sit_down`, `set_breathing_enabled(True, …)`, `run_behavior`, and the catalog verbs `dance`, `expressive_reaction`, `body_action`, `run_app`. The others (`say`, the eyes, the TTS language, basic awareness, `set_breathing_enabled(False, …)`, `wake_up` / `rest` and every stop verb) don't.
@@ -52,7 +52,7 @@ Every action is `async`, returns `None` when it succeeded, and **raises** to say
 
 ### Behavior catalog
 
-`start()` reads `robot.list_packages()` and classifies it with `build_catalog(packages) -> BehaviorCatalog`. That's a pure function, the same for both backends. It first flattens packages into `NaoBehavior(package_uuid, behavior_path, behavior_name, localized_name: LocalizedString(en_US, fr_FR), description, tags)`, where the root behavior (`path == "."`) takes the package's names, description and uuid as its name. Each catalog entry is a `BehaviorInfos(id, behavior_name, localized_name, description)`:
+`start()` reads `robot.list_packages()` and classifies it with `build_catalog(packages) -> BehaviorCatalog`. That's a pure function, the same for both backends. It first flattens packages into `NaoqiBehavior(package_uuid, behavior_path, behavior_name, localized_name: LocalizedString(en_US, fr_FR), description, tags)`, where the root behavior (`path == "."`) takes the package's names, description and uuid as its name. Each catalog entry is a `BehaviorInfos(id, behavior_name, localized_name, description)`:
 
 | Catalog | Getter | Selection rule | Id |
 |---|---|---|---|

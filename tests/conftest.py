@@ -8,7 +8,7 @@
 
 import pytest
 
-from naoqi_bridge.fake_robot import FakeNaoRobot
+from naoqi_bridge.fake_robot import FakeNaoqiRobot
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +21,6 @@ def instant_fake_behaviors(
     ``posture_duration_s`` on its fake; one that checks the real defaults is marked
     ``fake_behavior_durations`` (specs/testing.md "Instant fake behaviors")."""
     if request.node.get_closest_marker("fake_behavior_durations") is None:
-        monkeypatch.setattr(FakeNaoRobot, "DEFAULT_BEHAVIOR_DURATION_S", 0.0)
-        monkeypatch.setattr(FakeNaoRobot, "DEFAULT_SPEECH_DURATION_S", 0.0)
-        monkeypatch.setattr(FakeNaoRobot, "DEFAULT_POSTURE_DURATION_S", 0.0)
+        monkeypatch.setattr(FakeNaoqiRobot, "DEFAULT_BEHAVIOR_DURATION_S", 0.0)
+        monkeypatch.setattr(FakeNaoqiRobot, "DEFAULT_SPEECH_DURATION_S", 0.0)
+        monkeypatch.setattr(FakeNaoqiRobot, "DEFAULT_POSTURE_DURATION_S", 0.0)

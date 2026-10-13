@@ -5,8 +5,8 @@ calls `require_env(...)` up front so it *skips* cleanly — you only exercise th
 services you hold keys for, and a contributor (or CI) with none is never broken.
 
 Here the service is a real Nao, and the tier has three levels of risk
-(specs/testing.md "Live tier: levels of risk"): safe (`NAO_IP`), motion
-(`NAO_ALLOW_MOTION=1`) and interactive (`NAO_INTERACTIVE=1`).
+(specs/testing.md "Live tier: levels of risk"): safe (`NAOQI_E2E_IP`), motion
+(`NAOQI_E2E_ALLOW_MOTION=1`) and interactive (`NAOQI_E2E_INTERACTIVE=1`).
 """
 
 import asyncio
@@ -19,7 +19,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 import pytest
 
 from naoqi_bridge import NaoqiBridge, NaoqiBridgeConfig, RobotSettings, StreamSettings
-from naoqi_bridge.real_robot import RealNaoRobot
+from naoqi_bridge.naoqi_robot import NaoqiRobot
 
 logger = logging.getLogger("live")
 
@@ -50,9 +50,9 @@ def require_flag(name: str) -> None:
 
 
 def live_config(streams: StreamSettings | None = None) -> NaoqiBridgeConfig:
-    """A `real` bridge config for the robot at `NAO_IP` (skips when it's unset)."""
-    ip = require_env("NAO_IP")
-    port = int(os.environ.get("NAO_PORT", "9559"))
+    """A `real` bridge config for the robot at `NAOQI_E2E_IP` (skips when it's unset)."""
+    ip = require_env("NAOQI_E2E_IP")
+    port = int(os.environ.get("NAOQI_E2E_PORT", "9559"))
     return NaoqiBridgeConfig(
         backend="real",
         robot=RobotSettings(ip=ip, port=port),
@@ -67,7 +67,7 @@ async def live_session(
     """A running bridge on the robot, left as it was found: eyes white and, at the
     motion level (motors woken on entry), at rest."""
     if motion:
-        require_flag("NAO_ALLOW_MOTION")
+        require_flag("NAOQI_E2E_ALLOW_MOTION")
     async with NaoqiBridge(config) as bridge:
         try:
             if motion:
@@ -115,7 +115,7 @@ def body_action_behavior(bridge: NaoqiBridge, action_id: str) -> str:
 def naoqi(bridge: NaoqiBridge, service: str) -> object:
     """A Naoqi service, for a test that wants the robot's own view of its state."""
     robot = bridge.robot
-    assert isinstance(robot, RealNaoRobot)
+    assert isinstance(robot, NaoqiRobot)
     return robot._service(service)  # pyright: ignore[reportPrivateUsage]
 
 

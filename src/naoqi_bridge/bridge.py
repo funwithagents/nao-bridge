@@ -33,7 +33,7 @@ from .errors import (
 from .events import Event
 from .microphone import MicFeed
 from .observable import Observable
-from .robot import TOUCH_KEYS, NaoRobot, TouchPart, build_robot
+from .robot import TOUCH_KEYS, AnyNaoqiRobot, TouchPart, build_robot
 
 __all__ = [
     "REACTION_TYPES",
@@ -41,7 +41,7 @@ __all__ = [
     "BehaviorInfos",
     "JointsState",
     "LocalizedString",
-    "NaoBehavior",
+    "NaoqiBehavior",
     "NaoqiBridge",
     "TouchEvent",
     "TouchPart",
@@ -98,7 +98,7 @@ class LocalizedString:
 
 
 @dataclass
-class NaoBehavior:
+class NaoqiBehavior:
     package_uuid: str
     behavior_path: str
     behavior_name: str
@@ -126,8 +126,8 @@ class BehaviorCatalog:
 # region Catalog
 
 
-def _parse_behaviors(packages: list[dict[str, Any]]) -> list[NaoBehavior]:
-    behaviors: list[NaoBehavior] = []
+def _parse_behaviors(packages: list[dict[str, Any]]) -> list[NaoqiBehavior]:
+    behaviors: list[NaoqiBehavior] = []
     for package in packages:
         elems = package.get("elems", {})
         if not {"contents", "names", "descriptions"} <= elems.keys():
@@ -147,7 +147,7 @@ def _parse_behaviors(packages: list[dict[str, Any]]) -> list[NaoBehavior]:
                 name_fr = names.get("fr_FR", name_en)
                 description = entry.get("langToDesc", {}).get("en_US", "")
             behaviors.append(
-                NaoBehavior(
+                NaoqiBehavior(
                     package_uuid=package["uuid"],
                     behavior_path=entry["path"],
                     behavior_name=behavior_name,
@@ -159,7 +159,7 @@ def _parse_behaviors(packages: list[dict[str, Any]]) -> list[NaoBehavior]:
     return behaviors
 
 
-def _infos(behavior: NaoBehavior) -> BehaviorInfos:
+def _infos(behavior: NaoqiBehavior) -> BehaviorInfos:
     return BehaviorInfos(
         id=behavior.behavior_name,
         behavior_name=behavior.behavior_name,
@@ -168,7 +168,7 @@ def _infos(behavior: NaoBehavior) -> BehaviorInfos:
     )
 
 
-def _body_action(behavior: NaoBehavior) -> BehaviorInfos:
+def _body_action(behavior: NaoqiBehavior) -> BehaviorInfos:
     leaf = behavior.behavior_path.split("/")[-1]
     description = leaf
     for word, replacement in _BODY_ACTION_WORDS.items():
@@ -181,7 +181,7 @@ def _body_action(behavior: NaoBehavior) -> BehaviorInfos:
     )
 
 
-def _is_app(behavior: NaoBehavior) -> bool:
+def _is_app(behavior: NaoqiBehavior) -> bool:
     return (
         behavior.package_uuid not in _SYSTEM_PACKAGES
         and "dialog" not in behavior.package_uuid
@@ -258,7 +258,7 @@ class NaoqiBridge:
             config = NaoqiBridgeConfig(backend=config)
         self._config = config
 
-        self._robot: NaoRobot | None = None
+        self._robot: AnyNaoqiRobot | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._joints_task: asyncio.Task[None] | None = None
         self._catalog = BehaviorCatalog()
@@ -300,8 +300,8 @@ class NaoqiBridge:
         return self._robot is not None
 
     @property
-    def robot(self) -> NaoRobot:
-        """The underlying robot (``FakeNaoRobot`` on ``fake``); only while running."""
+    def robot(self) -> AnyNaoqiRobot:
+        """The underlying robot (``FakeNaoqiRobot`` on ``fake``); only while running."""
         if self._robot is None:
             raise NotRunningError("the bridge is not running; call start() first")
         return self._robot
@@ -329,7 +329,9 @@ class NaoqiBridge:
                 self._joints_loop(robot, streams.joints.period_s)
             )
 
-    async def _bring_up(self, robot: NaoRobot, cancel_connect: threading.Event) -> None:
+    async def _bring_up(
+        self, robot: AnyNaoqiRobot, cancel_connect: threading.Event
+    ) -> None:
         """Connect ``robot`` (giving up once ``cancel_connect`` is set), subscribe the
         enabled streams and load the catalog; a failure after the connection tears
         down what already came up."""
@@ -347,7 +349,7 @@ class NaoqiBridge:
             raise
 
     async def _abort_bring_up(
-        self, robot: NaoRobot, bring_up: asyncio.Future[None]
+        self, robot: AnyNaoqiRobot, bring_up: asyncio.Future[None]
     ) -> None:
         """Wait for a cancelled ``start()``'s bring-up to settle, then tear down what
         it brought up (a failed one already tore itself down)."""
@@ -362,7 +364,7 @@ class NaoqiBridge:
         self._robot = None
         await _owned(self._shut_down(robot))  # owned once begun, past a cancel
 
-    async def _shut_down(self, robot: NaoRobot) -> None:
+    async def _shut_down(self, robot: AnyNaoqiRobot) -> None:
         if self._joints_task is not None:
             self._joints_task.cancel()
             await asyncio.gather(self._joints_task, return_exceptions=True)
@@ -372,7 +374,7 @@ class NaoqiBridge:
         self._running.clear()
         self._running_behaviors.clear()
 
-    async def _teardown(self, robot: NaoRobot) -> None:
+    async def _teardown(self, robot: AnyNaoqiRobot) -> None:
         await self._mic.stop()
         steps: list[Callable[[], None]] = []
         if self._config.streams.touch.enabled:
@@ -428,7 +430,7 @@ class NaoqiBridge:
         except RuntimeError:  # the loop is closed: the session is over
             pass
 
-    async def _joints_loop(self, robot: NaoRobot, period_s: float) -> None:
+    async def _joints_loop(self, robot: AnyNaoqiRobot, period_s: float) -> None:
         while True:
             try:
                 names, angles = await asyncio.to_thread(robot.get_joints)
@@ -443,7 +445,7 @@ class NaoqiBridge:
 
     # region Verbs
 
-    async def _act[T](self, verb: str, call: Callable[[NaoRobot], T]) -> T:
+    async def _act[T](self, verb: str, call: Callable[[AnyNaoqiRobot], T]) -> T:
         """Run ``call`` on the robot off the loop. ``NotRunningError`` while stopped; a
         robot exception becomes ``CommandFailedError``, chained to it."""
         robot = self.robot
@@ -455,8 +457,8 @@ class NaoqiBridge:
     async def _span[T](
         self,
         verb: str,
-        call: Callable[[NaoRobot], T],
-        stop: Callable[[NaoRobot], None],
+        call: Callable[[AnyNaoqiRobot], T],
+        stop: Callable[[AnyNaoqiRobot], None],
         started: Callable[[asyncio.Future[T]], None] | None = None,
     ) -> T:
         """Run the spanning robot ``call`` like ``_act``; ``started`` is handed its
@@ -480,9 +482,9 @@ class NaoqiBridge:
     async def _stop_span(
         self,
         verb: str,
-        robot: NaoRobot,
+        robot: AnyNaoqiRobot,
         run: asyncio.Future[Any],
-        stop: Callable[[NaoRobot], None],
+        stop: Callable[[AnyNaoqiRobot], None],
         attempts: int = STOP_ATTEMPTS,
     ) -> None:
         for _ in range(attempts):

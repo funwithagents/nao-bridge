@@ -41,7 +41,7 @@ The jobs and the matrix entries run side by side, each on its own runner, and no
 
 ### What CI does not run
 
-- **The live tier (`tests-e2e/`).** It needs a real Nao (`NAO_IP`), which no runner has; its tests would all skip, so the job would prove nothing. A live job against a simulated Nao is a later addition, once a sim exists (open question 1).
+- **The live tier (`tests-e2e/`).** It needs a real Nao (`NAOQI_E2E_IP`), which no runner has; its tests would all skip, so the job would prove nothing. A live job against a simulated Nao is a later addition, once a sim exists (open question 1).
 - **A real robot**, ever: that stays a local command.
 
 ### Secrets and protection

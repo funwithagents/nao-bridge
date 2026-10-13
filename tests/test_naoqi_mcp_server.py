@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from mcp.types import TextContent
 
-from naoqi_bridge.fake_robot import FakeNaoRobot
+from naoqi_bridge.fake_robot import FakeNaoqiRobot
 from naoqi_bridge.naoqi_mcp_server import NaoqiMcpServer
 
 
@@ -30,9 +30,9 @@ async def call(server: NaoqiMcpServer, tool: str, **arguments: Any) -> str:
     return block.text
 
 
-def fake(server: NaoqiMcpServer) -> FakeNaoRobot:
+def fake(server: NaoqiMcpServer) -> FakeNaoqiRobot:
     robot = server.naoqi_bridge.robot
-    assert isinstance(robot, FakeNaoRobot)
+    assert isinstance(robot, FakeNaoqiRobot)
     return robot
 
 
@@ -262,7 +262,7 @@ def test_leaving_serve_cancels_the_behaviors_still_running():
     async def run() -> tuple[str, float, bool, list[str], list[str]]:
         server = NaoqiMcpServer()
         results: list[str] = []
-        robots: list[FakeNaoRobot] = []
+        robots: list[FakeNaoqiRobot] = []
 
         async def client_session() -> None:
             await call(server, "wake_up")

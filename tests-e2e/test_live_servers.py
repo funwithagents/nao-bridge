@@ -1,8 +1,8 @@
 """Live: both servers over their real transports, on a real Nao.
 
-Safe level (NAO_IP): the MCP server as a subprocess over stdio, driven by the `mcp`
+Safe level (NAOQI_E2E_IP): the MCP server as a subprocess over stdio, driven by the `mcp`
 client the way Claude Desktop drives it, so a stray libqi line on stdout would break
-the session. Motion level (NAO_ALLOW_MOTION=1): the WebSocket server, whose connect
+the session. Motion level (NAOQI_E2E_ALLOW_MOTION=1): the WebSocket server, whose connect
 ritual wakes the robot and starts breathing, with every stream on.
 """
 
@@ -72,7 +72,7 @@ def test_the_mcp_server_drives_the_robot_over_stdio(tmp_path: Path):
 
 
 def test_the_websocket_server_streams_the_robot_to_its_client():
-    require_flag("NAO_ALLOW_MOTION")
+    require_flag("NAOQI_E2E_ALLOW_MOTION")
     config = NaoqiWebsocketServerConfig(
         bridge=live_config(
             StreamSettings(
@@ -101,7 +101,7 @@ def test_the_websocket_server_streams_the_robot_to_its_client():
                             seen.setdefault(message["id"], []).append(message["data"])
                     return seen[message_id]
 
-                state = (await until("NaoState"))[0]
+                state = (await until("NaoqiState"))[0]
                 await until("Joints", 2)
                 await until("Audio", 2)
                 for uuid, command_id, data in [

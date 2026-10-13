@@ -92,7 +92,7 @@ MicFeed()
 
 ### `fake` backend support
 
-`FakeNaoRobot` ([robot.md](robot.md)) pushes like Naoqi. While audio is subscribed, a thread pushes a silent chunk every `audio_chunk_s` (default 0.085 s, 1360 samples at 16 kHz). `emit_audio(...)` stays available to push chosen content.
+`FakeNaoqiRobot` ([robot.md](robot.md)) pushes like Naoqi. While audio is subscribed, a thread pushes a silent chunk every `audio_chunk_s` (default 0.085 s, 1360 samples at 16 kHz). `emit_audio(...)` stays available to push chosen content.
 
 `tests/` check on the fake:
 - two subscribers both receive every `seq`, in order;

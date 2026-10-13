@@ -1,6 +1,6 @@
 """Live, motion level: the verbs that move the robot, on a real Nao.
 
-Skipped unless NAO_IP and NAO_ALLOW_MOTION=1 are set and `qi` is installed. Clear the
+Skipped unless NAOQI_E2E_IP and NAOQI_E2E_ALLOW_MOTION=1 are set and `qi` is installed. Clear the
 floor around the robot and stay next to it. Every test wakes the robot and leaves it
 at rest.
 """

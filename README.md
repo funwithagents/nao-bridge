@@ -5,8 +5,8 @@ The focus is on providing interactive high-level APIs to enable AI agent-based i
 
 It contains:
 - [NaoqiBridge](src/naoqi_bridge/bridge.py): the high-level async API to drive Nao, on top of a [robot seam](src/naoqi_bridge/robot.py) with a `real` backend (a Nao over `qi`) and a `fake` one (no hardware)
-- [Nao MCP server](src/naoqi_bridge/naoqi_mcp_server.py): a MCP server exposing NaoqiBridge as tools for LLM agents
-- [Nao websocket server](src/naoqi_bridge/naoqi_websocket_server.py): a websocket server to communicate with NaoqiBridge over the network
+- [Naoqi MCP server](src/naoqi_bridge/naoqi_mcp_server.py): a MCP server exposing NaoqiBridge as tools for LLM agents
+- [Naoqi WebSocket server](src/naoqi_bridge/naoqi_websocket_server.py): a websocket server to communicate with NaoqiBridge over the network
 
 Design docs live in [specs/](specs/_index.md); contributor and agent instructions in [AGENTS.md](AGENTS.md).
 
@@ -156,7 +156,7 @@ async with asyncio.timeout(10):
 > [!NOTE]
 > On the `fake` backend, the robot serves a fixed set of dances, reactions, body actions and apps, so the getters return data you can pass to `dance`, `expressive_reaction`, `body_action` and `run_app`.
 
-## Nao MCP server
+## Naoqi MCP server
 
 A MCP server linked to NaoqiBridge.
 
@@ -290,7 +290,7 @@ You are incarnating Nao, a fun and witty robot from the company Aldebaran. You c
 
 `dance`, `expressive_reaction`, `body_action` and `run_app` return as soon as the behavior has started (or with the reason it couldn't), like the WebSocket server's commands: the behavior goes on while the agent calls other tools, `get_running` says whether it's still playing, and the matching `stop_*` tool ends it.
 
-## Nao websocket server
+## Naoqi WebSocket server
 
 A server to communicate with NaoqiBridge over the network via websocket.
 It provides access to all NaoqiBridge features through websocket messages in JSON format.
@@ -312,4 +312,4 @@ The `server` block sets the WebSocket `host` (the address to bind; empty, the de
 ### Messages
 
 > [!NOTE]
-> The full protocol (envelope, commands and their data, streamed events) is described in [specs/naoqi-websocket-server.md](specs/naoqi-websocket-server.md). The first message of every session, `NaoState`, carries `protocolVersion` (currently `1`), bumped only on incompatible changes.
+> The full protocol (envelope, commands and their data, streamed events) is described in [specs/naoqi-websocket-server.md](specs/naoqi-websocket-server.md). The first message of every session, `NaoqiState`, carries `protocolVersion` (currently `2`: version 2 renamed `NaoState` to `NaoqiState`), bumped only on incompatible changes.

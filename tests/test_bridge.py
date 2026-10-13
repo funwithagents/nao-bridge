@@ -27,7 +27,7 @@ from naoqi_bridge.config import (
     StreamSettings,
     TouchStream,
 )
-from naoqi_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoRobot
+from naoqi_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoqiRobot
 from naoqi_bridge.robot import RobotConnectionError
 
 ALL_STREAMS = NaoqiBridgeConfig(
@@ -39,9 +39,9 @@ ALL_STREAMS = NaoqiBridgeConfig(
 )
 
 
-def fake(bridge: NaoqiBridge) -> FakeNaoRobot:
+def fake(bridge: NaoqiBridge) -> FakeNaoqiRobot:
     robot = bridge.robot
-    assert isinstance(robot, FakeNaoRobot)
+    assert isinstance(robot, FakeNaoqiRobot)
     return robot
 
 
@@ -55,7 +55,7 @@ async def wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> Non
 
 
 def test_async_with_connects_then_closes_the_robot():
-    async def run() -> tuple[FakeNaoRobot, bool, bool]:
+    async def run() -> tuple[FakeNaoqiRobot, bool, bool]:
         async with NaoqiBridge("fake") as bridge:
             robot = fake(bridge)
             connected_inside = robot.connected
@@ -101,7 +101,7 @@ def test_verbs_raise_not_running_when_the_bridge_is_stopped():
 
 
 def test_catalog_classifies_the_package_list():
-    catalog = build_catalog(FakeNaoRobot().list_packages())
+    catalog = build_catalog(FakeNaoqiRobot().list_packages())
 
     assert set(catalog.dances) == {
         "caravan-palace-se",
@@ -316,13 +316,13 @@ def test_unknown_catalog_ids_raise_value_error_naming_the_known_ones():
 def test_a_reaction_type_without_behaviors_raises_value_error(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    packages = FakeNaoRobot().list_packages()
+    packages = FakeNaoqiRobot().list_packages()
     for package in packages:  # a robot whose animations package has no Proud emotion
         behaviors = package["elems"]["contents"]["behaviors"]
         behaviors[:] = [
             b for b in behaviors if "proud" not in b["langToTags"].get("en_US", [])
         ]
-    monkeypatch.setattr(FakeNaoRobot, "list_packages", lambda self: packages)
+    monkeypatch.setattr(FakeNaoqiRobot, "list_packages", lambda self: packages)
 
     async def run() -> None:
         async with NaoqiBridge("fake") as bridge:
@@ -365,14 +365,14 @@ def test_stop_dance_ends_a_running_dance_but_not_an_idle_one():
 def test_stop_dance_landing_before_naoqi_starts_the_dance_still_stops_it(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    run_behavior = FakeNaoRobot.run_behavior
+    run_behavior = FakeNaoqiRobot.run_behavior
 
-    def late_run(self: FakeNaoRobot, name: str) -> None:
+    def late_run(self: FakeNaoqiRobot, name: str) -> None:
         time.sleep(0.2)  # Naoqi hasn't started it yet: a first stop finds nothing
         run_behavior(self, name)
 
     async def run() -> tuple[float, list[str]]:
-        monkeypatch.setattr(FakeNaoRobot, "run_behavior", late_run)
+        monkeypatch.setattr(FakeNaoqiRobot, "run_behavior", late_run)
         async with NaoqiBridge("fake") as bridge:
             await bridge.wake_up()
             fake(bridge).behavior_duration_s = 5.0
@@ -464,7 +464,7 @@ SPANNING_BEHAVIOR_VERBS: list[tuple[Verb, Tracking]] = [
 ]
 
 
-def command_names(robot: FakeNaoRobot) -> list[str]:
+def command_names(robot: FakeNaoqiRobot) -> list[str]:
     return [name for name, _ in robot.commands]
 
 
@@ -534,14 +534,14 @@ def test_a_timeout_around_a_dance_stops_it():
 def test_a_cancelled_dance_stays_tracked_until_it_has_stopped(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    stop_behavior = FakeNaoRobot.stop_behavior
+    stop_behavior = FakeNaoqiRobot.stop_behavior
 
-    def slow_stop(self: FakeNaoRobot, name: str) -> None:
+    def slow_stop(self: FakeNaoqiRobot, name: str) -> None:
         time.sleep(0.2)
         stop_behavior(self, name)
 
     async def run() -> tuple[tuple[str, ...], tuple[str, ...]]:
-        monkeypatch.setattr(FakeNaoRobot, "stop_behavior", slow_stop)
+        monkeypatch.setattr(FakeNaoqiRobot, "stop_behavior", slow_stop)
         async with NaoqiBridge("fake") as bridge:
             dancing = await start_dancing(bridge)
             dancing.cancel()
@@ -589,10 +589,10 @@ def test_a_cancelled_posture_move_stops_and_raises_only_the_cancel():
 
 
 def test_a_stop_that_finds_nothing_yet_is_sent_again(monkeypatch: pytest.MonkeyPatch):
-    stop_behavior = FakeNaoRobot.stop_behavior
+    stop_behavior = FakeNaoqiRobot.stop_behavior
     stops: list[str] = []
 
-    def stop_missing_the_first_time(self: FakeNaoRobot, name: str) -> None:
+    def stop_missing_the_first_time(self: FakeNaoqiRobot, name: str) -> None:
         stops.append(name)
         if len(stops) == 1:
             self.commands.append(("stop_behavior", {"name": name}))  # too early
@@ -601,7 +601,9 @@ def test_a_stop_that_finds_nothing_yet_is_sent_again(monkeypatch: pytest.MonkeyP
 
     async def run() -> list[str]:
         monkeypatch.setattr("naoqi_bridge.bridge.STOP_RETRY_S", 0.05)
-        monkeypatch.setattr(FakeNaoRobot, "stop_behavior", stop_missing_the_first_time)
+        monkeypatch.setattr(
+            FakeNaoqiRobot, "stop_behavior", stop_missing_the_first_time
+        )
         async with NaoqiBridge("fake") as bridge:
             await cancel_and_wait(await start_dancing(bridge))
             return fake(bridge).running_behaviors
@@ -613,12 +615,12 @@ def test_a_stop_that_finds_nothing_yet_is_sent_again(monkeypatch: pytest.MonkeyP
 def test_a_stop_the_robot_never_confirms_gives_up_in_bounded_time(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
-    def ignored_stop(self: FakeNaoRobot, name: str) -> None:
+    def ignored_stop(self: FakeNaoqiRobot, name: str) -> None:
         self.commands.append(("stop_behavior", {"name": name}))
 
     async def run() -> tuple[float, int, tuple[str, ...]]:
         monkeypatch.setattr("naoqi_bridge.bridge.STOP_RETRY_S", 0.02)
-        monkeypatch.setattr(FakeNaoRobot, "stop_behavior", ignored_stop)
+        monkeypatch.setattr(FakeNaoqiRobot, "stop_behavior", ignored_stop)
         async with NaoqiBridge("fake") as bridge:
             elapsed = await cancel_and_wait(await start_dancing(bridge))
             stops = command_names(fake(bridge)).count("stop_behavior")
@@ -637,11 +639,11 @@ def test_a_stop_the_robot_never_confirms_gives_up_in_bounded_time(
 def test_a_failing_stop_is_logged_and_the_caller_still_gets_the_cancel(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
-    def broken_stop(self: FakeNaoRobot, name: str) -> None:
+    def broken_stop(self: FakeNaoqiRobot, name: str) -> None:
         raise RuntimeError("ALBehaviorManager is gone")
 
     async def run() -> tuple[str, ...]:
-        monkeypatch.setattr(FakeNaoRobot, "stop_behavior", broken_stop)
+        monkeypatch.setattr(FakeNaoqiRobot, "stop_behavior", broken_stop)
         async with NaoqiBridge("fake") as bridge:
             await cancel_and_wait(await start_dancing(bridge))
             return bridge.current_dances
@@ -651,14 +653,14 @@ def test_a_failing_stop_is_logged_and_the_caller_still_gets_the_cancel(
 
 
 def test_a_second_cancel_does_not_cut_the_stop_short(monkeypatch: pytest.MonkeyPatch):
-    stop_behavior = FakeNaoRobot.stop_behavior
+    stop_behavior = FakeNaoqiRobot.stop_behavior
 
-    def slow_stop(self: FakeNaoRobot, name: str) -> None:
+    def slow_stop(self: FakeNaoqiRobot, name: str) -> None:
         time.sleep(0.1)
         stop_behavior(self, name)
 
     async def run() -> list[str]:
-        monkeypatch.setattr(FakeNaoRobot, "stop_behavior", slow_stop)
+        monkeypatch.setattr(FakeNaoqiRobot, "stop_behavior", slow_stop)
         async with NaoqiBridge("fake") as bridge:
             dancing = await start_dancing(bridge)
             dancing.cancel()
@@ -677,13 +679,13 @@ def test_a_cancel_during_the_motors_check_sends_nothing(
     asked = threading.Event()
     answer = threading.Event()
 
-    def slow_is_awake(self: FakeNaoRobot) -> bool:
+    def slow_is_awake(self: FakeNaoqiRobot) -> bool:
         asked.set()
         answer.wait(1.0)
         return True
 
     async def run() -> list[str]:
-        monkeypatch.setattr(FakeNaoRobot, "is_awake", slow_is_awake)
+        monkeypatch.setattr(FakeNaoqiRobot, "is_awake", slow_is_awake)
         async with NaoqiBridge("fake") as bridge:
             dancing = asyncio.create_task(bridge.dance("eagle-dance"))
             await wait_until(asked.is_set)
@@ -714,14 +716,14 @@ def test_the_session_is_usable_right_after_a_cancel():
 def test_a_cancelled_instant_verb_returns_at_once_and_its_command_completes(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    fade_eyes = FakeNaoRobot.fade_eyes
+    fade_eyes = FakeNaoqiRobot.fade_eyes
 
-    def slow_fade(self: FakeNaoRobot, color: str) -> None:
+    def slow_fade(self: FakeNaoqiRobot, color: str) -> None:
         time.sleep(0.3)
         fade_eyes(self, color)
 
     async def run() -> tuple[float, list[str]]:
-        monkeypatch.setattr(FakeNaoRobot, "fade_eyes", slow_fade)
+        monkeypatch.setattr(FakeNaoqiRobot, "fade_eyes", slow_fade)
         async with NaoqiBridge("fake") as bridge:
             fading = asyncio.create_task(bridge.change_eyes_color("red"))
             await asyncio.sleep(0.05)
@@ -737,16 +739,18 @@ def test_a_cancelled_instant_verb_returns_at_once_and_its_command_completes(
 def test_a_start_cancelled_while_connecting_closes_the_robot(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    connect = FakeNaoRobot.connect
-    robots: list[FakeNaoRobot] = []
+    connect = FakeNaoqiRobot.connect
+    robots: list[FakeNaoqiRobot] = []
 
-    def slow_connect(self: FakeNaoRobot, cancel: threading.Event | None = None) -> None:
+    def slow_connect(
+        self: FakeNaoqiRobot, cancel: threading.Event | None = None
+    ) -> None:
         robots.append(self)
         time.sleep(0.2)  # deaf to the cancel: connects anyway
         connect(self)
 
     async def run() -> tuple[bool, float]:
-        monkeypatch.setattr(FakeNaoRobot, "connect", slow_connect)
+        monkeypatch.setattr(FakeNaoqiRobot, "connect", slow_connect)
         bridge = NaoqiBridge("fake")
         starting = asyncio.create_task(bridge.start())
         await asyncio.sleep(0.05)
@@ -763,10 +767,10 @@ def test_a_start_cancelled_while_connecting_closes_the_robot(
 def test_a_start_cancelled_while_connecting_gives_up_the_connection(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    robots: list[FakeNaoRobot] = []
+    robots: list[FakeNaoqiRobot] = []
 
     def pending_connect(
-        self: FakeNaoRobot, cancel: threading.Event | None = None
+        self: FakeNaoqiRobot, cancel: threading.Event | None = None
     ) -> None:
         # A silent host: no answer for 5 s, unless the connection is cancelled.
         robots.append(self)
@@ -775,7 +779,7 @@ def test_a_start_cancelled_while_connecting_gives_up_the_connection(
         raise RobotConnectionError("connection cancelled")
 
     async def run() -> tuple[bool, float]:
-        monkeypatch.setattr(FakeNaoRobot, "connect", pending_connect)
+        monkeypatch.setattr(FakeNaoqiRobot, "connect", pending_connect)
         bridge = NaoqiBridge("fake")
         starting = asyncio.create_task(bridge.start())
         await asyncio.sleep(0.05)
@@ -791,14 +795,14 @@ def test_a_start_cancelled_while_connecting_gives_up_the_connection(
 def test_a_cancelled_stop_still_runs_every_teardown_step(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    unsubscribe_touch = FakeNaoRobot.unsubscribe_touch
+    unsubscribe_touch = FakeNaoqiRobot.unsubscribe_touch
 
-    def slow_unsubscribe(self: FakeNaoRobot) -> None:
+    def slow_unsubscribe(self: FakeNaoqiRobot) -> None:
         time.sleep(0.2)
         unsubscribe_touch(self)
 
     async def run() -> tuple[bool, list[str]]:
-        monkeypatch.setattr(FakeNaoRobot, "unsubscribe_touch", slow_unsubscribe)
+        monkeypatch.setattr(FakeNaoqiRobot, "unsubscribe_touch", slow_unsubscribe)
         bridge = NaoqiBridge(
             NaoqiBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True)))
         )

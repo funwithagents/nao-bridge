@@ -1,4 +1,4 @@
-"""The ``real`` backend: ``NaoRobot`` over a ``qi`` session to a Nao.
+"""The ``real`` backend: ``AnyNaoqiRobot`` over a ``qi`` session to a Nao.
 
 Specified by [specs/robot.md](../../specs/robot.md). ``qi`` is imported lazily on
 ``connect()``, so this module (and ``naoqi_bridge``) imports where ``qi`` isn't installed.
@@ -23,7 +23,7 @@ from .robot import (
     TouchCallback,
 )
 
-__all__ = ["RealNaoRobot"]
+__all__ = ["NaoqiRobot"]
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +50,8 @@ class _AudioSink:
         self._callback(nbOfChannels, nbOfSamplesByChannel, bytes(inputBuffer))
 
 
-class RealNaoRobot:
-    """``NaoRobot`` over a ``qi`` session to a real (or Choregraphe-simulated) robot."""
+class NaoqiRobot:
+    """``AnyNaoqiRobot`` over a ``qi`` session to a real (or Choregraphe-simulated) robot."""
 
     AUDIO_SERVICE_NAME = "NaoqiBridgeAudio"
 

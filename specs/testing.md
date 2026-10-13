@@ -37,7 +37,7 @@ The `tests/` tier mirrors the `src/naoqi_bridge/` module layout (`test_<module>.
 
 ## Instant fake behaviors
 
-The fake's behaviors last `FakeNaoRobot.DEFAULT_BEHAVIOR_DURATION_S` (5 s), its speech `DEFAULT_SPEECH_DURATION_S` (1 s) and its posture moves `DEFAULT_POSTURE_DURATION_S` (2 s). That way demos and client development see them running and stoppable ([robot.md](robot.md)). In the fast tier it would make every dance, `say` or `stand_up` wait, so an autouse fixture in `tests/conftest.py` sets all three class defaults to `0.0` for every test.
+The fake's behaviors last `FakeNaoqiRobot.DEFAULT_BEHAVIOR_DURATION_S` (5 s), its speech `DEFAULT_SPEECH_DURATION_S` (1 s) and its posture moves `DEFAULT_POSTURE_DURATION_S` (2 s). That way demos and client development see them running and stoppable ([robot.md](robot.md)). In the fast tier it would make every dance, `say` or `stand_up` wait, so an autouse fixture in `tests/conftest.py` sets all three class defaults to `0.0` for every test.
 - A test that needs one in flight (a running behavior, a `say` or posture move to cancel) sets `behavior_duration_s`, `speech_duration_s` or `posture_duration_s` on its fake instance (reached through `bridge.robot`).
 - A test that checks the real defaults is marked `@pytest.mark.fake_behavior_durations`, which the fixture leaves alone.
 - Tests that start a server in a subprocess don't get the fixture, so they don't run behaviors, speech or postures.
@@ -50,7 +50,7 @@ The package holds no process-global or singleton state, so neither tier has a re
 
 A live test needs real credentials, and it must **skip — never fail** — when they're absent, so you exercise only the services you hold keys for and a contributor (or CI) with none is never broken. `tests-e2e/support.require_env(NAME)` implements this: it returns the env var or calls `pytest.skip(...)` when it's unset. Credentials come from the environment, never committed.
 
-For naoqi-bridge the live service is a **real Nao robot**: e2e tests take its address from `require_env("NAO_IP")` (optional `NAO_PORT`, default 9559) and also need the `qi` wheel installed. The fast tier never needs a robot — it runs `NaoqiBridge` and both servers on the `fake` backend (`FakeNaoRobot`, reached through `bridge.robot`), and checks `RealNaoRobot`'s connection rules against a stub `qi` module.
+For naoqi-bridge the live service is a **real Nao robot**: e2e tests take its address from `require_env("NAOQI_E2E_IP")` (optional `NAOQI_E2E_PORT`, default 9559) and also need the `qi` wheel installed. The fast tier never needs a robot — it runs `NaoqiBridge` and both servers on the `fake` backend (`FakeNaoqiRobot`, reached through `bridge.robot`), and checks `NaoqiRobot`'s connection rules against a stub `qi` module.
 
 ## Live tier: levels of risk
 
@@ -58,19 +58,19 @@ A live test that moves the robot needs more than its address: someone has to hav
 
 | Level | Switched on by | What it may do | Modules |
 |---|---|---|---|
-| **Safe** | `NAO_IP` | Anything that doesn't move the limbs: connect, catalog, eyes, TTS language, speech, basic awareness (motors off), errors, the joints and audio streams, cancelling a `say` | `test_live_robot.py`, `test_live_verbs.py`, `test_live_streams.py`, the safe half of `test_live_cancellation.py`, the MCP half of `test_live_servers.py` |
-| **Motion** | `NAO_ALLOW_MOTION=1` | Motors on, postures, breathing, body actions, reactions, a dance, and cancelling them; the WebSocket server, whose connect ritual wakes the robot | `test_live_motion.py`, the motion half of `test_live_cancellation.py`, the WebSocket half of `test_live_servers.py` |
-| **Interactive** | `NAO_INTERACTIVE=1` | Asks the person at the robot to act (touch the head) and waits for it | the touch test in `test_live_streams.py` |
+| **Safe** | `NAOQI_E2E_IP` | Anything that doesn't move the limbs: connect, catalog, eyes, TTS language, speech, basic awareness (motors off), errors, the joints and audio streams, cancelling a `say` | `test_live_robot.py`, `test_live_verbs.py`, `test_live_streams.py`, the safe half of `test_live_cancellation.py`, the MCP half of `test_live_servers.py` |
+| **Motion** | `NAOQI_E2E_ALLOW_MOTION=1` | Motors on, postures, breathing, body actions, reactions, a dance, and cancelling them; the WebSocket server, whose connect ritual wakes the robot | `test_live_motion.py`, the motion half of `test_live_cancellation.py`, the WebSocket half of `test_live_servers.py` |
+| **Interactive** | `NAOQI_E2E_INTERACTIVE=1` | Asks the person at the robot to act (touch the head) and waits for it | the touch test in `test_live_streams.py` |
 
 A flag is on when it's `1`, `true` or `yes`. `tests-e2e/support.py` holds what the levels share:
 - `require_env(name)` and `require_flag(name)`, which skip when the variable or the flag is missing;
-- `live_config(...)`, a `real` `NaoqiBridgeConfig` from `NAO_IP` / `NAO_PORT` with the streams a test asks for;
+- `live_config(...)`, a `real` `NaoqiBridgeConfig` from `NAOQI_E2E_IP` / `NAOQI_E2E_PORT` with the streams a test asks for;
 - `live_session(...)`, which runs a bridge on it and leaves the robot as it found it: eyes white and, at the motion level, `rest`;
 - the catalog pickers, which take ids from the robot's own catalog (installed dances and apps differ per robot) and skip when it has none.
 
 Each test runs its own session under `asyncio.run`, since a bridge's streams belong to the loop that started it. A test about the robot itself (whether a behavior is still running) may ask Naoqi directly through `bridge.robot`.
 
-Live tests also **measure**. Each cancellation test records how long its cancel took to return, and the audio test records the chunk size Naoqi really pushes ([microphone.md](microphone.md) open question). `tests-e2e/conftest.py` prints these measurements in the run's terminal summary, so the stop retry interval ([bridge.md](bridge.md) "How a spanning verb stops") can be tuned on real numbers. Run the safe level alone with `NAO_IP=… uv run pytest tests-e2e`. Add `NAO_ALLOW_MOTION=1` once the robot has room to move and someone is watching, and `-s` with `NAO_INTERACTIVE=1` to see the prompts.
+Live tests also **measure**. Each cancellation test records how long its cancel took to return, and the audio test records the chunk size Naoqi really pushes ([microphone.md](microphone.md) open question). `tests-e2e/conftest.py` prints these measurements in the run's terminal summary, so the stop retry interval ([bridge.md](bridge.md) "How a spanning verb stops") can be tuned on real numbers. Run the safe level alone with `NAOQI_E2E_IP=… uv run pytest tests-e2e`. Add `NAOQI_E2E_ALLOW_MOTION=1` once the robot has room to move and someone is watching, and `-s` with `NAOQI_E2E_INTERACTIVE=1` to see the prompts.
 
 ## Tooling
 

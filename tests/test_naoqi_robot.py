@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-from naoqi_bridge.real_robot import RealNaoRobot
+from naoqi_bridge.naoqi_robot import NaoqiRobot
 from naoqi_bridge.robot import RobotConnectionError
 
 
@@ -134,17 +134,17 @@ def test_real_backend_without_qi_fails_loudly_instead_of_faking(
 ):
     monkeypatch.setitem(sys.modules, "qi", None)  # makes `import qi` raise ImportError
     with pytest.raises(RobotConnectionError, match="qi"):
-        RealNaoRobot("10.0.0.5").connect()
+        NaoqiRobot("10.0.0.5").connect()
 
 
 def test_real_backend_needs_an_address(stub_qi: type[_StubSession]):
     with pytest.raises(RobotConnectionError, match="IP"):
-        RealNaoRobot("").connect()
+        NaoqiRobot("").connect()
     assert stub_qi.connects == 0
 
 
 def test_real_backend_connects_and_reaches_naoqi(stub_qi: type[_StubSession]):
-    robot = RealNaoRobot("10.0.0.5")
+    robot = NaoqiRobot("10.0.0.5")
     robot.connect()
     robot.say("hello")
     assert stub_qi.calls == [("ALAnimatedSpeech", "say", ("hello",))]
@@ -153,7 +153,7 @@ def test_real_backend_connects_and_reaches_naoqi(stub_qi: type[_StubSession]):
 def test_real_backend_does_not_retry_a_failed_connect(stub_qi: type[_StubSession]):
     stub_qi.failures = 1  # a second attempt would succeed
     with pytest.raises(RobotConnectionError, match="cannot reach") as caught:
-        RealNaoRobot("10.0.0.5").connect()
+        NaoqiRobot("10.0.0.5").connect()
     assert stub_qi.connects == 1
     assert stub_qi.closed == 1  # the failed attempt's session is released
     assert isinstance(caught.value.__cause__, RuntimeError)
@@ -165,7 +165,7 @@ def test_real_backend_gives_up_on_a_silent_host_at_its_timeout(
     stub_qi.silent = 1
     started = time.monotonic()
     with pytest.raises(RobotConnectionError, match="no answer within 0.2 s"):
-        RealNaoRobot("10.0.0.5", connect_timeout_s=0.2).connect()
+        NaoqiRobot("10.0.0.5", connect_timeout_s=0.2).connect()
     assert 0.2 <= time.monotonic() - started < 1.0
     assert stub_qi.connects == 1
     assert stub_qi.futures[0].cancelled
@@ -180,7 +180,7 @@ def test_real_backend_gives_up_a_connect_in_flight_when_cancelled(
     threading.Timer(0.1, cancel.set).start()
     started = time.monotonic()
     with pytest.raises(RobotConnectionError, match="cancelled"):
-        RealNaoRobot("10.0.0.5", connect_timeout_s=10.0).connect(cancel)
+        NaoqiRobot("10.0.0.5", connect_timeout_s=10.0).connect(cancel)
     assert time.monotonic() - started < 1.0  # not the 10 s timeout
     assert stub_qi.futures[0].cancelled
     assert stub_qi.closed == 1
@@ -192,7 +192,7 @@ def test_real_backend_already_cancelled_makes_no_attempt(
     cancel = threading.Event()
     cancel.set()
     with pytest.raises(RobotConnectionError, match="cancelled"):
-        RealNaoRobot("10.0.0.5").connect(cancel)
+        NaoqiRobot("10.0.0.5").connect(cancel)
     assert stub_qi.connects == 0
 
 
@@ -202,7 +202,7 @@ def test_real_backend_already_cancelled_makes_no_attempt(
 def test_real_backend_subscribes_to_the_configured_microphone(
     stub_qi: type[_StubSession], channel: Any, code: int
 ):
-    robot = RealNaoRobot("10.0.0.5")
+    robot = NaoqiRobot("10.0.0.5")
     robot.connect()
     robot.subscribe_audio(lambda *_: None, channel)
     assert (
@@ -215,7 +215,7 @@ def test_real_backend_subscribes_to_the_configured_microphone(
 def test_real_backend_refuses_robot_calls_while_disconnected(
     stub_qi: type[_StubSession],
 ):
-    robot = RealNaoRobot("10.0.0.5")
+    robot = NaoqiRobot("10.0.0.5")
     with pytest.raises(RobotConnectionError, match="not connected"):
         robot.say("hello")
     with pytest.raises(RobotConnectionError, match="not connected"):
@@ -224,7 +224,7 @@ def test_real_backend_refuses_robot_calls_while_disconnected(
 
 
 def test_real_backend_close_forgets_its_subscriptions(stub_qi: type[_StubSession]):
-    robot = RealNaoRobot("10.0.0.5")
+    robot = NaoqiRobot("10.0.0.5")
     robot.connect()
     robot.subscribe_touch(lambda key, value: None)
     robot.subscribe_audio(lambda *_: None, "front")
@@ -239,14 +239,14 @@ def test_real_backend_close_forgets_its_subscriptions(stub_qi: type[_StubSession
 def test_real_backend_asks_motion_whether_the_robot_is_awake(
     stub_qi: type[_StubSession],
 ):
-    robot = RealNaoRobot("10.0.0.5")
+    robot = NaoqiRobot("10.0.0.5")
     robot.connect()
     assert robot.is_awake() is True
     assert stub_qi.calls == [("ALMotion", "robotIsWakeUp", ())]
 
 
 def test_real_backend_sets_posture_retries_before_moving(stub_qi: type[_StubSession]):
-    robot = RealNaoRobot("10.0.0.5")
+    robot = NaoqiRobot("10.0.0.5")
     robot.connect()
     assert robot.go_to_posture("Sit", 0.5, 2) is True
     assert stub_qi.calls == [
@@ -256,7 +256,7 @@ def test_real_backend_sets_posture_retries_before_moving(stub_qi: type[_StubSess
 
 
 def test_real_backend_stops_a_posture_move(stub_qi: type[_StubSession]):
-    robot = RealNaoRobot("10.0.0.5")
+    robot = NaoqiRobot("10.0.0.5")
     robot.connect()
     robot.stop_posture()
     assert stub_qi.calls == [("ALRobotPosture", "stopMove", ())]

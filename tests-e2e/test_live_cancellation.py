@@ -4,7 +4,7 @@ A cancelled verb must come back quickly with the robot stopped, the bridge's tra
 empty, no stop warning logged, and the session ready for the next verb. Each cancel's
 latency is printed in the run's summary.
 
-Safe level (NAO_IP): a cancelled `say`. Motion level (NAO_ALLOW_MOTION=1): dances,
+Safe level (NAOQI_E2E_IP): a cancelled `say`. Motion level (NAOQI_E2E_ALLOW_MOTION=1): dances,
 body actions, postures and reactions. The cancelled `start()` needs `qi` only.
 """
 

@@ -6,7 +6,7 @@ tests:
   - tests-e2e/test_live_servers.py
 ---
 
-# Nao MCP server
+# Naoqi MCP server
 
 **Status:** Implemented
 

@@ -1,4 +1,4 @@
-"""Nao MCP Server Module.
+"""Naoqi MCP server module.
 
 Exposes NaoqiBridge actions as MCP tools for LLM agents (specs/naoqi-mcp-server.md),
 built from a ``NaoqiMcpServerConfig``: the bridge's config plus the server's own.
@@ -498,7 +498,7 @@ class NaoqiMcpServer:
 
 def main() -> None:
     """Main entry point for the application."""
-    parser = argparse.ArgumentParser(description="Nao MCP Server")
+    parser = argparse.ArgumentParser(description="Naoqi MCP server")
     parser.add_argument(
         "--config",
         help="Path to a JSON server config (default: the fake robot over stdio)",

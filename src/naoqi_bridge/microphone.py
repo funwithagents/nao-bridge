@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from .config import AudioChannel
-    from .robot import NaoRobot
+    from .robot import AnyNaoqiRobot
 
 __all__ = ["MIC_RING_CHUNKS", "MicChunk", "MicFeed"]
 
@@ -68,7 +68,7 @@ class MicFeed:
         self._session_start = 0  # the first seq of the running session
         self._running = False
         self._waiters: set[_Waiter] = set()
-        self._robot: NaoRobot | None = None
+        self._robot: AnyNaoqiRobot | None = None
         self._channels = 1
 
     @property
@@ -97,7 +97,7 @@ class MicFeed:
                 return None
             return self._ring[(self._head - 1) % self._capacity]
 
-    async def start(self, robot: NaoRobot, channel: AudioChannel) -> None:
+    async def start(self, robot: AnyNaoqiRobot, channel: AudioChannel) -> None:
         """Subscribe to ``robot``'s ``channel`` microphone. A no-op while running."""
         if self._running:
             return

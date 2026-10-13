@@ -1,6 +1,6 @@
-"""Live checks against a real Nao: skipped unless NAO_IP is set and `qi` is installed.
+"""Live checks against a real Nao: skipped unless NAOQI_E2E_IP is set and `qi` is installed.
 
-Run explicitly: `NAO_IP=192.168.1.42 uv run pytest tests-e2e`. Nothing here moves the
+Run explicitly: `NAOQI_E2E_IP=192.168.1.42 uv run pytest tests-e2e`. Nothing here moves the
 robot's limbs; it connects, reads the catalog, and blinks the eyes.
 """
 
@@ -16,8 +16,8 @@ pytest.importorskip("qi")
 
 
 def test_connects_and_reads_a_catalog():
-    ip = require_env("NAO_IP")
-    port = int(os.environ.get("NAO_PORT", "9559"))
+    ip = require_env("NAOQI_E2E_IP")
+    port = int(os.environ.get("NAOQI_E2E_PORT", "9559"))
 
     async def run() -> int:
         config = NaoqiBridgeConfig(
