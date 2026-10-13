@@ -12,7 +12,7 @@ tests:
 
 # Robot (connection seam)
 
-**Status:** Implemented
+**Status:** Updated
 
 ## Purpose
 
@@ -45,6 +45,7 @@ The Protocol is the contract; each implementation translates it to its backend. 
 The one way in, used by `NaoqiBridge.start()`, driven by the [config](config.md):
 - `backend: "fake"` → `FakeNaoqiRobot()`; the `robot` block is ignored.
 - `backend: "real"` → `NaoqiRobot(robot.ip, robot.port, connect_timeout_s=robot.connect_timeout_s)`.
+- `backend: "sim"` → `NaoqiRobot("127.0.0.1", 9559, connect_timeout_s=robot.connect_timeout_s)`: naoqi-sim's fixed address. A sim is a Naoqi like any other, so it gets no robot class of its own; starting or borrowing the sim is the bridge's, before it connects ([sim.md](sim.md)).
 
 The config has already rejected unknown backends and a `real` backend without an IP. Building does not connect.
 
@@ -108,5 +109,4 @@ What the fake does is set by what the tests exercise:
 
 ## Open questions
 
-1. **Simulated Naoqi.** A Choregraphe virtual robot is already reachable as `real` at `127.0.0.1:<port>`. A dedicated `sim` backend name only becomes useful if something needs to tell it apart (e.g. skipping hardware-only calls).
-2. **Newer Naoqi / robots.** The slice is only verified on Naoqi 2.1.4.13 / Nao v5. Nao v6 or Pepper may need service calls adjusted inside `NaoqiRobot`; the Protocol shouldn't change.
+1. **Newer Naoqi / robots.** The slice is only verified on Naoqi 2.1.4.13 / Nao v5. Nao v6 or Pepper may need service calls adjusted inside `NaoqiRobot`; the Protocol shouldn't change. The live tier on a NAOqi 2.8 sim ([ci.md](ci.md)) is where the first 2.8 gaps show.

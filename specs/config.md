@@ -11,13 +11,13 @@ tests:
 
 # Configuration
 
-**Status:** Implemented
+**Status:** Updated
 
 ## Purpose
 
 One declarative description of *which robot and what to stream*. A `NaoqiBridge` is built from it, and each server wraps it in its own config. Today the same facts are spread over `NaoqiBridge` keyword arguments, server arguments and CLI flags. A config file makes a setup reproducible: switching from the robot to the fake becomes a one-word change in one file.
 
-The first version deliberately covers only the **backend**, the **robot connection** and the **streams**. Other blocks are open questions below.
+It covers the **backend**, the **robot connection**, the **sim** a `sim` backend runs ([sim.md](sim.md)) and the **streams**. Other blocks are open questions below.
 
 ## Core concepts / Decided
 
@@ -31,16 +31,26 @@ The first version deliberately covers only the **backend**, the **robot connecti
     "touch": { "enabled": true },
     "joints": { "enabled": false, "period_s": 0.2 },
     "audio": { "enabled": false, "channel": "front" }
+  },
+  "sim": {
+    "spawn": "auto",
+    "config": {
+      "naoqi": { "version": "2.1" },
+      "viewer": { "headless": true }
+    }
   }
 }
 ```
 
+`sim` applies only on `"backend": "sim"`; on `real` (as here) it is checked and ignored.
+
 ```python
 @dataclass
 class NaoqiBridgeConfig:
-    backend: Backend = "fake"         # "real" | "fake"
+    backend: Backend = "fake"         # "real" | "fake" | "sim"
     robot: RobotSettings = field(default_factory=RobotSettings)
     streams: StreamSettings = field(default_factory=StreamSettings)
+    sim: SimSettings = field(default_factory=SimSettings)
 
 @dataclass
 class RobotSettings:
@@ -53,21 +63,34 @@ class StreamSettings:
     touch: TouchStream = field(default_factory=TouchStream)     # enabled: bool = False
     joints: JointsStream = field(default_factory=JointsStream)  # enabled: bool = False, period_s: float = 0.2
     audio: AudioStream = field(default_factory=AudioStream)     # enabled: bool = False, channel: "front" | "rear" | "left" | "right" = "front"
+
+@dataclass
+class SimSettings:
+    spawn: SimSpawn = "auto"                 # "never" | "auto" | "always" (sim.md, "Own it or borrow it")
+    config: NaoqiSimConfig | None = None     # naoqi-sim's own config; None: naoqi-sim's defaults
 ```
 
 - Every block is optional. Missing blocks and fields take the defaults above. **A default is declared once**, on the dataclass field; the loaders read it from there (`dataclasses.fields`), so a default can't drift between direct construction and JSON.
-- **The default backend is `fake`.** A real Nao has no usable default address, so `NaoqiBridgeConfig()` is valid and offline. A real robot always means an explicit config with `robot.ip`.
+- **The default backend is `fake`.** A real Nao has no usable default address, so `NaoqiBridgeConfig()` is valid and offline. A real robot always means an explicit config with `robot.ip`; a simulated one, `backend: "sim"`.
+
+### The `sim` block
+
+The `sim` block has two keys, mirroring `SimSettings`: the bridge's `spawn` ([sim.md](sim.md)) and `config`, which is exactly a naoqi-sim config file, so one pastes in unchanged and copies back out unchanged:
+
+- `spawn` is checked here (one of the three values). `config` goes to naoqi-sim's own `NaoqiSimConfig.from_dict`, imported lazily from `naoqi_sim.config` (which needs neither `qi` nor Docker); absent, it is `None`, naoqi-sim's defaults. naoqi-sim's `ConfigError` carries its key path the same way ours does; the loader re-raises it as ours with `sim.config.` in front (`sim.config.viewer.scene`). Its rules are naoqi-sim's: unknown keys, types, ranges.
+- **Without the `[sim]` extra** naoqi-sim can't check `config`. With `backend: "sim"` that's a `ConfigError` (key `backend`) naming `naoqi-bridge[sim]`; with another backend `sim.config` is accepted unchecked and `config` stays `None`, so a file that switches backends still loads on a platform without the extra.
+- **On `real` and `fake`, `sim` is validated but not applied**, as `robot` on `fake`; on `sim`, `robot.ip` and `robot.port` are, and `robot.connect_timeout_s` applies (the qi connection to the sim).
 
 ### Constructors and validation
 
 - Every config class has the same three constructors: `from_dict(data)`, `from_json(text)` (parses, then calls `from_dict`), and `from_json_file(path)` (reads, then calls `from_json`; an invalid-JSON error names the path). All three share one validation path.
 - Errors raise `ConfigError(ValueError)`, with a message that names the offending key path (e.g. `streams.joints.period_s`). A block's own checks raise `ConfigError(message, key=<field>)`, and each enclosing loader prefixes `key` with its own path; the message is never parsed to find the key.
 - **Unknown keys are errors**, so a typo fails when the config loads.
-- **Type and range checks:** `backend` ∈ `{"real", "fake"}`; `robot.port` is a positive integer; `connect_timeout_s` and `period_s` are positive, finite numbers; `channel` is one of the four values.
+- **Type and range checks:** `backend` ∈ `{"real", "fake", "sim"}`; `sim.spawn` ∈ `{"never", "auto", "always"}`; `robot.port` is a positive integer; `connect_timeout_s` and `period_s` are positive, finite numbers; `channel` is one of the four values.
 - **`robot.connect_tries` is gone.** The connection makes one attempt since libqi 3.1.8 ([robot.md](robot.md)), so a config that still sets it fails as an unknown key.
 - **`real` needs `robot.ip`.** An empty IP is a `ConfigError` when the config loads.
 - **On `fake`, `robot` is validated but not applied.** A config written for the robot runs offline by changing `backend` alone.
-- `config.py` imports neither `qi` nor `mcp` nor `websockets`.
+- `config.py` imports neither `qi` nor `mcp` nor `websockets`, and `naoqi_sim.config` only inside the `sim` loader.
 
 ### Streams: config switches, bridge APIs
 
@@ -120,17 +143,17 @@ Each server has its own config object, wrapping a `NaoqiBridgeConfig` under `bri
 
 - `naoqi-mcp-server --config path.json` and `naoqi-websocket-server --config path.json`. The `--fake-robot`, `--ip`, `--port`, `--websocket-port`, `--with-joints-data` and `--with-audio-data` flags are **removed**.
 - Without `--config`, the server runs on its default config, which is the `fake` backend.
-- A config error exits 2 with the `ConfigError` message. An unreachable robot still exits 1.
+- A config error exits 2 with the `ConfigError` message. An unreachable robot, or a sim that can't be started or borrowed ([sim.md](sim.md), "Errors"), exits 1.
 
 ### Example files
 
 `examples/configs/` holds ready-to-use files kept in sync with this spec:
 - `mcp-fake.json` and `mcp-real.json`
 - `websocket-fake.json` and `websocket-real.json` (all three streams on)
+- `mcp-sim.json` and `websocket-sim.json` ([sim.md](sim.md), "Example files")
 
 The README's Claude Desktop / Tiny Agents snippets point `--config` at them.
 
 ## Open questions
 
 1. **More blocks.** Motion (posture speed and tries), session state (what the robot does at start/stop: eye colors, wake up, breathing, TTS language) and catalog rules (reaction tags, system packages, for other robots or Naoqi versions) are candidates for optional blocks. Deferred until needed; adding one doesn't break existing files.
-2. **A `sim` backend** for a locally simulated Naoqi: `backend` gains `"sim"`, probably defaulting `robot.ip` to `127.0.0.1`. Deferred until that simulator exists.

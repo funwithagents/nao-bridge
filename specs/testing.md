@@ -9,7 +9,7 @@ tests:
 
 # Testing
 
-**Status:** Implemented
+**Status:** Updated
 
 ## Purpose
 
@@ -48,9 +48,36 @@ The package holds no process-global or singleton state, so neither tier has a re
 
 ## Live tier: skip without credentials
 
-A live test needs real credentials, and it must **skip — never fail** — when they're absent, so you exercise only the services you hold keys for and a contributor (or CI) with none is never broken. `tests-e2e/support.require_env(NAME)` implements this: it returns the env var or calls `pytest.skip(...)` when it's unset. Credentials come from the environment, never committed.
+A live test needs real credentials, and it must **skip — never fail** — when they're absent, so you exercise only the services you hold keys for and a contributor (or CI) with none is never broken. `tests-e2e/support.require_env(NAME)` implements this: it returns the env var or calls `pytest.skip(...)` when it's unset. Credentials come from the environment, never committed. The one exception is a target asked for by name: `NAOQI_E2E_TARGET=sim` turns a sim that can't run into a failure (below), since whoever set it expects the tests to run.
 
-For naoqi-bridge the live service is a **real Nao robot**: e2e tests take its address from `require_env("NAOQI_E2E_IP")` (optional `NAOQI_E2E_PORT`, default 9559) and also need the `qi` wheel installed. The fast tier never needs a robot — it runs `NaoqiBridge` and both servers on the `fake` backend (`FakeNaoqiRobot`, reached through `bridge.robot`), and checks `NaoqiRobot`'s connection rules against a stub `qi` module.
+For naoqi-bridge the live service is a Naoqi: a **simulated Nao** by default, or a **real Nao robot** (below, "Live tier: the target"). Either way the tier needs the `qi` wheel installed. The fast tier never needs a robot — it runs `NaoqiBridge` and both servers on the `fake` backend (`FakeNaoqiRobot`, reached through `bridge.robot`), and checks `NaoqiRobot`'s connection rules against a stub `qi` module.
+
+## Live tier: the target
+
+The live tier runs against one target per run, chosen by the environment:
+
+| Variable | Values | Meaning |
+|---|---|---|
+| `NAOQI_E2E_TARGET` | `sim` (when unset), `real` | The backend the tests' bridges use; the words are the config's backends |
+| `NAOQI_E2E_SIM_VERSION` | `2.1` (when unset), `2.8` | `sim`: the NAOqi version of the sim |
+| `NAOQI_E2E_SIM_VIEWER` | a flag (`1`, `true`, `yes`) | `sim`: the sim window instead of a headless sim, to watch the run |
+| `NAOQI_E2E_IP`, `NAOQI_E2E_PORT` | an address, a port (9559 when unset) | `real`: the robot |
+
+An unknown target or version fails the session at collection (`pytest.UsageError`).
+
+**The `sim` target** ([sim.md](sim.md)). A session-scoped fixture in `tests-e2e/conftest.py` holds one sim for the whole run, through a bridge of its own on the `sim` backend with `spawn: "auto"`, on an event loop of its own thread from the first test to the end of the run:
+- nothing runs: it starts the sim and owns it, so every run exercises the bridge's own start-and-stop of a sim, and stops it at the end;
+- a naoqi-sim already runs (`naoqi-sim run` in another terminal, to hear the robot or keep the sim between runs): it borrows it and leaves it running. One of another version fails the run.
+
+The tests' bridges (and the servers the tests start in subprocesses) use `backend: "sim"` with `spawn: "never"`: they connect to the run's sim, never start a second one, and fail clearly if it's gone. The fixture's sim runs headless with the render camera and the placeholder robot model, a silent audio output and naoqi-sim's fake audio input, so the audio stream carries what NAOqi really pushes (naoqi-sim's own CI settings); `NAOQI_E2E_SIM_VIEWER=1` opens the window instead (`sim.config.viewer.headless: false`), with the robot model the machine has. The images are never built by the tier: `uv run naoqi-sim fetch-and-build-images` once per machine.
+
+**When the sim can't run** (no `[sim]` extra, no Docker, images missing or outdated, a port taken), what happens depends on whether the target was asked for:
+- `NAOQI_E2E_TARGET` unset: every test **skips**, with naoqi-sim's message saying what's missing, so a contributor without Docker is never broken;
+- `NAOQI_E2E_TARGET=sim` set: the run **fails**. CI sets it ([ci.md](ci.md)), where a skip would turn the job green with nothing tested.
+
+**The `real` target** is a Nao at `NAOQI_E2E_IP`. Without the variable, the tests skip, as without credentials.
+
+The tier runs serially (pytest's default here): one sim per machine, one robot.
 
 ## Live tier: levels of risk
 
@@ -58,19 +85,21 @@ A live test that moves the robot needs more than its address: someone has to hav
 
 | Level | Switched on by | What it may do | Modules |
 |---|---|---|---|
-| **Safe** | `NAOQI_E2E_IP` | Anything that doesn't move the limbs: connect, catalog, eyes, TTS language, speech, basic awareness (motors off), errors, the joints and audio streams, cancelling a `say` | `test_live_robot.py`, `test_live_verbs.py`, `test_live_streams.py`, the safe half of `test_live_cancellation.py`, the MCP half of `test_live_servers.py` |
-| **Motion** | `NAOQI_E2E_ALLOW_MOTION=1` | Motors on, postures, breathing, body actions, reactions, a dance, and cancelling them; the WebSocket server, whose connect ritual wakes the robot | `test_live_motion.py`, the motion half of `test_live_cancellation.py`, the WebSocket half of `test_live_servers.py` |
-| **Interactive** | `NAOQI_E2E_INTERACTIVE=1` | Asks the person at the robot to act (touch the head) and waits for it | the touch test in `test_live_streams.py` |
+| **Safe** | the target | Anything that doesn't move the limbs: connect, catalog, eyes, TTS language, speech, basic awareness (motors off), errors, the joints and audio streams, cancelling a `say` | `test_live_robot.py`, `test_live_verbs.py`, `test_live_streams.py`, the safe half of `test_live_cancellation.py`, the MCP half of `test_live_servers.py` |
+| **Motion** | `NAOQI_E2E_ALLOW_MOTION=1`; always on with the `sim` target | Motors on, postures, breathing, body actions, reactions, a dance, and cancelling them; the WebSocket server, whose connect ritual wakes the robot | `test_live_motion.py`, the motion half of `test_live_cancellation.py`, the WebSocket half of `test_live_servers.py` |
+| **Interactive** | `NAOQI_E2E_INTERACTIVE=1`; skipped with the `sim` target (naoqi-sim has no touch input yet, [sim.md](sim.md)) | Asks the person at the robot to act (touch the head) and waits for it | the touch test in `test_live_streams.py` |
 
 A flag is on when it's `1`, `true` or `yes`. `tests-e2e/support.py` holds what the levels share:
 - `require_env(name)` and `require_flag(name)`, which skip when the variable or the flag is missing;
-- `live_config(...)`, a `real` `NaoqiBridgeConfig` from `NAOQI_E2E_IP` / `NAOQI_E2E_PORT` with the streams a test asks for;
+- `live_config(...)`, the target's `NaoqiBridgeConfig` with the streams a test asks for: `sim` with `spawn: "never"` and the run's version, or `real` at `NAOQI_E2E_IP` / `NAOQI_E2E_PORT`;
 - `live_session(...)`, which runs a bridge on it and leaves the robot as it found it: eyes white and, at the motion level, `rest`;
-- the catalog pickers, which take ids from the robot's own catalog (installed dances and apps differ per robot) and skip when it has none.
+- the catalog pickers, which take ids from the robot's own catalog (installed dances and apps differ per robot) and skip when it has none (always, on a sim, for dances, apps and body actions: [sim.md](sim.md), "What a sim offers the bridge").
 
 Each test runs its own session under `asyncio.run`, since a bridge's streams belong to the loop that started it. A test about the robot itself (whether a behavior is still running) may ask Naoqi directly through `bridge.robot`.
 
-Live tests also **measure**. Each cancellation test records how long its cancel took to return, and the audio test records the chunk size Naoqi really pushes ([microphone.md](microphone.md) open question). `tests-e2e/conftest.py` prints these measurements in the run's terminal summary, so the stop retry interval ([bridge.md](bridge.md) "How a spanning verb stops") can be tuned on real numbers. Run the safe level alone with `NAOQI_E2E_IP=… uv run pytest tests-e2e`. Add `NAOQI_E2E_ALLOW_MOTION=1` once the robot has room to move and someone is watching, and `-s` with `NAOQI_E2E_INTERACTIVE=1` to see the prompts.
+Live tests also **measure**. Each cancellation test records how long its cancel took to return, and the audio test records the chunk size Naoqi really pushes ([microphone.md](microphone.md) open question). `tests-e2e/conftest.py` prints these measurements in the run's terminal summary, so the stop retry interval ([bridge.md](bridge.md) "How a spanning verb stops") can be tuned on real numbers. `uv run pytest tests-e2e` runs every level a headless 2.1 sim allows; `NAOQI_E2E_SIM_VERSION=2.8` the same on 2.8, `NAOQI_E2E_SIM_VIEWER=1` with the window. On a robot, run the safe level alone with `NAOQI_E2E_TARGET=real NAOQI_E2E_IP=… uv run pytest tests-e2e`; add `NAOQI_E2E_ALLOW_MOTION=1` once the robot has room to move and someone is watching, and `-s` with `NAOQI_E2E_INTERACTIVE=1` to see the prompts.
+
+A test of the `sim` backend itself (`tests-e2e/test_live_sim.py`, skipped on `real`) checks against the run's sim what only a running naoqi-sim shows: `spawn: "auto"` borrows it and leaves it running after `stop()`, `spawn: "always"` refuses it, and a config of the other version is refused.
 
 ## Tooling
 
@@ -79,4 +108,4 @@ Live tests also **measure**. Each cancellation test records how long its cancel 
 
 ## Open questions
 
-None currently. CI runs the fast tier on GitHub's runners ([ci.md](ci.md)); the live tier stays a local command until a simulated Nao exists. What the live tier hasn't confirmed yet is tracked in [analysis/](../analysis/), not here.
+None currently. CI runs the fast tier and, on a headless sim, the live tier ([ci.md](ci.md)); the live tier on a robot stays a local command. What the live tier hasn't confirmed yet is tracked in [analysis/](../analysis/), not here.
