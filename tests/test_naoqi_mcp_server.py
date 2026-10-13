@@ -337,7 +337,7 @@ def test_libqi_logs_never_reach_the_mcp_client(tmp_path: Path):
     config = {
         "bridge": {
             "backend": "real",
-            "robot": {"ip": "127.0.0.1", "port": 1, "connect_tries": 1},
+            "robot": {"ip": "127.0.0.1", "port": 1},
         }
     }
     result = run_cli(config, tmp_path)

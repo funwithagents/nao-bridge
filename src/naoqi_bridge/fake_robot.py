@@ -12,7 +12,13 @@ import threading
 from typing import Any
 
 from .config import AudioChannel
-from .robot import AUDIO_SAMPLE_RATE, AudioCallback, TouchCallback, TouchPart
+from .robot import (
+    AUDIO_SAMPLE_RATE,
+    AudioCallback,
+    RobotConnectionError,
+    TouchCallback,
+    TouchPart,
+)
 
 __all__ = ["JOINT_NAMES", "POSTURE_ANGLES", "REST_POSTURE", "FakeNaoRobot"]
 
@@ -264,7 +270,9 @@ class FakeNaoRobot:
         with self._lock:
             return bool(self._posture_moves)
 
-    def connect(self) -> None:
+    def connect(self, cancel: threading.Event | None = None) -> None:
+        if cancel is not None and cancel.is_set():
+            raise RobotConnectionError("connection cancelled")
         self._record("connect")
         self.connected = True
 

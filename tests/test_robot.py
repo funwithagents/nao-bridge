@@ -10,18 +10,11 @@ def test_build_robot_follows_the_config():
     assert isinstance(build_robot(NaoqiBridgeConfig()), FakeNaoRobot)
     config = NaoqiBridgeConfig(
         backend="real",
-        robot=RobotSettings(
-            ip="10.0.0.5", port=9600, connect_tries=3, connect_timeout_s=2.5
-        ),
+        robot=RobotSettings(ip="10.0.0.5", port=9600, connect_timeout_s=2.5),
     )
     real = build_robot(config)
     assert isinstance(real, RealNaoRobot)
-    assert (real.ip, real.port, real.connect_tries, real.connect_timeout_s) == (
-        "10.0.0.5",
-        9600,
-        3,
-        2.5,
-    )
+    assert (real.ip, real.port, real.connect_timeout_s) == ("10.0.0.5", 9600, 2.5)
 
 
 def test_fake_ignores_the_robot_block():

@@ -9,6 +9,7 @@ recording every command. ``build_robot`` selects one from the bridge config.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from typing import Any, Literal, Protocol
 
@@ -57,7 +58,7 @@ class RobotConnectionError(RuntimeError):
 class NaoRobot(Protocol):
     """The Naoqi slice the bridge consumes. Every method blocks and raises on failure."""
 
-    def connect(self) -> None: ...
+    def connect(self, cancel: threading.Event | None = None) -> None: ...
     def close(self) -> None: ...
     def set_language(self, language: str) -> None: ...
     def say(self, text: str) -> None: ...
@@ -93,9 +94,4 @@ def build_robot(config: NaoqiBridgeConfig) -> NaoRobot:
     if config.backend == "fake":
         return FakeNaoRobot()
     robot = config.robot
-    return RealNaoRobot(
-        robot.ip,
-        robot.port,
-        connect_tries=robot.connect_tries,
-        connect_timeout_s=robot.connect_timeout_s,
-    )
+    return RealNaoRobot(robot.ip, robot.port, connect_timeout_s=robot.connect_timeout_s)

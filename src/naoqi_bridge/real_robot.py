@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import importlib
 import logging
+import threading
+import time
 from functools import partial
 from typing import Any
 
@@ -24,6 +26,9 @@ from .robot import (
 __all__ = ["RealNaoRobot"]
 
 logger = logging.getLogger(__name__)
+
+# How often a pending connect checks its cancel event.
+CONNECT_POLL_S = 0.05
 
 
 class _AudioSink:
@@ -55,19 +60,17 @@ class RealNaoRobot:
         ip: str,
         port: int = 9559,
         *,
-        connect_tries: int = 10,
         connect_timeout_s: float = 5.0,
     ) -> None:
         self.ip = ip
         self.port = port
-        self.connect_tries = connect_tries
         self.connect_timeout_s = connect_timeout_s
         self._session: Any = None
         self._services: dict[str, Any] = {}
         self._touch_links: list[tuple[Any, Any]] = []
         self._audio_service_id: Any = None
 
-    def connect(self) -> None:
+    def connect(self, cancel: threading.Event | None = None) -> None:
         if not self.ip or self.port <= 0:
             raise RobotConnectionError(
                 "the real backend needs a robot IP address and port"
@@ -77,52 +80,42 @@ class RealNaoRobot:
         except ImportError as e:
             raise RobotConnectionError(
                 "the real backend needs the `qi` package, which naoqi-bridge installs on "
-                "macOS arm64 and Linux x86_64 with CPython 3.12 / 3.13 (run `uv sync`); "
-                "there is no qi wheel for other platforms, which run the fake backend only"
+                "macOS arm64, Linux x86_64 and Windows x64 with CPython 3.12 / 3.13 "
+                "(run `uv sync`); there is no qi wheel for other platforms, which run "
+                "the fake backend only"
             ) from e
 
         url = f"tcp://{self.ip}:{self.port}"
-        timeout_ms = max(1, round(self.connect_timeout_s * 1000))
-        last_error: Exception | None = None
-        timed_out = 0
-        for attempt in range(1, self.connect_tries + 1):
-            session = qi.Session()
-            # Asynchronous, so a silent host costs connect_timeout_s, not the OS TCP
-            # timeout: the future is still running at the deadline.
-            future = session.connect(url, _async=True)
-            future.wait(timeout_ms)
-            if not future.isFinished():
+        if cancel is not None and cancel.is_set():
+            raise RobotConnectionError(f"connection to {url} cancelled")
+        # One attempt: libqi 3.1.8 fixed the spurious `disconnected` failures that
+        # 3.1.6 needed retries for. Asynchronous, so a silent host costs
+        # connect_timeout_s, not the OS TCP timeout, and a cancel is heard in flight.
+        session = qi.Session()
+        future = session.connect(url, _async=True)
+        deadline = time.monotonic() + self.connect_timeout_s
+        while not future.isFinished():
+            if cancel is not None and cancel.is_set():
                 future.cancel()
                 session.close()
-                timed_out += 1
-                last_error = TimeoutError(
-                    f"no answer within {self.connect_timeout_s:g} s"
-                )
-                logger.warning(
-                    "Connection attempt %d to %s timed out after %g s",
-                    attempt,
-                    url,
-                    self.connect_timeout_s,
-                )
-                continue
-            if future.hasError():
+                raise RobotConnectionError(f"connection to {url} cancelled")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                future.cancel()
                 session.close()
-                last_error = RuntimeError(future.error())
-                logger.warning(
-                    "Connection attempt %d to %s failed: %s", attempt, url, last_error
-                )
-                continue
-            self._session = session
-            logger.debug("Connected to %s", url)
-            return
-        detail = (
-            f" ({timed_out} timed out after {self.connect_timeout_s:g} s)"
-            if timed_out
-            else ""
-        )
-        raise RobotConnectionError(
-            f"could not connect to {url} after {self.connect_tries} tries{detail}"
-        ) from last_error
+                raise RobotConnectionError(
+                    f"could not connect to {url}: no answer within "
+                    f"{self.connect_timeout_s:g} s"
+                ) from TimeoutError(url)
+            future.wait(max(1, round(min(CONNECT_POLL_S, remaining) * 1000)))
+        if future.hasError():
+            session.close()
+            error = RuntimeError(future.error())
+            raise RobotConnectionError(
+                f"could not connect to {url}: {error}"
+            ) from error
+        self._session = session
+        logger.debug("Connected to %s", url)
 
     def close(self) -> None:
         if self._session is not None:

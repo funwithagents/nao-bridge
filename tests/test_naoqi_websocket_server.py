@@ -401,7 +401,7 @@ def test_an_unreachable_robot_is_reported_not_raised():
         bridge=NaoqiBridgeConfig.from_dict(
             {
                 "backend": "real",
-                "robot": {"ip": "127.0.0.1", "port": 1, "connect_tries": 1},
+                "robot": {"ip": "127.0.0.1", "port": 1},
             }
         ),
         server=LOOPBACK,

@@ -15,7 +15,7 @@ Design docs live in [specs/](specs/_index.md); contributor and agent instruction
 > While the Qi package should work fine with more recent versions of Naoqi, the Naoqi API used here might have evolved since version 2.1.4.13. To test and add compatibility, we would need a Nao v6 robot (or even a Pepper robot) ! 🙂
 
 > [!NOTE]
-> No Nao robot? No worries! 😅 If you don't have a Nao or if your platform has no `qi` wheel (like Windows), use the `fake` backend (the default; `examples/configs/*-fake.json` for the servers): the API and servers run without actual hardware.
+> No Nao robot? No worries! 😅 If you don't have a Nao or if your platform has no `qi` wheel (like an Intel Mac), use the `fake` backend (the default; `examples/configs/*-fake.json` for the servers): the API and servers run without actual hardware.
 > See usage details below.
 
 ## Installation
@@ -30,18 +30,18 @@ This installs the package and the `naoqi-mcp-server` / `naoqi-websocket-server` 
 
 ## Dependency with qi python package
 
-Communicating with a real Nao relies on the `qi` Python package. It comes from the GitHub releases of our [fork](https://github.com/funwithagents/libqi-python) of the [official libqi-python repository](https://github.com/aldebaran/libqi-python), which is no longer maintained. It is a declared dependency, so **`uv sync` installs it** on the platforms that have a wheel:
+Communicating with a real Nao relies on the `qi` Python package (`qi>=3.1.8,<4`). It comes from the package index of our [fork](https://github.com/funwithagents/libqi-python) of the [official libqi-python repository](https://github.com/aldebaran/libqi-python), which is no longer maintained: `https://funwithagents.github.io/libqi-python/simple/`, not PyPI (whose `qi` is Aldebaran's older 3.1.5). It is a declared dependency, so **`uv sync` installs it** on the platforms that have a wheel:
 
 | Platform | `qi` | What runs |
 |---|---|---|
-| macOS arm64, Linux x86_64 (Python 3.12 or 3.13) | installed by `uv sync` | real robot and fake |
-| Windows, macOS Intel, Linux arm64 | not available | fake only |
+| macOS arm64, Linux x86_64, Windows x64 (Python 3.12 or 3.13) | installed by `uv sync` | real robot and fake |
+| macOS Intel, Linux arm64, Windows arm64 | not available | fake only |
 
 > [!WARNING]
 > Without `qi`, the `real` backend fails to connect with an explicit error; it never silently switches to the fake. On a platform without a wheel, use the `fake` backend.
 
 > [!NOTE]
-> Install with `uv`: the wheel locations are uv settings (`[tool.uv.sources]`), which `pip` ignores.
+> uv finds `qi` through `pyproject.toml`. With pip, add the index: `pip install --extra-index-url https://funwithagents.github.io/libqi-python/simple/ <path-or-url-to-naoqi-bridge>`.
 
 ## NaoqiBridge
 
@@ -75,7 +75,7 @@ The bridge is built from a `NaoqiBridgeConfig`, in code or from JSON (`NaoqiBrid
 ```json
 {
   "backend": "real",
-  "robot": { "ip": "192.168.1.42", "port": 9559, "connect_tries": 10, "connect_timeout_s": 5.0 },
+  "robot": { "ip": "192.168.1.42", "port": 9559, "connect_timeout_s": 5.0 },
   "streams": {
     "touch": { "enabled": true },
     "joints": { "enabled": true, "period_s": 0.2 },
@@ -85,7 +85,7 @@ The bridge is built from a `NaoqiBridgeConfig`, in code or from JSON (`NaoqiBrid
 ```
 
 - **`backend`**: `"fake"` (default, offline stand-in) or `"real"` (needs `qi` and `robot.ip`)
-- **`robot`**: the robot's address, and how hard to try reaching it: up to `connect_tries` attempts of at most `connect_timeout_s` each, so a wrong address fails within 50 s by default. Validated but ignored on `fake`, so switching backend is a one-word change
+- **`robot`**: the robot's address, and how long to wait for it: one connection attempt of at most `connect_timeout_s`, so a wrong address fails within 5 s by default. Validated but ignored on `fake`, so switching backend is a one-word change
 - **`streams`**: which robot streams the bridge subscribes to; `channel` picks the microphone (`front`, `rear`, `left`, `right`)
 
 A malformed config raises `ConfigError` naming the key (e.g. `streams.joints.period_s must be a positive, finite number`). Full reference: [specs/config.md](specs/config.md).

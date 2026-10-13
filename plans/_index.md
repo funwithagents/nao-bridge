@@ -31,6 +31,7 @@ Implementation plans for naoqi-bridge — each plan turns a settled part of a sp
 | [202610091738_live-tier-coverage.md](202610091738_live-tier-coverage.md) | Live tier in three opt-in levels (safe `NAO_IP`, motion `NAO_ALLOW_MOTION`, interactive `NAO_INTERACTIVE`): verbs, streams, cancellation with measured latencies, both servers against a real Nao; not yet run on a robot | Done |
 | [202610091900_fake-joints-follow-its-posture.md](202610091900_fake-joints-follow-its-posture.md) | The fake reports all 26 `Body` joints at the angles of its posture (`Crouch` at rest, `Stand`, `Sit`), following `rest()` and `go_to_posture`; angles measured on a simulated Nao | Done |
 | [202610121745_rename-to-naoqi-bridge.md](202610121745_rename-to-naoqi-bridge.md) | Rename to naoqi-bridge: package, `naoqi-mcp-server`/`naoqi-websocket-server` and their modules and specs, `NaoqiBridge*` and server classes, specs and docs; robot names (`NaoRobot`, `NAO_IP`…) kept | Done |
+| [202610131500_libqi-index-and-windows.md](202610131500_libqi-index-and-windows.md) | `qi>=3.1.8,<4` from the libqi package index, Windows x64 joins the real backend (others stay fake-only); one connect attempt, `connect_tries` removed, a cancelled `start()` gives up the connection in flight; fast tier on Linux, macOS and Windows | In progress |
 
 ## Status legend
 

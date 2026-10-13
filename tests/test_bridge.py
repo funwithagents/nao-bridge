@@ -28,6 +28,7 @@ from naoqi_bridge.config import (
     TouchStream,
 )
 from naoqi_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoRobot
+from naoqi_bridge.robot import RobotConnectionError
 
 ALL_STREAMS = NaoqiBridgeConfig(
     streams=StreamSettings(
@@ -712,9 +713,9 @@ def test_a_start_cancelled_while_connecting_closes_the_robot(
     connect = FakeNaoRobot.connect
     robots: list[FakeNaoRobot] = []
 
-    def slow_connect(self: FakeNaoRobot) -> None:
+    def slow_connect(self: FakeNaoRobot, cancel: threading.Event | None = None) -> None:
         robots.append(self)
-        time.sleep(0.2)
+        time.sleep(0.2)  # deaf to the cancel: connects anyway
         connect(self)
 
     async def run() -> tuple[bool, float]:
@@ -730,6 +731,34 @@ def test_a_start_cancelled_while_connecting_closes_the_robot(
     assert elapsed >= 0.1  # waited for the connection in flight
     assert command_names(robots[0]) == ["connect", "close"]
     assert not robots[0].connected
+
+
+def test_a_start_cancelled_while_connecting_gives_up_the_connection(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    robots: list[FakeNaoRobot] = []
+
+    def pending_connect(
+        self: FakeNaoRobot, cancel: threading.Event | None = None
+    ) -> None:
+        # A silent host: no answer for 5 s, unless the connection is cancelled.
+        robots.append(self)
+        assert cancel is not None
+        cancel.wait(5.0)
+        raise RobotConnectionError("connection cancelled")
+
+    async def run() -> tuple[bool, float]:
+        monkeypatch.setattr(FakeNaoRobot, "connect", pending_connect)
+        bridge = NaoqiBridge("fake")
+        starting = asyncio.create_task(bridge.start())
+        await asyncio.sleep(0.05)
+        elapsed = await cancel_and_wait(starting)
+        return bridge.running, elapsed
+
+    running, elapsed = asyncio.run(run())
+    assert not running
+    assert elapsed < 0.5  # not the 5 s the connection would have taken
+    assert command_names(robots[0]) == []  # never connected, so nothing to close
 
 
 def test_a_cancelled_stop_still_runs_every_teardown_step(

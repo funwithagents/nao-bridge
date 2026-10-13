@@ -64,7 +64,7 @@ Dependencies point one way: servers → bridge → seam → backends. `events.py
 
 ## Status
 
-Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index.md) is `Done`.
+Every spec is `Implemented` but project.md, robot.md, config.md, bridge.md and ci.md, which are `Updated` while [the libqi index plan](../plans/202610131500_libqi-index-and-windows.md) is `In progress`; every other plan in [plans/_index.md](../plans/_index.md) is `Done`.
 
 | Concept | State |
 | --- | --- |
@@ -97,27 +97,26 @@ Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index
 
 ## Configuration
 
-One JSON shape, `NaoqiBridgeConfig`: `backend` (`fake` by default, or `real`), `robot` (`ip`, `port`, `connect_tries`, `connect_timeout_s`) and `streams` (`touch`, `joints`, `audio`, all off by default). Unknown keys, bad types and a `real` backend without an IP fail at load with a `ConfigError` naming the key path. Each server wraps it as `{"bridge": …, "server": …}`, and its CLI takes `--config FILE` only (exit 2 on a bad config, 1 on an unreachable robot). Ready-made files live in `examples/configs/`. Details: [config.md](config.md).
+One JSON shape, `NaoqiBridgeConfig`: `backend` (`fake` by default, or `real`), `robot` (`ip`, `port`, `connect_timeout_s`) and `streams` (`touch`, `joints`, `audio`, all off by default). Unknown keys, bad types and a `real` backend without an IP fail at load with a `ConfigError` naming the key path. Each server wraps it as `{"bridge": …, "server": …}`, and its CLI takes `--config FILE` only (exit 2 on a bad config, 1 on an unreachable robot). Ready-made files live in `examples/configs/`. Details: [config.md](config.md).
 
 ## Packaging and platforms
 
-- Python 3.12–3.13, packaged with uv, `src/` layout; runtime dependencies `mcp<2`, `websockets` and, where a wheel exists, `qi==3.1.6` ([project.md](project.md)).
-- `qi` comes from the GitHub Releases of the [funwithagents/libqi-python](https://github.com/funwithagents/libqi-python) fork, through `[tool.uv.sources]`; PyPI only has the older 3.1.5.
+- Python 3.12–3.13, packaged with uv, `src/` layout; runtime dependencies `mcp<2`, `websockets` and, where a wheel exists, `qi>=3.1.8,<4` ([project.md](project.md)).
+- `qi` comes from the package index of the [funwithagents/libqi-python](https://github.com/funwithagents/libqi-python) fork on GitHub Pages, `https://funwithagents.github.io/libqi-python/simple/`; PyPI only has the older 3.1.5. uv reads it from `pyproject.toml`; pip needs `--extra-index-url` with that URL.
 
   | Platform | `qi` | Backends |
   | --- | --- | --- |
-  | macOS arm64, Linux x86_64 (CPython 3.12 / 3.13) | installed by `uv sync` | `real` and `fake` |
-  | Windows, macOS x86_64, Linux aarch64 | absent | `fake` only |
+  | macOS arm64, Linux x86_64, Windows x64 (CPython 3.12 / 3.13) | installed by `uv sync` | `real` and `fake` |
+  | macOS x86_64, Linux aarch64, Windows arm64 | absent | `fake` only |
 
-- `naoqi_bridge` imports everywhere, since `qi` is imported only when `RealNaoRobot` connects.
-- uv is the supported installer: pip ignores `[tool.uv.sources]` (open questions).
+- `naoqi_bridge` imports everywhere, since `qi` is imported only when `RealNaoRobot` connects. That connection makes one attempt bounded by `connect_timeout_s`, which a cancelled `start()` gives up in flight ([robot.md](robot.md)).
 - Console scripts: `naoqi-mcp-server`, `naoqi-websocket-server`.
 
 ## Testing and CI
 
 - Two tiers, split by directory ([testing.md](testing.md)): `tests/`, fast and deterministic, runs the bridge and both servers on `FakeNaoRobot` and `RealNaoRobot` against a stub `qi`; `tests-e2e/`, opt-in, runs against a real Nao from `NAO_IP` and skips without it. It has three levels of risk: safe (`NAO_IP`), motion (`NAO_ALLOW_MOTION=1`) and interactive (`NAO_INTERACTIVE=1`). It prints what it measured, such as cancel latencies and the audio chunk size.
 - The fast tier makes fake behaviors instant through an autouse fixture; a test that needs a running behavior sets its duration on the fake.
-- CI ([ci.md](ci.md)) runs `check` (ruff lint and format, pyright) and `fast-tier` on GitHub's `ubuntu-24.04` runners for every pull request and push to `main`. The Linux runner installs the real `qi` wheel, so the `qi`-gated tests run there.
+- CI ([ci.md](ci.md)) runs `check` (ruff lint and format, pyright) on `ubuntu-24.04` and `fast-tier` on `ubuntu-24.04`, `macos-15` and `windows-2025`, for every pull request and push to `main`. Each runner installs its real `qi` wheel, so the `qi`-gated tests run on all three.
 - `tests/test_project_map.py` keeps [AGENTS.md](../AGENTS.md)'s project map and the specs' frontmatter honest.
 
 ## Open questions
@@ -126,10 +125,10 @@ Collected from the concept specs, which own them.
 
 - **Simulated Naoqi** ([robot.md](robot.md), [config.md](config.md), [ci.md](ci.md)): a simulated Naoqi is reachable today as `real` at `127.0.0.1`. A `sim` backend name only earns its place if something must tell it apart; a live CI job against a simulator waits until one exists.
 - **Newer robots** ([robot.md](robot.md)): only Naoqi 2.1.4.13 / Nao v5 is verified. Nao v6 (Naoqi 2.8) or Pepper may need different service calls inside `RealNaoRobot`; the Protocol shouldn't change.
-- **Cancellation** ([bridge.md](bridge.md)): an interruptible connection so a cancelled `start()` doesn't wait out the attempts; whether the newest `say` should interrupt the one in flight; checking live that `stopAll` also stops animated speech's gestures.
+- **Cancellation** ([bridge.md](bridge.md)): whether the newest `say` should interrupt the one in flight; checking live that `stopAll` also stops animated speech's gestures.
 - **Microphone** ([microphone.md](microphone.md)): Naoqi's real chunk size at 16 kHz mono is unmeasured (the fake's 1360 samples is a placeholder); 48 kHz four-channel capture and a gap signal in the stream are deferred.
 - **Config blocks** ([config.md](config.md)): motion, session state (what the robot does at start and stop) and catalog rules are candidate blocks, added when needed.
 - **WebSocket protocol** ([naoqi-websocket-server.md](naoqi-websocket-server.md)): no machine-readable schema, no authentication.
-- **pip installs** ([project.md](project.md)): pip can't find the `qi` wheels; direct-URL dependencies would fix it but rule out PyPI. Deferred while uv is the supported installer.
-- **CI coverage** ([ci.md](ci.md)): Python 3.13 and macOS jobs, deferred until a regression shows the need.
+- **Publishing on PyPI** ([project.md](project.md)): naoqi-bridge installs from its repository; a published wheel would resolve `qi` through the libqi index. Undecided.
+- **CI coverage** ([ci.md](ci.md)): a Python 3.13 entry, deferred until a regression shows the need.
 - **Not yet designed:** camera images, perception (faces, people), speech recognition, and how they'd reach agents. None has a spec.

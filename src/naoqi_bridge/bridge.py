@@ -14,6 +14,7 @@ import asyncio
 import contextlib
 import logging
 import random
+import threading
 import time
 from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from dataclasses import dataclass, field
@@ -307,12 +308,15 @@ class NaoqiBridge:
             raise BridgeError("the bridge is already running")
         streams = self._config.streams
         robot = build_robot(self._config)
-        bring_up = asyncio.ensure_future(self._bring_up(robot))
+        cancel_connect = threading.Event()
+        bring_up = asyncio.ensure_future(self._bring_up(robot, cancel_connect))
         try:
             await asyncio.shield(bring_up)
         except asyncio.CancelledError:
-            # The step in flight can't be interrupted in its thread: let it finish,
-            # then undo what came up (specs/bridge.md "Cancellation", Lifecycle).
+            # A connection in flight gives up; any other step can't be interrupted in
+            # its thread: let it finish, then undo what came up (specs/bridge.md
+            # "Cancellation", Lifecycle).
+            cancel_connect.set()
             with contextlib.suppress(asyncio.CancelledError):
                 await _owned(self._abort_bring_up(robot, bring_up))
             raise
@@ -322,11 +326,12 @@ class NaoqiBridge:
                 self._joints_loop(robot, streams.joints.period_s)
             )
 
-    async def _bring_up(self, robot: NaoRobot) -> None:
-        """Connect ``robot``, subscribe the enabled streams and load the catalog; a
-        failure after the connection tears down what already came up."""
+    async def _bring_up(self, robot: NaoRobot, cancel_connect: threading.Event) -> None:
+        """Connect ``robot`` (giving up once ``cancel_connect`` is set), subscribe the
+        enabled streams and load the catalog; a failure after the connection tears
+        down what already came up."""
         streams = self._config.streams
-        await asyncio.to_thread(robot.connect)
+        await asyncio.to_thread(robot.connect, cancel_connect)
         self._loop = asyncio.get_running_loop()
         try:
             if streams.touch.enabled:

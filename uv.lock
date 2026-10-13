@@ -2,10 +2,8 @@ version = 1
 revision = 3
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
-    "python_full_version >= '3.13' and platform_machine == 'arm64' and sys_platform == 'darwin'",
-    "python_full_version < '3.13' and platform_machine == 'arm64' and sys_platform == 'darwin'",
-    "python_full_version >= '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
-    "python_full_version < '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "platform_machine == 'arm64' and sys_platform == 'darwin'",
+    "platform_machine == 'x86_64' and sys_platform == 'linux'",
     "sys_platform == 'win32'",
     "platform_machine == 'x86_64' and sys_platform == 'darwin'",
     "platform_machine == 'aarch64' and sys_platform == 'linux'",
@@ -270,10 +268,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
-    { name = "qi", version = "3.1.6", source = { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp312-cp312-macosx_15_0_arm64.whl" }, marker = "python_full_version < '3.13' and platform_machine != 'x86_64' and sys_platform != 'linux' and sys_platform != 'win32'" },
-    { name = "qi", version = "3.1.6", source = { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp312-cp312-manylinux_2_34_x86_64.whl" }, marker = "python_full_version < '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "qi", version = "3.1.6", source = { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp313-cp313-macosx_15_0_arm64.whl" }, marker = "python_full_version >= '3.13' and platform_machine != 'x86_64' and sys_platform != 'linux' and sys_platform != 'win32'" },
-    { name = "qi", version = "3.1.6", source = { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp313-cp313-manylinux_2_34_x86_64.whl" }, marker = "python_full_version >= '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "qi", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32') or (platform_machine != 'x86_64' and sys_platform != 'linux' and sys_platform != 'win32')" },
     { name = "websockets" },
 ]
 
@@ -287,11 +282,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "mcp", specifier = ">=1.9,<2" },
-    { name = "qi", marker = "(python_full_version < '3.12' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version >= '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.12' and platform_machine == 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')", specifier = "==3.1.6" },
-    { name = "qi", marker = "python_full_version == '3.12.*' and platform_machine == 'arm64' and sys_platform == 'darwin'", url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp312-cp312-macosx_15_0_arm64.whl" },
-    { name = "qi", marker = "python_full_version == '3.13.*' and platform_machine == 'arm64' and sys_platform == 'darwin'", url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp313-cp313-macosx_15_0_arm64.whl" },
-    { name = "qi", marker = "python_full_version == '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux'", url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp312-cp312-manylinux_2_34_x86_64.whl" },
-    { name = "qi", marker = "python_full_version == '3.13.*' and platform_machine == 'x86_64' and sys_platform == 'linux'", url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp313-cp313-manylinux_2_34_x86_64.whl" },
+    { name = "qi", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')", specifier = ">=3.1.8,<4", index = "https://funwithagents.github.io/libqi-python/simple/" },
     { name = "websockets", specifier = ">=17.2" },
 ]
 
@@ -485,46 +476,15 @@ wheels = [
 
 [[package]]
 name = "qi"
-version = "3.1.6"
-source = { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp312-cp312-macosx_15_0_arm64.whl" }
-resolution-markers = [
-    "python_full_version < '3.13' and platform_machine == 'arm64' and sys_platform == 'darwin'",
-]
+version = "3.1.8"
+source = { registry = "https://funwithagents.github.io/libqi-python/simple/" }
 wheels = [
-    { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp312-cp312-macosx_15_0_arm64.whl", hash = "sha256:6064b05389ede63fb1a6c57216a3b1afefe6af4c4f0f57188f8a65e99875724f" },
-]
-
-[[package]]
-name = "qi"
-version = "3.1.6"
-source = { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp312-cp312-manylinux_2_34_x86_64.whl" }
-resolution-markers = [
-    "python_full_version < '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
-]
-wheels = [
-    { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp312-cp312-manylinux_2_34_x86_64.whl", hash = "sha256:b71db6e988e14b2b686e29d5b03a11a9dc3fbffe3348da0fa0220e071f75cfe9" },
-]
-
-[[package]]
-name = "qi"
-version = "3.1.6"
-source = { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp313-cp313-macosx_15_0_arm64.whl" }
-resolution-markers = [
-    "python_full_version >= '3.13' and platform_machine == 'arm64' and sys_platform == 'darwin'",
-]
-wheels = [
-    { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp313-cp313-macosx_15_0_arm64.whl", hash = "sha256:3ac6246e7fd940a80911a81d65d6f11165248d2d93a609755bc150f596d6f7d6" },
-]
-
-[[package]]
-name = "qi"
-version = "3.1.6"
-source = { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp313-cp313-manylinux_2_34_x86_64.whl" }
-resolution-markers = [
-    "python_full_version >= '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
-]
-wheels = [
-    { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.6/qi-3.1.6-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:174f77b88089890df83556a0322ca801924eb7691d4d4f73f758d96f4a42323c" },
+    { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.8/qi-3.1.8-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:2acd6d5c58d6cd3c523c70928e4b1689500c89d2f3d9b1f6815a550fedc1a6fd" },
+    { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.8/qi-3.1.8-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:ae08292abb81d9733f25ab73d8e59ae83dfcd588790cdcc18dc1c59dedee1467" },
+    { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.8/qi-3.1.8-cp312-cp312-win_amd64.whl", hash = "sha256:c8c1a74d8ef5d4b3e9b0160efa805fbc9da960b14c120f597b8debd4085507a3" },
+    { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.8/qi-3.1.8-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:bbc0723db9be6c126c5e60356cb0dce8ba09c5809f5df43e8098daa2e67ef614" },
+    { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.8/qi-3.1.8-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:27053cc60d546b72ebe44e9ec01a582e43506e37aec757feb377d2e37d34ad7b" },
+    { url = "https://github.com/funwithagents/libqi-python/releases/download/v3.1.8/qi-3.1.8-cp313-cp313-win_amd64.whl", hash = "sha256:4fd250dfc744581d7bb4edab1d36e9b20f4fd472681f160cf8114c9a3dcd6be6" },
 ]
 
 [[package]]

@@ -55,7 +55,7 @@ def live_config(streams: StreamSettings | None = None) -> NaoqiBridgeConfig:
     port = int(os.environ.get("NAO_PORT", "9559"))
     return NaoqiBridgeConfig(
         backend="real",
-        robot=RobotSettings(ip=ip, port=port, connect_tries=2),
+        robot=RobotSettings(ip=ip, port=port),
         streams=streams or StreamSettings(),
     )
 

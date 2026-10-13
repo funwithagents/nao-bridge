@@ -11,7 +11,7 @@ tests:
 
 # Configuration
 
-**Status:** Implemented
+**Status:** Updated
 
 ## Purpose
 
@@ -26,7 +26,7 @@ The first version deliberately covers only the **backend**, the **robot connecti
 ```json
 {
   "backend": "real",
-  "robot": { "ip": "192.168.1.42", "port": 9559, "connect_tries": 10, "connect_timeout_s": 5.0 },
+  "robot": { "ip": "192.168.1.42", "port": 9559, "connect_timeout_s": 5.0 },
   "streams": {
     "touch": { "enabled": true },
     "joints": { "enabled": false, "period_s": 0.2 },
@@ -46,8 +46,7 @@ class NaoqiBridgeConfig:
 class RobotSettings:
     ip: str = ""
     port: int = 9559
-    connect_tries: int = 10
-    connect_timeout_s: float = 5.0   # per attempt; a silent host would otherwise wait for the OS TCP timeout
+    connect_timeout_s: float = 5.0   # the one connection attempt; a silent host would otherwise wait for the OS TCP timeout
 
 @dataclass
 class StreamSettings:
@@ -64,7 +63,8 @@ class StreamSettings:
 - Every config class has the same three constructors: `from_dict(data)`, `from_json(text)` (parses, then calls `from_dict`), and `from_json_file(path)` (reads, then calls `from_json`; an invalid-JSON error names the path). All three share one validation path.
 - Errors raise `ConfigError(ValueError)`, with a message that names the offending key path (e.g. `streams.joints.period_s`). A block's own checks raise `ConfigError(message, key=<field>)`, and each enclosing loader prefixes `key` with its own path; the message is never parsed to find the key.
 - **Unknown keys are errors**, so a typo fails when the config loads.
-- **Type and range checks:** `backend` ∈ `{"real", "fake"}`; `robot.port` and `connect_tries` are positive integers; `connect_timeout_s` and `period_s` are positive, finite numbers; `channel` is one of the four values.
+- **Type and range checks:** `backend` ∈ `{"real", "fake"}`; `robot.port` is a positive integer; `connect_timeout_s` and `period_s` are positive, finite numbers; `channel` is one of the four values.
+- **`robot.connect_tries` is gone.** The connection makes one attempt since libqi 3.1.8 ([robot.md](robot.md)), so a config that still sets it fails as an unknown key.
 - **`real` needs `robot.ip`.** An empty IP is a `ConfigError` when the config loads.
 - **On `fake`, `robot` is validated but not applied.** A config written for the robot runs offline by changing `backend` alone.
 - `config.py` imports neither `qi` nor `mcp` nor `websockets`.
@@ -88,7 +88,7 @@ The callbacks (`on_touch`, `on_joints`, `on_audio`) are **removed**. The config 
 - `NaoqiBridge.from_dict(data)`, `from_json(text)` and `from_json_file(path)` build the config, then the bridge.
 - The `ip=` / `port=` / `on_*=` keyword arguments are **removed**.
 - `bridge.config` exposes the config, read-only.
-- `build_robot(config)` replaces `build_robot(backend, ip=..., port=...)` ([robot.md](robot.md)), and `RealNaoRobot` takes `connect_tries` from it.
+- `build_robot(config)` replaces `build_robot(backend, ip=..., port=...)` ([robot.md](robot.md)), and `RealNaoRobot` takes `connect_timeout_s` from it.
 
 ### Server configs: `{"bridge": …, "server": …}`
 

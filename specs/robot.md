@@ -12,7 +12,7 @@ tests:
 
 # Robot (connection seam)
 
-**Status:** Implemented
+**Status:** Updated
 
 ## Purpose
 
@@ -33,7 +33,7 @@ So the seam is a **first-party `NaoRobot` Protocol**, with two implementations:
 
 | Backend | Class | What it is |
 |---|---|---|
-| `real` | `RealNaoRobot(ip, port=9559, *, connect_tries=10, connect_timeout_s=5.0)` | Translates each Protocol method into the Naoqi service call(s) |
+| `real` | `RealNaoRobot(ip, port=9559, *, connect_timeout_s=5.0)` | Translates each Protocol method into the Naoqi service call(s) |
 | `fake` (default) | `FakeNaoRobot()` | Records every command, serves a fixed package list, simulates behavior runs and sensor events |
 
 Each lives in its own module: `robot.py` holds what they share (the Protocol, the callback types, `TOUCH_KEYS` / `AUDIO_SAMPLE_RATE` / `AUDIO_CHANNEL_CODES`, `RobotConnectionError`) and `build_robot`; `real_robot.py` holds `RealNaoRobot`; `fake_robot.py` holds `FakeNaoRobot` and its package list. `build_robot` imports the two lazily, since both import `robot.py`.
@@ -44,7 +44,7 @@ The Protocol is the contract; each implementation translates it to its backend. 
 
 The one way in, used by `NaoqiBridge.start()`, driven by the [config](config.md):
 - `backend: "fake"` → `FakeNaoRobot()`; the `robot` block is ignored.
-- `backend: "real"` → `RealNaoRobot(robot.ip, robot.port, connect_tries=robot.connect_tries, connect_timeout_s=robot.connect_timeout_s)`.
+- `backend: "real"` → `RealNaoRobot(robot.ip, robot.port, connect_timeout_s=robot.connect_timeout_s)`.
 
 The config has already rejected unknown backends and a `real` backend without an IP. Building does not connect.
 
@@ -54,7 +54,7 @@ Every method is **blocking** (the bridge calls them via `asyncio.to_thread`) and
 
 | Method | `RealNaoRobot` → Naoqi |
 |---|---|
-| `connect()` / `close()` | open / close `tcp://<ip>:<port>` |
+| `connect(cancel=None)` / `close()` | open / close `tcp://<ip>:<port>` |
 | `set_language(language)` | `ALTextToSpeech.setLanguage` |
 | `say(text)` | `ALAnimatedSpeech.say` (returns when spoken) |
 | `stop_speech()` | `ALTextToSpeech.stopAll` (makes a `say` in flight return) |
@@ -76,14 +76,15 @@ Sensor callbacks are invoked **on Naoqi's threads**; marshalling onto an event l
 
 ### `RealNaoRobot`
 
-- **`qi` is imported lazily in `connect()`** (via `importlib`), so importing `naoqi_bridge` never needs it. `qi` is a dependency on the platforms with a wheel and absent elsewhere ([project.md](project.md)). If it's missing, `connect()` raises `RobotConnectionError`: the message names the platforms that ship `qi` (macOS arm64, Linux x86_64, CPython 3.12 / 3.13), says to run `uv sync` there, and says the platform otherwise runs the `fake` backend only. **There is no silent fallback to fake** — that was the old behavior, and it let an agent believe a real robot was moving. Ask for the fake explicitly.
+- **`qi` is imported lazily in `connect()`** (via `importlib`), so importing `naoqi_bridge` never needs it. `qi` is a dependency on the platforms with a wheel and absent elsewhere ([project.md](project.md)). If it's missing, `connect()` raises `RobotConnectionError`: the message names the platforms that ship `qi` (macOS arm64, Linux x86_64, Windows x64, CPython 3.12 / 3.13), says to run `uv sync` there, and says the platform otherwise runs the `fake` backend only. **There is no silent fallback to fake** — that was the old behavior, and it let an agent believe a real robot was moving. Ask for the fake explicitly.
 - `connect()` with an empty IP or a non-positive port raises `RobotConnectionError` before trying.
-- `connect()` makes up to `connect_tries` attempts (default 10, from the config), each **bounded by `connect_timeout_s`** (default 5 s). An attempt connects asynchronously (`session.connect(url, _async=True)` → a `qi.Future`) and waits on the future with that deadline:
+- **`connect()` makes one attempt, bounded by `connect_timeout_s`** (default 5 s, from the config). The libqi 3.1.6 wheels failed some connects at once with `disconnected`, so `connect()` used to retry (`connect_tries`, 10 by default); libqi 3.1.8, the floor ([project.md](project.md)), fixed it. Measured against a simulated Nao's NAOqi 2.1 with plain `session.connect` calls: 12 failures in 200 with 3.1.6, none in 200 with 3.1.8. The attempt connects asynchronously (`session.connect(url, _async=True)` → a `qi.Future`) and waits on the future in slices of `CONNECT_POLL_S` (50 ms) until the deadline:
   - **Finished without error:** connected.
-  - **Finished with an error** (refused port, unreachable network): the session is closed and the next attempt starts at once.
-  - **Still running at the deadline** (a silent host, which a blocking connect would wait out for the OS TCP timeout, ~76 s): the future is cancelled, the session closed, and the next attempt starts.
+  - **Finished with an error** (refused port, unreachable network): the session is closed and `RobotConnectionError` names the URL and qi's error, chained to it.
+  - **Still running at the deadline** (a silent host, which a blocking connect would wait out for the OS TCP timeout, ~76 s): the future is cancelled, the session closed, and `RobotConnectionError` says there was no answer within `connect_timeout_s`.
 
-  After the last attempt it raises `RobotConnectionError` naming the attempts, chained to the last error. A wrong IP therefore fails within `connect_tries × connect_timeout_s` (50 s by default).
+  A wrong IP therefore fails within `connect_timeout_s`. Waiting for a robot that is still booting is the caller's: call `start()` again.
+- **`connect(cancel)` gives up when `cancel` is set.** `cancel` is an optional `threading.Event`, checked before the attempt and at every slice of the wait. Once set, the future is cancelled, the session closed, and `RobotConnectionError("connection to … cancelled")` raised; one already set makes no attempt. One TCP attempt can take seconds (a refused port takes about 2 s on Windows, where Linux and macOS refuse at once; a silent host takes the whole timeout), so this is what lets a cancelled `start()` return promptly ([bridge.md](bridge.md), Lifecycle). `FakeNaoRobot.connect(cancel)` raises the same error when `cancel` is already set, and connects at once otherwise.
 - Services are acquired lazily on first use and cached for the session; `close()` drops them, along with the touch links and the audio sink registration. Any call that needs the session while not connected — the audio subscription included — raises `RobotConnectionError`.
 - Naoqi requires the audio sink to expose a method named exactly `processRemote`. That lives on a small private sink object, so `RealNaoRobot`'s own surface stays the Protocol.
 

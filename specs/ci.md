@@ -7,7 +7,7 @@ tests:
 
 # Continuous integration
 
-**Status:** Implemented
+**Status:** Updated
 
 ## Purpose
 
@@ -17,10 +17,10 @@ The verification gate of [AGENTS.md](../AGENTS.md) — lint, type check, tests �
 
 ### The runner
 
-- **GitHub-hosted Linux, the free tier.** Every job runs on `ubuntu-24.04`, pinned by name rather than `ubuntu-latest`, so the image moves only when the pin is bumped on purpose. No self-hosted runner.
-- **CI is the project's Linux target.** Development happens on macOS; the runner is where the bridge's Linux paths are exercised — notably the Linux x86_64 `qi` wheel, which `uv sync` installs there ([project.md](project.md)), so the fast-tier tests gated on `pytest.importorskip("qi")` run on the runner. A Linux-only failure is a bridge bug to fix, not a reason to leave Linux out.
+- **GitHub-hosted runners, the free tier.** `check` runs on `ubuntu-24.04`; `fast-tier` runs on `ubuntu-24.04`, `macos-15` and `windows-2025`, the three platforms with a `qi` wheel ([project.md](project.md)). Each image is pinned by name rather than `*-latest`, so it moves only when the pin is bumped on purpose. No self-hosted runner.
+- **CI is where every platform is exercised.** Development happens on macOS; the runners are where the bridge's Linux and Windows paths run. Each one's `qi` wheel installs with `uv sync`, so the fast-tier tests gated on `pytest.importorskip("qi")` run on all three, including the MCP server's stdout guard against libqi's real console log ([naoqi-mcp-server.md](naoqi-mcp-server.md)). A failure on one platform is a bridge bug to fix, not a reason to leave the platform out.
 - **One Python**, 3.12 — the floor of `requires-python`, the version `.python-version` names; uv installs it on the runner.
-- **No system packages.** Nothing in the dependency tree builds from source or needs a system library on Linux, so the jobs install nothing with apt.
+- **No system packages.** Nothing in the dependency tree builds from source or needs a system library, so the jobs install nothing beyond the sync.
 
 ### The workflow
 
@@ -29,9 +29,9 @@ One file, `.github/workflows/ci.yml`. It triggers on `pull_request`, on `push` t
 | Job | What |
 |---|---|
 | `check` | `uv sync --locked`, then `ruff check .`, `ruff format --check .`, `pyright` — the static gate |
-| `fast-tier` | the same environment; `pytest` — the fast tier, `tests/` only (`testpaths`) |
+| `fast-tier` | a matrix over the three runners above, `fail-fast: false`; the same environment; `pytest -rs` — the fast tier, `tests/` only (`testpaths`) |
 
-The two jobs run side by side, each on its own runner, and neither waits on the other: a run takes as long as its slower job. Each job sets up its own environment; with uv's cache that costs seconds.
+The jobs and the matrix entries run side by side, each on its own runner, and none waits on another: a run takes as long as its slowest job. One platform failing leaves the others running, so a run shows every platform's verdict. Each job sets up its own environment; with uv's cache that costs seconds.
 
 - **`--locked`.** The sync fails when `uv.lock` does not match `pyproject.toml`, so a dependency edit lands with its relock or not at all.
 - **The dev group installs** with the sync (uv's default groups); there are no other groups.
@@ -47,16 +47,15 @@ The two jobs run side by side, each on its own runner, and neither waits on the 
 ### Secrets and protection
 
 - **No secret is required**, and none is used: forks' pull requests run the same jobs as the owner's.
-- **The status checks to require on `main`** are `check` and `fast-tier`. Requiring them is a repository setting on GitHub, outside the repo.
+- **The status checks to require on `main`** are `check` and the three `fast-tier` entries. Requiring them is a repository setting on GitHub, outside the repo.
 
 ## Relationship to the other specs
 
 - **[testing.md](testing.md):** the two tiers and the no-credentials fast tier CI runs. CI is the hosted run of that strategy, with no rule of its own about what a test does.
-- **[project.md](project.md):** the `qi` platform dependency the Linux runner installs, the tooling the `check` job runs, `.github/workflows/` in the repo shape.
+- **[project.md](project.md):** the `qi` platform dependency each runner installs, the tooling the `check` job runs, `.github/workflows/` in the repo shape.
 - **[AGENTS.md](../AGENTS.md):** the verification gate CI automates.
 
 ## Open questions
 
 1. **A live job against a simulated Nao.** Once a Nao sim exists, an `e2e-sim` job runs `pytest tests-e2e -rs` against it beside the two jobs above, with its own expected-skips list. Deferred until the sim is built.
 2. **A Python matrix.** `requires-python` admits 3.13 too, and `qi` ships a cp313 wheel; a second fast-tier entry on 3.13 would cover it. Deferred until a 3.13-only regression shows the need.
-3. **A macOS job.** The developers' platform and the other `qi` wheel (arm64); free on a public repo. Deferred until a macOS-only regression reaches `main`.

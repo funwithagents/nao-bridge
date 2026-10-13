@@ -62,10 +62,10 @@ def test_a_cancelled_say_stops_the_speech(caplog: pytest.LogCaptureFixture):
 
 
 def test_a_start_cancelled_while_connecting_comes_back_not_running():
-    # A non-routable address: each attempt runs into its timeout. Needs qi, no robot.
+    # A non-routable address: the attempt would run into its timeout. Needs qi, no robot.
     config = NaoqiBridgeConfig(
         backend="real",
-        robot=RobotSettings(ip="10.255.255.1", connect_tries=1, connect_timeout_s=2.0),
+        robot=RobotSettings(ip="10.255.255.1", connect_timeout_s=10.0),
     )
 
     async def run() -> tuple[float, bool]:
@@ -84,8 +84,8 @@ def test_a_start_cancelled_while_connecting_comes_back_not_running():
 
     elapsed, running = asyncio.run(run())
     assert not running
-    # The attempt in flight is waited out (specs/bridge.md open question 1).
-    assert elapsed < 2.0 + 1.0
+    # The attempt in flight is given up, not waited out (specs/bridge.md).
+    assert elapsed < 1.0
 
 
 # --- Motion -------------------------------------------------------------------

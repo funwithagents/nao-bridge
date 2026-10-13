@@ -13,7 +13,7 @@ tests:
 
 # The bridge (`NaoqiBridge`)
 
-**Status:** Implemented
+**Status:** Updated
 
 ## Purpose
 
@@ -107,7 +107,7 @@ The streams have their own cancellation contracts: an `audio_input()` subscriber
 
 #### Lifecycle
 
-- **A cancel during `start()` is handled like a failure.** The step in flight finishes in its thread, since it can't be interrupted; then everything started so far is torn down, the robot is closed, and the `CancelledError` propagates. Nothing is leaked, but the cancel can take as long as that step: up to `connect_tries × connect_timeout_s` during the connection ([robot.md](robot.md)).
+- **A cancel during `start()` is handled like a failure.** A connection in flight gives up: `start()` passes the robot's `connect()` a `threading.Event` and sets it on the cancel, so the attempt ends within one 50 ms poll ([robot.md](robot.md)). Any other step in flight finishes in its thread, since it can't be interrupted. Then everything started so far is torn down, the robot is closed if it connected, and the `CancelledError` propagates. Nothing is leaked; the cancel takes as long as the step in flight, which is short once the connection is up.
 - **`stop()` is owned once begun.** A cancel arriving while it runs is absorbed until every teardown step has run, then propagates. The bridge reads as not running from the moment `stop()` begins.
 
 ### Streams
@@ -146,6 +146,5 @@ So `except (BridgeError, ValueError)` catches every expected verb failure, and t
 
 ## Open questions
 
-1. **An interruptible connection.** Cancelling `start()` waits out the connection attempt in flight, and `RealNaoRobot.connect()` makes up to `connect_tries` of them. Making `connect()` give up between attempts would bound that cancel by one `connect_timeout_s`. Deferred until a caller needs a short `start()` timeout.
-2. **Concurrent `say` calls.** Two overlapping `say` calls are queued or mixed by Naoqi as it sees fit. Whether the newest `say` should interrupt the one in flight is deferred. Cancelling one `say` stops the speech (`ALTextToSpeech.stopAll`), and that silences the other too.
-3. **`stopAll` and animated speech.** It's assumed (not yet verified live on Naoqi 2.1.4.13) that `ALTextToSpeech.stopAll` makes `ALAnimatedSpeech.say` return and stops its gestures. If the gestures play on, the `say` row needs an `ALAnimatedSpeech`-level stop.
+1. **Concurrent `say` calls.** Two overlapping `say` calls are queued or mixed by Naoqi as it sees fit. Whether the newest `say` should interrupt the one in flight is deferred. Cancelling one `say` stops the speech (`ALTextToSpeech.stopAll`), and that silences the other too.
+2. **`stopAll` and animated speech.** It's assumed (not yet verified live on Naoqi 2.1.4.13) that `ALTextToSpeech.stopAll` makes `ALAnimatedSpeech.say` return and stops its gestures. If the gestures play on, the `say` row needs an `ALAnimatedSpeech`-level stop.

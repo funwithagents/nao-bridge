@@ -43,7 +43,7 @@ def test_the_mcp_server_drives_the_robot_over_stdio(tmp_path: Path):
             {
                 "bridge": {
                     "backend": "real",
-                    "robot": {"ip": robot.ip, "port": robot.port, "connect_tries": 2},
+                    "robot": {"ip": robot.ip, "port": robot.port},
                 }
             }
         )

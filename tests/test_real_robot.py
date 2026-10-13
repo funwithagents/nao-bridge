@@ -3,6 +3,8 @@ stub ``qi`` module. No robot, network or real ``qi`` needed.
 """
 
 import sys
+import threading
+import time
 import types
 from typing import Any, ClassVar
 
@@ -61,6 +63,8 @@ class _StubFuture:
 
     def wait(self, timeout_ms: int) -> None:
         self.waited_ms = timeout_ms
+        if not self._finished:  # a silent host: the wait runs out
+            time.sleep(timeout_ms / 1000)
 
     def isFinished(self) -> bool:
         return self._finished
@@ -139,22 +143,57 @@ def test_real_backend_needs_an_address(stub_qi: type[_StubSession]):
     assert stub_qi.connects == 0
 
 
-def test_real_backend_retries_then_connects(stub_qi: type[_StubSession]):
-    stub_qi.failures = 3
+def test_real_backend_connects_and_reaches_naoqi(stub_qi: type[_StubSession]):
     robot = RealNaoRobot("10.0.0.5")
     robot.connect()
-    assert stub_qi.connects == 4
-    assert stub_qi.closed == 3  # each failed attempt's session is released
     robot.say("hello")
     assert stub_qi.calls == [("ALAnimatedSpeech", "say", ("hello",))]
 
 
-def test_real_backend_gives_up_after_its_tries(stub_qi: type[_StubSession]):
-    stub_qi.failures = 3
-    with pytest.raises(RobotConnectionError, match="after 3 tries") as caught:
-        RealNaoRobot("10.0.0.5", connect_tries=3).connect()
-    assert stub_qi.connects == 3
+def test_real_backend_does_not_retry_a_failed_connect(stub_qi: type[_StubSession]):
+    stub_qi.failures = 1  # a second attempt would succeed
+    with pytest.raises(RobotConnectionError, match="cannot reach") as caught:
+        RealNaoRobot("10.0.0.5").connect()
+    assert stub_qi.connects == 1
+    assert stub_qi.closed == 1  # the failed attempt's session is released
     assert isinstance(caught.value.__cause__, RuntimeError)
+
+
+def test_real_backend_gives_up_on_a_silent_host_at_its_timeout(
+    stub_qi: type[_StubSession],
+):
+    stub_qi.silent = 1
+    started = time.monotonic()
+    with pytest.raises(RobotConnectionError, match="no answer within 0.2 s"):
+        RealNaoRobot("10.0.0.5", connect_timeout_s=0.2).connect()
+    assert 0.2 <= time.monotonic() - started < 1.0
+    assert stub_qi.connects == 1
+    assert stub_qi.futures[0].cancelled
+    assert stub_qi.closed == 1
+
+
+def test_real_backend_gives_up_a_connect_in_flight_when_cancelled(
+    stub_qi: type[_StubSession],
+):
+    stub_qi.silent = 1
+    cancel = threading.Event()
+    threading.Timer(0.1, cancel.set).start()
+    started = time.monotonic()
+    with pytest.raises(RobotConnectionError, match="cancelled"):
+        RealNaoRobot("10.0.0.5", connect_timeout_s=10.0).connect(cancel)
+    assert time.monotonic() - started < 1.0  # not the 10 s timeout
+    assert stub_qi.futures[0].cancelled
+    assert stub_qi.closed == 1
+
+
+def test_real_backend_already_cancelled_makes_no_attempt(
+    stub_qi: type[_StubSession],
+):
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(RobotConnectionError, match="cancelled"):
+        RealNaoRobot("10.0.0.5").connect(cancel)
+    assert stub_qi.connects == 0
 
 
 @pytest.mark.parametrize(
