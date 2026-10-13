@@ -7,7 +7,7 @@ tests:
 
 # Continuous integration
 
-**Status:** Updated
+**Status:** Implemented
 
 ## Purpose
 
@@ -77,6 +77,19 @@ The tests that skip by design in `e2e-sim`, the same six on both entries; any ot
 
 - **No secret is required**, and none is used: forks' pull requests run the same jobs as the owner's.
 - **The status checks to require on `main`** are `check`, the three `fast-tier` entries and both `e2e-sim` entries. Requiring them is a repository setting on GitHub, outside the repo.
+
+
+### Measured
+
+On PR #6 (Oct 13, 2026), the first runs:
+
+| | Cold (fetch and build) | Cache hit |
+|---|---|---|
+| `e2e-sim` 2.1 | 10 min (tests 3 min 30 s) | 5 min 30 s (tests 3 min 25 s) |
+| `e2e-sim` 2.8 | 15 min | 7 min 25 s (tests 3 min 50 s) |
+
+- Both entries: 21 passed and the six expected skips. Cancel latencies: `say` 40 ms on 2.1 and 370 ms on 2.8, `stand_up` 2.4 s on both, the audio chunk 1365 samples at 16 kHz.
+- One cold build failed on both entries, before any test: naoqi-sim's `tts` image got an empty Piper voice file from Hugging Face (its download has no `--fail`), and the engine did not start. The next cold build passed. If it recurs, it is naoqi-sim's to make the download fail loudly and retry.
 
 ## Relationship to the other specs
 

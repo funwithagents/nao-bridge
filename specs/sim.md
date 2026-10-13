@@ -13,7 +13,7 @@ tests:
 
 # The `sim` backend
 
-**Status:** Stable
+**Status:** Implemented
 
 ## Purpose
 

@@ -51,7 +51,7 @@ This overview is the map of the project: what it is for, how the parts fit, the 
 | Config | `config.py` | `NaoqiBridgeConfig` (backend, robot, streams, sim), the `from_dict` / `from_json` / `from_json_file` loaders, `ConfigError` naming the key | [config.md](config.md) |
 | Robot seam | `robot.py` | The `AnyNaoqiRobot` Protocol (the exact Naoqi slice the bridge consumes), shared constants and types, `RobotConnectionError`, `build_robot(config)` | [robot.md](robot.md) |
 | Real backend | `naoqi_robot.py` | `NaoqiRobot`: each Protocol method as Naoqi service calls over a `qi` session, imported lazily; bounded connection attempts | [robot.md](robot.md) |
-| Sim | `sim.py` (planned) | The `sim` backend's lease: start a naoqi-sim and own it, or borrow the one running, as `sim.spawn` says; the one module that imports `naoqi_sim` | [sim.md](sim.md) |
+| Sim | `sim.py` | The `sim` backend's lease: start a naoqi-sim and own it, or borrow the one running, as `sim.spawn` says; the one module that imports `naoqi_sim` | [sim.md](sim.md) |
 | Fake backend | `fake_robot.py` | `FakeNaoqiRobot`: records commands, serves a fixed package list, behaviors that take time, motors that start off, sensor events and paced audio | [robot.md](robot.md) |
 | Bridge | `bridge.py`, `errors.py` | `NaoqiBridge`: lifecycle, verbs that raise why they failed, behavior catalog, running-item tracking, stream APIs | [bridge.md](bridge.md) |
 | Event | `events.py` | `Event[T]`: synchronous pub/sub, for occurrences (`bridge.on_touch`) | [events.md](events.md) |
@@ -65,7 +65,7 @@ Dependencies point one way: servers → bridge → seam → backends. `events.py
 
 ## Status
 
-The `sim` backend is designed and not built: [sim.md](sim.md) is `Stable`, the specs it changes (config, robot, bridge, project, testing, CI) are `Updated`, and its plan in [plans/_index.md](../plans/_index.md) is `Todo`. Every other spec is `Implemented`.
+Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index.md) is `Done`.
 
 | Concept | State |
 | --- | --- |
@@ -76,8 +76,8 @@ The `sim` backend is designed and not built: [sim.md](sim.md) is `Stable`, the s
 | MCP server | Built and tested ([naoqi-mcp-server.md](naoqi-mcp-server.md)) |
 | WebSocket server, protocol version 1 | Built and tested ([naoqi-websocket-server.md](naoqi-websocket-server.md)) |
 | Project tooling, two test tiers, CI | In place ([project.md](project.md), [testing.md](testing.md), [ci.md](ci.md)) |
-| Live tier | Verbs, streams, cancellation and both servers, in three opt-in levels (safe, motion, interactive); written but not yet run on a robot ([analysis](../analysis/202610091738_not-yet-tested-on-a-robot.md)); not in CI |
-| `sim` backend, live tier on a sim, `e2e-sim` CI job | Designed, not built ([sim.md](sim.md), Stable) |
+| Live tier | Verbs, streams, cancellation and both servers, in three opt-in levels (safe, motion, interactive); passes on 2.1 and 2.8 sims, locally and in CI (`e2e-sim`); not yet run on a robot ([analysis](../analysis/202610091738_not-yet-tested-on-a-robot.md)) |
+| `sim` backend, live tier on a sim, `e2e-sim` CI job | Built and tested; the live tier passes on 2.1 and 2.8 sims, locally and in CI ([sim.md](sim.md), [ci.md](ci.md)) |
 
 ## How a call flows
 
