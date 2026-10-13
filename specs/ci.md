@@ -59,12 +59,13 @@ One entry per NAOqi version, each on its own runner, since one sim runs per mach
 
 ### Expected skips
 
-The tests that skip by design in `e2e-sim`; any other skip there is a fault. The list is measured on the job's first runs.
+The tests that skip by design in `e2e-sim`, the same six on both entries; any other skip there is a fault. Measured on local runs of both versions (21 passed, 6 skipped each).
 
 | Test | Why |
 |---|---|
-| The dance, app and body-action tests (`first_dance`, `first_body_action`, the app pickers) | The sim has the `animations` package only ([sim.md](sim.md)) |
-| `test_live_streams.py`'s touch test | The interactive level is skipped on a sim: naoqi-sim has no touch input yet |
+| `test_live_cancellation.py::test_a_cancelled_dance_stops_on_the_robot` (both cases), `test_live_motion.py::test_stop_dance_ends_a_dance_and_its_verb_returns` | No dance: the sim has the `animations` package only ([sim.md](sim.md)) |
+| `test_live_cancellation.py::test_a_cancelled_body_action_stops_on_the_robot`, `test_live_motion.py::test_a_body_action_and_a_reaction_run_to_their_end` | No body action, for the same reason |
+| `test_live_streams.py::test_a_head_touch_reaches_on_touch` | The interactive level is skipped on a sim: naoqi-sim has no touch input yet |
 
 ### What CI does not run
 

@@ -45,7 +45,7 @@ The Protocol is the contract; each implementation translates it to its backend. 
 The one way in, used by `NaoqiBridge.start()`, driven by the [config](config.md):
 - `backend: "fake"` → `FakeNaoqiRobot()`; the `robot` block is ignored.
 - `backend: "real"` → `NaoqiRobot(robot.ip, robot.port, connect_timeout_s=robot.connect_timeout_s)`.
-- `backend: "sim"` → `NaoqiRobot("127.0.0.1", 9559, connect_timeout_s=robot.connect_timeout_s)`: naoqi-sim's fixed address. A sim is a Naoqi like any other, so it gets no robot class of its own; starting or borrowing the sim is the bridge's, before it connects ([sim.md](sim.md)).
+- `backend: "sim"` → `NaoqiRobot("127.0.0.1", 9559, connect_timeout_s=robot.connect_timeout_s, sit_through_crouch=<the sim is NAOqi 2.8>)`: naoqi-sim's fixed address. A sim is a Naoqi like any other, so it gets no robot class of its own; starting or borrowing the sim is the bridge's, before it connects ([sim.md](sim.md)). The version is `sim.config.naoqi.version`, which a borrowed sim must match.
 
 The config has already rejected unknown backends and a `real` backend without an IP. Building does not connect.
 
@@ -61,7 +61,7 @@ Every method is **blocking** (the bridge calls them via `asyncio.to_thread`) and
 | `stop_speech()` | `ALTextToSpeech.stopAll` (makes a `say` in flight return) |
 | `wake_up()` / `rest()` | `ALMotion.wakeUp` / `rest` |
 | `is_awake() -> bool` | `ALMotion.robotIsWakeUp` (motors stiff; asked each time, since the robot can go to rest on its own: fall manager, chest button, another client) |
-| `go_to_posture(posture, speed, max_tries) -> bool` | `ALRobotPosture.setMaxTryNumber` + `goToPosture` (returns when the move ends) |
+| `go_to_posture(posture, speed, max_tries) -> bool` | `ALRobotPosture.setMaxTryNumber` + `goToPosture` (returns when the move ends); with `sit_through_crouch`, Sit goes through Crouch and is judged by `getPosture()` (below) |
 | `stop_posture()` | `ALRobotPosture.stopMove` (the bridge's stop for a cancelled `stand_up` / `sit_down`) |
 | `set_breathing(chain_name, enabled)` | `ALMotion.setBreathEnabled` |
 | `fade_eyes(color)` | `ALLeds.fadeRGB("FaceLeds", color, 0)` |
@@ -87,6 +87,7 @@ Sensor callbacks are invoked **on Naoqi's threads**; marshalling onto an event l
   A wrong IP therefore fails within `connect_timeout_s`. Waiting for a robot that is still booting is the caller's: call `start()` again.
 - **`connect(cancel)` gives up when `cancel` is set.** `cancel` is an optional `threading.Event`, checked before the attempt and at every slice of the wait. Once set, the future is cancelled, the session closed, and `RobotConnectionError("connection to … cancelled")` raised; one already set makes no attempt. One TCP attempt can take seconds (a refused port takes about 2 s on Windows, where Linux and macOS refuse at once; a silent host takes the whole timeout), so this is what lets a cancelled `start()` return promptly ([bridge.md](bridge.md), Lifecycle). `FakeNaoqiRobot.connect(cancel)` raises the same error when `cancel` is already set, and connects at once otherwise.
 - Services are acquired lazily on first use and cached for the session; `close()` drops them, along with the touch links and the audio sink registration. Any call that needs the session while not connected — the audio subscription included — raises `RobotConnectionError`.
+- **`sit_through_crouch`** (off by default; on only for a 2.8 sim, [sim.md](sim.md)): `go_to_posture("Sit", …)` first goes to Crouch unless the robot is already there, then to Sit, and returns whether `getPosture()` then says `Sit`, whatever `goToPosture` returned. The 2.8 desktop suite's robot has no inertial sensor, so its posture manager won't sit from Stand and misreports Sit from Crouch. It is still one robot call: `stop_posture()` during the Crouch leg ends the whole move (the Sit leg doesn't start). Other postures are asked for directly.
 - Naoqi requires the audio sink to expose a method named exactly `processRemote`. That lives on a small private sink object, so `NaoqiRobot`'s own surface stays the Protocol.
 
 ### `FakeNaoqiRobot`

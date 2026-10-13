@@ -1,11 +1,11 @@
-"""Live: the cancellation contract (specs/bridge.md "Cancellation") on a real Nao.
+"""Live: the cancellation contract (specs/bridge.md "Cancellation") on the target.
 
 A cancelled verb must come back quickly with the robot stopped, the bridge's tracking
 empty, no stop warning logged, and the session ready for the next verb. Each cancel's
 latency is printed in the run's summary.
 
-Safe level (NAOQI_E2E_IP): a cancelled `say`. Motion level (NAOQI_E2E_ALLOW_MOTION=1): dances,
-body actions, postures and reactions. The cancelled `start()` needs `qi` only.
+Safe level: a cancelled `say`. Motion level (NAOQI_E2E_ALLOW_MOTION=1 on a robot, always
+on a sim): dances, body actions, postures and reactions. The cancelled `start()` needs `qi` only.
 """
 
 import asyncio
@@ -118,8 +118,8 @@ def test_a_cancelled_dance_stops_on_the_robot(
 ):
     async def run() -> float:
         async with live_session(live_config(), motion=True) as bridge:
+            dance_id = first_dance(bridge)  # skips before the robot moves
             await bridge.stand_up()
-            dance_id = first_dance(bridge)
             behavior = dance_behavior(bridge, dance_id)
             dancing = asyncio.create_task(bridge.dance(dance_id))
             elapsed = await cancel_behavior_verb(
@@ -140,8 +140,8 @@ def test_a_cancelled_dance_stops_on_the_robot(
 def test_a_cancelled_body_action_stops_on_the_robot(caplog: pytest.LogCaptureFixture):
     async def run() -> float:
         async with live_session(live_config(), motion=True) as bridge:
+            action_id = first_body_action(bridge)  # skips before the robot moves
             await bridge.stand_up()
-            action_id = first_body_action(bridge)
             moving = asyncio.create_task(bridge.body_action(action_id))
             return await cancel_behavior_verb(
                 bridge,

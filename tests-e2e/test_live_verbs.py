@@ -1,7 +1,7 @@
-"""Live, safe level: the bridge's verbs that don't move the limbs, on a real Nao.
+"""Live, safe level: the bridge's verbs that don't move the limbs, on the target.
 
-Skipped unless NAOQI_E2E_IP is set and `qi` is installed. Run explicitly:
-`NAOQI_E2E_IP=192.168.1.42 uv run pytest tests-e2e/test_live_verbs.py`.
+Run explicitly: `uv run pytest tests-e2e/test_live_verbs.py` (a sim), or
+`NAOQI_E2E_TARGET=real NAOQI_E2E_IP=192.168.1.42 uv run pytest tests-e2e/test_live_verbs.py`.
 """
 
 import asyncio

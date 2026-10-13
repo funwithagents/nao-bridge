@@ -2,9 +2,11 @@
 and every validation error naming its key path."""
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
+from naoqi_sim import NaoqiSimConfig
 
 from naoqi_bridge.config import (
     AudioStream,
@@ -13,6 +15,7 @@ from naoqi_bridge.config import (
     JsonConfig,
     NaoqiBridgeConfig,
     RobotSettings,
+    SimSettings,
     StreamSettings,
     TouchStream,
 )
@@ -44,6 +47,7 @@ def test_the_default_config_is_the_offline_fake_with_no_streams():
         JointsStream,
         AudioStream,
         StreamSettings,
+        SimSettings,
         NaoqiBridgeConfig,
         McpServerSettings,
         WebsocketServerSettings,
@@ -79,7 +83,12 @@ def test_a_full_config_loads_every_field():
 @pytest.mark.parametrize(
     ("data", "message"),
     [
-        ({"backend": "sim"}, "backend must be one of 'real', 'fake'"),
+        ({"backend": "mars"}, "backend must be one of 'real', 'fake', 'sim'"),
+        (
+            {"sim": {"spawn": "sometimes"}},
+            "sim.spawn must be one of 'never', 'auto', 'always'",
+        ),
+        ({"sim": {"version": "2.1"}}, "unknown key 'sim.version'"),
         ({"backend": "real"}, "robot.ip is required for the real backend"),
         ({"robot": {"port": 0}}, "robot.port must be a positive integer"),
         ({"robot": {"port": "9559"}}, "robot.port must be an integer"),
@@ -214,12 +223,78 @@ def test_server_config_errors_carry_the_full_path(
         factory.from_dict(data)
 
 
-@pytest.mark.parametrize("name", ["mcp-fake", "mcp-real"])
+# region The sim block (specs/config.md "The `sim` block")
+
+
+def test_a_naoqi_sim_config_pastes_in_as_sim_config():
+    naoqi_sim_file = {
+        "naoqi": {"version": "2.8", "ready_timeout_s": 60},
+        "viewer": {"headless": True, "variant": "placeholder"},
+        "video_input": {"source": "render"},
+        "audio_output": {"mode": "silent"},
+        "audio_input": {"source": "fake"},
+    }
+    config = NaoqiBridgeConfig.from_dict(
+        {"backend": "sim", "sim": {"spawn": "never", "config": naoqi_sim_file}}
+    )
+    assert config.sim.spawn == "never"
+    # naoqi-sim reads it exactly as its own CLI would read the file.
+    assert config.sim.config == NaoqiSimConfig.from_dict(naoqi_sim_file)
+
+
+def test_the_sim_backend_alone_borrows_or_starts_naoqi_sims_defaults():
+    config = NaoqiBridgeConfig.from_dict({"backend": "sim"})
+    assert config.sim == SimSettings(spawn="auto", config=None)
+    assert NaoqiBridgeConfig(backend="sim") == config
+
+
+def test_naoqi_sims_own_errors_come_back_under_sim_config():
+    with pytest.raises(ConfigError) as caught:
+        NaoqiBridgeConfig.from_dict(
+            {"backend": "sim", "sim": {"config": {"viewer": {"variant": "shiny"}}}}
+        )
+    assert caught.value.key == "sim.config.viewer.variant"
+    with pytest.raises(ConfigError) as caught:
+        NaoqiBridgeConfig.from_dict({"sim": {"config": {"naoqi": {"versio": "2.1"}}}})
+    assert caught.value.key.startswith("sim.config")
+
+
+def test_a_sim_block_on_another_backend_is_validated_but_unused():
+    config = NaoqiBridgeConfig.from_dict(
+        {
+            "backend": "fake",
+            "sim": {"spawn": "always", "config": {"naoqi": {"version": "2.8"}}},
+        }
+    )
+    assert config.backend == "fake"
+    with pytest.raises(ConfigError, match="sim.config.naoqi.version"):
+        NaoqiBridgeConfig.from_dict({"sim": {"config": {"naoqi": {"version": "3.0"}}}})
+
+
+def test_without_naoqi_sim_only_the_sim_backend_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # A platform without the [sim] extra (no qi wheel): naoqi-sim can't be imported.
+    monkeypatch.setitem(sys.modules, "naoqi_sim.config", None)
+    with pytest.raises(ConfigError, match=r"naoqi-bridge\[sim\]") as caught:
+        NaoqiBridgeConfig.from_dict({"backend": "sim"})
+    assert caught.value.key == "backend"
+    # A file that switches backends still loads; its sim.config stays unchecked.
+    config = NaoqiBridgeConfig.from_dict(
+        {"backend": "fake", "sim": {"config": {"naoqi": {"version": "2.1"}}}}
+    )
+    assert config.sim.config is None
+
+
+# endregion
+
+
+@pytest.mark.parametrize("name", ["mcp-fake", "mcp-real", "mcp-sim"])
 def test_mcp_examples_load(name: str):
     NaoqiMcpServerConfig.from_json_file(EXAMPLES / f"{name}.json")
 
 
-@pytest.mark.parametrize("name", ["websocket-fake", "websocket-real"])
+@pytest.mark.parametrize("name", ["websocket-fake", "websocket-real", "websocket-sim"])
 def test_websocket_examples_load_with_every_stream(name: str):
     streams = NaoqiWebsocketServerConfig.from_json_file(
         EXAMPLES / f"{name}.json"

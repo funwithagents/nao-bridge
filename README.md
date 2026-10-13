@@ -15,7 +15,7 @@ Design docs live in [specs/](specs/_index.md); contributor and agent instruction
 > While the Qi package should work fine with more recent versions of Naoqi, the Naoqi API used here might have evolved since version 2.1.4.13. To test and add compatibility, we would need a Nao v6 robot (or even a Pepper robot) ! 🙂
 
 > [!NOTE]
-> No Nao robot? No worries! 😅 If you don't have a Nao or if your platform has no `qi` wheel (like an Intel Mac), use the `fake` backend (the default; `examples/configs/*-fake.json` for the servers): the API and servers run without actual hardware.
+> No Nao robot? No worries! 😅 Run a simulated Nao with the `sim` backend (see [Simulated Nao](#simulated-nao-the-sim-backend)): Naoqi itself, in Docker, that speaks, moves and hears. Or, if your platform has no `qi` wheel (like an Intel Mac), use the `fake` backend (the default; `examples/configs/*-fake.json` for the servers): the API and servers run without actual hardware.
 > See usage details below.
 
 ## Installation
@@ -42,6 +42,29 @@ Communicating with a real Nao relies on the `qi` Python package (`qi>=3.1.8,<4`)
 
 > [!NOTE]
 > uv finds `qi` through `pyproject.toml`. With pip, add the index: `pip install --extra-index-url https://funwithagents.github.io/libqi-python/simple/ <path-or-url-to-naoqi-bridge>`.
+
+## Simulated Nao: the `sim` backend
+
+The `sim` backend runs [naoqi-sim](https://github.com/funwithagents/naoqi-sim), Naoqi itself in a local Docker container, and drives it like a robot ([specs/sim.md](specs/sim.md)). It needs Docker, the `[sim]` extra (installed by `uv sync --dev`; `naoqi-bridge[sim]` for a project depending on naoqi-bridge) and, once per machine, the sim's images, built from Aldebaran's public downloads:
+
+```bash
+uv run naoqi-sim fetch-and-build-images        # both NAOqi versions; or: ... 2.1
+```
+
+Then a config with `"backend": "sim"` starts a sim with the bridge and stops it with the bridge, or uses the one already running (`uv run naoqi-sim run` in another terminal) and leaves it running. `sim.config` is a [naoqi-sim config](https://github.com/funwithagents/naoqi-sim) as it is (version, window, loudspeaker, microphone):
+
+```python
+bridge = NaoqiBridge.from_dict(
+    {
+        "backend": "sim",
+        "sim": {"spawn": "auto", "config": {"naoqi": {"version": "2.1"}}},
+    }
+)
+```
+
+`spawn` is `auto` (the default: use the running sim, else start one), `never` (only use a running one) or `always` (start one; one already running is an error). The servers take the same block: `examples/configs/mcp-sim.json`, `websocket-sim.json`. A sim has the `animations` package only (no dances or apps) and no touch input yet.
+
+The live tests run on a headless sim by default: `uv run pytest tests-e2e` (`NAOQI_E2E_SIM_VERSION=2.8` for 2.8, `NAOQI_E2E_SIM_VIEWER=1` to watch it in the sim window; `NAOQI_E2E_TARGET=real NAOQI_E2E_IP=…` for a robot). See [specs/testing.md](specs/testing.md).
 
 ## NaoqiBridge
 
@@ -84,9 +107,10 @@ The bridge is built from a `NaoqiBridgeConfig`, in code or from JSON (`NaoqiBrid
 }
 ```
 
-- **`backend`**: `"fake"` (default, offline stand-in) or `"real"` (needs `qi` and `robot.ip`)
+- **`backend`**: `"fake"` (default, offline stand-in), `"real"` (needs `qi` and `robot.ip`) or `"sim"` (a simulated Nao, see [above](#simulated-nao-the-sim-backend))
 - **`robot`**: the robot's address, and how long to wait for it: one connection attempt of at most `connect_timeout_s`, so a wrong address fails within 5 s by default. Validated but ignored on `fake`, so switching backend is a one-word change
 - **`streams`**: which robot streams the bridge subscribes to; `channel` picks the microphone (`front`, `rear`, `left`, `right`)
+- **`sim`**: on `sim`, whether to start the sim or use the running one (`spawn`) and the naoqi-sim config (`config`). Validated but ignored on the other backends
 
 A malformed config raises `ConfigError` naming the key (e.g. `streams.joints.period_s must be a positive, finite number`). Full reference: [specs/config.md](specs/config.md).
 

@@ -1,4 +1,4 @@
-"""naoqi-bridge: drive a Naoqi robot (or its offline fake) from Python, MCP or WebSocket."""
+"""naoqi-bridge: drive a Naoqi robot (a real one, a simulated one, or the offline fake) from Python, MCP or WebSocket."""
 
 from .bridge import BehaviorInfos, JointsState, LocalizedString, NaoqiBridge, TouchEvent
 from .config import (
@@ -8,6 +8,8 @@ from .config import (
     JointsStream,
     NaoqiBridgeConfig,
     RobotSettings,
+    SimSettings,
+    SimSpawn,
     StreamSettings,
     TouchStream,
 )
@@ -43,6 +45,8 @@ __all__ = [
     "Observable",
     "RobotConnectionError",
     "RobotSettings",
+    "SimSettings",
+    "SimSpawn",
     "StreamSettings",
     "TouchEvent",
     "TouchPart",

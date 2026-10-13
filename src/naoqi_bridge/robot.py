@@ -86,7 +86,8 @@ class AnyNaoqiRobot(Protocol):
 
 
 def build_robot(config: NaoqiBridgeConfig) -> AnyNaoqiRobot:
-    """Build (not connect) the robot for ``config.backend``: ``fake`` or ``real``."""
+    """Build (not connect) the robot for ``config.backend``: the fake, or a Naoqi over
+    ``qi``, at ``robot.ip`` on ``real`` and at naoqi-sim's fixed address on ``sim``."""
     # Imported here: both modules import this one for the shared types.
     from .fake_robot import FakeNaoqiRobot
     from .naoqi_robot import NaoqiRobot
@@ -94,4 +95,13 @@ def build_robot(config: NaoqiBridgeConfig) -> AnyNaoqiRobot:
     if config.backend == "fake":
         return FakeNaoqiRobot()
     robot = config.robot
+    if config.backend == "sim":
+        from .sim import SIM_HOST, SIM_PORT, naoqi_sim_config
+
+        return NaoqiRobot(
+            SIM_HOST,
+            SIM_PORT,
+            connect_timeout_s=robot.connect_timeout_s,
+            sit_through_crouch=naoqi_sim_config(config.sim).naoqi.version == "2.8",
+        )
     return NaoqiRobot(robot.ip, robot.port, connect_timeout_s=robot.connect_timeout_s)

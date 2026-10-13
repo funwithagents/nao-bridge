@@ -1,11 +1,14 @@
 ---
 code:
+  - src/naoqi_bridge/sim.py
   - src/naoqi_bridge/config.py
   - src/naoqi_bridge/bridge.py
   - src/naoqi_bridge/robot.py
 tests:
+  - tests/test_sim.py
   - tests/test_config.py
   - tests/test_bridge.py
+  - tests-e2e/test_live_sim.py
 ---
 
 # The `sim` backend
@@ -19,7 +22,7 @@ A third backend, next to `real` and `fake`: a simulated Nao from [naoqi-sim](htt
 - a developer runs the bridge, both servers and an agent against a Nao that speaks, moves and hears, on their machine, from one config file;
 - the live tier ([testing.md](testing.md)) runs on a headless sim locally and in CI ([ci.md](ci.md)), not only on a robot someone holds.
 
-naoqi-sim already serves any qi client at `tcp://127.0.0.1:9559`, so a sim was reachable before as `real` at `127.0.0.1`. The backend adds what that left to the user: **starting and stopping the sim with the bridge**, from the config, and knowing that the target is naoqi-sim of the version asked for. Once connected, nothing in the bridge is sim-specific: the verbs, the catalog and the streams run through the same `NaoqiRobot` as on a robot.
+naoqi-sim already serves any qi client at `tcp://127.0.0.1:9559`, so a sim was reachable before as `real` at `127.0.0.1`. The backend adds what that left to the user: **starting and stopping the sim with the bridge**, from the config, and knowing that the target is naoqi-sim of the version asked for. Once connected, the verbs, the catalog and the streams run through the same `NaoqiRobot` as on a robot. The one exception is sitting on a 2.8 sim (below, "What a sim offers the bridge"), a workaround for a limit of Aldebaran's 2.8 desktop suite that naoqi-sim documents.
 
 ## Decided
 
@@ -115,6 +118,7 @@ The sim is a desktop NAOqi with naoqi-sim's replacements; from the bridge's side
 | Touch | Not yet: naoqi-sim's touch input is not built |
 | Catalog | The `animations` package only: no dances, no apps, no body actions; reactions from what `animations` holds |
 | NAOqi 2.8 | Runs; the bridge is verified on 2.1 only, so 2.8 is where `NaoqiRobot`'s 2.8 gaps show first |
+| Sit, on 2.8 | The 2.8 desktop suite has no DCM, so its robot has no inertial sensor: `ALRobotPosture` takes the lean of Stand → Sit for a push and stays standing, and from Crouch it reaches Sit but often reports it didn't (naoqi-sim's known issue). So on a 2.8 sim `NaoqiRobot` sits through Crouch and judges the move by `getPosture()` ([robot.md](robot.md), "`NaoqiRobot`"): `sit_down` works, in 15 to 25 s. Everywhere else, Sit is asked for directly |
 
 ### Example files
 

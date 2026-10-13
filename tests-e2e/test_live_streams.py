@@ -1,8 +1,8 @@
 """Live: the robot's streams. Joints and audio at the safe level, touch at the
 interactive level (someone at the robot touches its head when asked).
 
-Skipped unless NAOQI_E2E_IP is set and `qi` is installed; the touch test also needs
-NAOQI_E2E_INTERACTIVE=1, and `-s` to see its prompt.
+On the target (a sim by default, or the robot at NAOQI_E2E_IP); needs `qi`. The touch
+test needs a robot, NAOQI_E2E_INTERACTIVE=1, and `-s` to see its prompt.
 """
 
 import asyncio
@@ -10,7 +10,7 @@ import math
 import time
 
 import pytest
-from support import MEASUREMENTS, live_config, live_session, require_flag
+from support import MEASUREMENTS, live_config, live_session, require_interactive
 
 from naoqi_bridge import (
     AudioStream,
@@ -78,7 +78,7 @@ def test_audio_arrives_at_16_khz_mono():
 
 
 def test_a_head_touch_reaches_on_touch(capsys: pytest.CaptureFixture[str]):
-    require_flag("NAOQI_E2E_INTERACTIVE")
+    require_interactive()
     config = live_config(StreamSettings(touch=TouchStream(enabled=True)))
 
     async def run() -> TouchEvent:

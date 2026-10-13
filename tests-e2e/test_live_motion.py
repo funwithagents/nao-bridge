@@ -1,8 +1,7 @@
-"""Live, motion level: the verbs that move the robot, on a real Nao.
+"""Live, motion level: the verbs that move the robot, on the target.
 
-Skipped unless NAOQI_E2E_IP and NAOQI_E2E_ALLOW_MOTION=1 are set and `qi` is installed. Clear the
-floor around the robot and stay next to it. Every test wakes the robot and leaves it
-at rest.
+Always on a sim. On a robot, skipped unless NAOQI_E2E_ALLOW_MOTION=1: clear the floor
+around the robot and stay next to it. Every test wakes the robot and leaves it at rest.
 """
 
 import asyncio
@@ -54,8 +53,9 @@ def test_postures_and_breathing():
 def test_a_body_action_and_a_reaction_run_to_their_end():
     async def run() -> tuple[tuple[str, ...], dict[str, str]]:
         async with live_session(live_config(), motion=True) as bridge:
+            action_id = first_body_action(bridge)  # skips before the robot moves
             await bridge.stand_up()
-            await bridge.body_action(first_body_action(bridge))
+            await bridge.body_action(action_id)
             await bridge.expressive_reaction("Happy")
             return bridge.current_body_actions, dict(
                 bridge.current_expressive_reactions
@@ -67,8 +67,8 @@ def test_a_body_action_and_a_reaction_run_to_their_end():
 def test_stop_dance_ends_a_dance_and_its_verb_returns():
     async def run() -> tuple[float, bool, tuple[str, ...]]:
         async with live_session(live_config(), motion=True) as bridge:
+            dance_id = first_dance(bridge)  # skips before the robot moves
             await bridge.stand_up()
-            dance_id = first_dance(bridge)
             behavior = dance_behavior(bridge, dance_id)
             dancing = asyncio.create_task(bridge.dance(dance_id))
             await wait_until(lambda: behavior_running(bridge, behavior))

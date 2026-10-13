@@ -202,7 +202,7 @@ class NaoqiMcpServer:
         try:
             asyncio.run(self.serve())
         except RobotConnectionError as e:
-            logger.error("Could not connect to Nao: %s", e)
+            logger.error("Could not connect to the robot: %s", e)
             return False
         return True
 

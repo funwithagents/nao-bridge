@@ -1,0 +1,7 @@
+{
+  "bridge": {
+    "backend": "sim",
+    "sim": { "spawn": "auto", "config": { "naoqi": { "version": "2.1" } } }
+  },
+  "server": { "transport": "stdio" }
+}

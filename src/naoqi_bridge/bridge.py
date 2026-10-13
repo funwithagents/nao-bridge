@@ -34,6 +34,7 @@ from .events import Event
 from .microphone import MicFeed
 from .observable import Observable
 from .robot import TOUCH_KEYS, AnyNaoqiRobot, TouchPart, build_robot
+from .sim import SimLease, acquire_sim
 
 __all__ = [
     "REACTION_TYPES",
@@ -58,7 +59,9 @@ POSTURE_MAX_TRIES = 3
 # Naoqi), up to STOP_ATTEMPTS stops in all (specs/bridge.md "How a spanning verb
 # stops").
 STOP_RETRY_S = 0.5
-STOP_ATTEMPTS = 4
+# NAOqi itself can take about 2.5 s to end a stopped posture move or animated speech
+# (measured on a simulated Nao), so the bridge waits up to 4 s.
+STOP_ATTEMPTS = 8
 
 REACTION_TYPES = ("Happy", "Proud", "Laugh", "Sad", "HeadTouched")
 _SYSTEM_PACKAGES = frozenset(
@@ -243,7 +246,8 @@ def _drop_outcome(future: asyncio.Future[Any]) -> None:
 
 
 class NaoqiBridge:
-    """Drive a Nao robot (``real``) or its offline stand-in (``fake``).
+    """Drive a Nao robot (``real``), a simulated one (``sim``, specs/sim.md) or the
+    offline stand-in (``fake``).
 
     Built from a ``NaoqiBridgeConfig`` (or a bare backend string). Use
     ``async with NaoqiBridge("fake") as bridge:`` or the ``start()`` / ``stop()`` pair.
@@ -259,6 +263,8 @@ class NaoqiBridge:
         self._config = config
 
         self._robot: AnyNaoqiRobot | None = None
+        # The sim the bridge started or borrows, on the sim backend.
+        self._sim: SimLease | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._joints_task: asyncio.Task[None] | None = None
         self._catalog = BehaviorCatalog()
@@ -310,6 +316,8 @@ class NaoqiBridge:
         if self._robot is not None:
             raise BridgeError("the bridge is already running")
         streams = self._config.streams
+        # The sim first: acquiring it is cancel-safe on its own (specs/sim.md).
+        sim = await acquire_sim(self._config.sim) if self.backend == "sim" else None
         robot = build_robot(self._config)
         cancel_connect = threading.Event()
         bring_up = asyncio.ensure_future(self._bring_up(robot, cancel_connect))
@@ -321,9 +329,13 @@ class NaoqiBridge:
             # "Cancellation", Lifecycle).
             cancel_connect.set()
             with contextlib.suppress(asyncio.CancelledError):
-                await _owned(self._abort_bring_up(robot, bring_up))
+                await _owned(self._abort_bring_up(robot, bring_up, sim))
+            raise
+        except BaseException:
+            await _owned(self._release_sim(sim))  # the bring-up tore itself down
             raise
         self._robot = robot
+        self._sim = sim
         if streams.joints.enabled:
             self._joints_task = asyncio.create_task(
                 self._joints_loop(robot, streams.joints.period_s)
@@ -349,13 +361,17 @@ class NaoqiBridge:
             raise
 
     async def _abort_bring_up(
-        self, robot: AnyNaoqiRobot, bring_up: asyncio.Future[None]
+        self,
+        robot: AnyNaoqiRobot,
+        bring_up: asyncio.Future[None],
+        sim: SimLease | None,
     ) -> None:
         """Wait for a cancelled ``start()``'s bring-up to settle, then tear down what
-        it brought up (a failed one already tore itself down)."""
+        it brought up (a failed one already tore itself down), and release the sim."""
         await asyncio.wait({bring_up})
         if bring_up.cancelled() or bring_up.exception() is None:
             await self._teardown(robot)
+        await self._release_sim(sim)
 
     async def stop(self) -> None:
         robot = self._robot
@@ -373,6 +389,18 @@ class NaoqiBridge:
         await self._teardown(robot)
         self._running.clear()
         self._running_behaviors.clear()
+        sim, self._sim = self._sim, None
+        await self._release_sim(sim)
+
+    @staticmethod
+    async def _release_sim(sim: SimLease | None) -> None:
+        """Stop a sim the bridge started; leave a borrowed one running."""
+        if sim is None:
+            return
+        try:
+            await sim.release()
+        except Exception:
+            logger.exception("Stopping the naoqi-sim failed")
 
     async def _teardown(self, robot: AnyNaoqiRobot) -> None:
         await self._mic.stop()
