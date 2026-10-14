@@ -64,7 +64,9 @@ bridge = NaoqiBridge.from_dict(
 
 `spawn` is `auto` (the default: use the running sim, else start one), `never` (only use a running one) or `always` (start one; one already running is an error). The servers take the same block: `examples/configs/mcp-sim.json`, `websocket-sim.json`. A sim has the `animations` package only (no dances or apps) and no touch input yet.
 
-The live tests run on a headless sim by default: `uv run pytest tests-e2e` (`NAOQI_E2E_SIM_VERSION=2.8` for 2.8, `NAOQI_E2E_SIM_VIEWER=1` to watch it in the sim window; `NAOQI_E2E_TARGET=real NAOQI_E2E_IP=…` for a robot). See [specs/testing.md](specs/testing.md).
+The live tests run on a headless sim by default: `uv run pytest tests-e2e` (`NAOQI_E2E_SIM_VERSION=2.8` for 2.8, `NAOQI_E2E_SIM_VIEWER=1` to watch it in the sim window; `NAOQI_E2E_TARGET=real NAOQI_E2E_IP=… NAOQI_E2E_PROFILE=nao` for a robot, plus `NAOQI_E2E_ALLOW_MOTION=1` once it has room to move). Each test declares the capabilities it needs (`@pytest.mark.requires("dances")`) and skips where the target lacks them. See [specs/testing.md](specs/testing.md).
+
+The same harness ships for projects built on the bridge: install `naoqi-bridge[sim,test]`, add `pytest_plugins = ["naoqi_bridge.testing.plugin"]` to your rootdir `conftest.py`, and write live tests with `live_config` / `live_session` from `naoqi_bridge.testing` ([specs/testing_support.md](specs/testing_support.md)).
 
 ## Watching the robot: the viewer
 

@@ -1,4 +1,4 @@
-"""Live, safe level: the bridge's verbs that don't move the limbs, on the target.
+"""Live: the bridge's verbs that don't move the limbs, on any target.
 
 Run explicitly: `uv run pytest tests-e2e/test_live_verbs.py` (a sim), or
 `NAOQI_E2E_TARGET=real NAOQI_E2E_IP=192.168.1.42 uv run pytest tests-e2e/test_live_verbs.py`.
@@ -8,11 +8,9 @@ import asyncio
 import time
 
 import pytest
-from support import live_config, live_session
 
 from naoqi_bridge import CommandFailedError, MotorsOffError
-
-pytest.importorskip("qi")
+from naoqi_bridge.testing import live_config, live_session
 
 EYE_COLORS = ("white", "red", "green", "blue", "yellow", "magenta", "cyan")
 LONG_SENTENCE = (
