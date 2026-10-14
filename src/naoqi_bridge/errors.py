@@ -10,6 +10,7 @@ __all__ = [
     "MotorsOffError",
     "NotPlayingError",
     "NotRunningError",
+    "ViewerError",
 ]
 
 
@@ -32,3 +33,8 @@ class MotorsOffError(BridgeError):
 
 class CommandFailedError(BridgeError):
     """The robot failed a verb; a Naoqi exception is chained as ``__cause__``."""
+
+
+class ViewerError(BridgeError):
+    """``start()`` couldn't open the viewer (specs/viewer.md); naoqi-viewer's
+    ``LaunchError`` is chained as ``__cause__``."""

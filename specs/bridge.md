@@ -24,8 +24,8 @@ tests:
 ### Construction and lifecycle
 
 - `NaoqiBridge(config: NaoqiBridgeConfig | Backend | None = None)` ([config.md](config.md)). With no argument it uses `NaoqiBridgeConfig()`, the offline fake. A bare backend string is shorthand for `NaoqiBridgeConfig(backend=...)`. `NaoqiBridge.from_dict` / `from_json` / `from_json_file` load the config, then build the bridge. Constructing the bridge does nothing else: no connection, no task.
-- **`await start()`** on the `sim` backend first acquires the sim: it starts one or borrows the one running, as `sim.spawn` says ([sim.md](sim.md)). Then, on every backend, it builds the robot with `build_robot(config)` ([robot.md](robot.md)) and connects it off the event loop. It subscribes the streams the config enables (touch; audio through the mic feed, [microphone.md](microphone.md)), loads the behavior catalog, and starts the joints task when joints are enabled. If any step fails, what already started is torn down (the robot closed, the sim released) and the error propagates (`RobotConnectionError` for an unreachable robot or an unavailable sim). Calling `start()` on a running bridge raises `BridgeError`.
-- **`await stop()`** cancels the joints task and publishes `None` on `joints`. It then stops the mic feed (which ends every `audio_input()` subscriber), unsubscribes touch, closes the robot, clears the running-item tracking and, last, releases the sim (stopping it when the bridge started it). It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it. Cancelling `start()` or `stop()` follows "Cancellation" below: neither leaves anything half up.
+- **`await start()`** on the `sim` backend first acquires the sim: it starts one or borrows the one running, as `sim.spawn` says ([sim.md](sim.md)). Then, on every backend, it builds the robot with `build_robot(config)` ([robot.md](robot.md)) and connects it off the event loop. It subscribes the streams the config enables (touch; audio through the mic feed, [microphone.md](microphone.md)), loads the behavior catalog, and starts the joints task when joints are enabled. Last, with `viewer.enabled`, it opens the viewer on the robot it connected to, or logs why not ([viewer.md](viewer.md)). If any step fails, what already started is torn down (the robot closed, the sim released) and the error propagates (`RobotConnectionError` for an unreachable robot or an unavailable sim, `ViewerError` for a viewer that can't launch). Calling `start()` on a running bridge raises `BridgeError`.
+- **`await stop()`** closes the viewer if one is open, then cancels the joints task and publishes `None` on `joints`. It then stops the mic feed (which ends every `audio_input()` subscriber), unsubscribes touch, closes the robot, clears the running-item tracking and, last, releases the sim (stopping it when the bridge started it). It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it. Cancelling `start()` or `stop()` follows "Cancellation" below: neither leaves anything half up.
 - **`async with NaoqiBridge(...) as bridge:`** is shorthand for the pair, and runs `stop()` on every way out.
 - `running: bool`. `config` and `backend` (read-only).
 - **Escape hatch:** `bridge.robot` is the `NaoqiRobot` — the `FakeNaoqiRobot` on `fake`, which tests use to assert on recorded commands. It raises `NotRunningError` when the bridge isn't running.
@@ -132,6 +132,7 @@ Defined in `errors.py`, so the bridge's modules share them; `bridge.py` doesn't 
 | `NotPlayingError(BridgeError)` | A catalog stop verb for an item that isn't playing. |
 | `MotorsOffError(BridgeError)` | A verb that moves the body while the motors are off (see "Action verb contract"). |
 | `CommandFailedError(BridgeError)` | The robot failed a verb: a Naoqi exception (chained), or a posture not reached. |
+| `ViewerError(BridgeError)` | `start()` couldn't launch the viewer: naoqi-viewer's `LaunchError`, chained ([viewer.md](viewer.md), "Errors"). |
 | `ValueError` | Bad input: a catalog id or reaction type the catalog doesn't hold, or a reaction type with no behaviors installed. |
 
 So `except (BridgeError, ValueError)` catches every expected verb failure, and that's what both servers do. `ConfigError` comes from [config.md](config.md). `RobotConnectionError` from [robot.md](robot.md) propagates out of `start()`; raised by a verb's robot call, it's wrapped in `CommandFailedError` like any robot failure.
@@ -140,10 +141,10 @@ So `except (BridgeError, ValueError)` catches every expected verb failure, and t
 
 `from naoqi_bridge import NaoqiBridge` re-exports what a caller needs:
 - `NaoqiBridge`;
-- the config classes (`NaoqiBridgeConfig`, `RobotSettings`, `StreamSettings`, `TouchStream`, `JointsStream`, `AudioStream`, `SimSettings`, `Backend`, `SimSpawn`);
+- the config classes (`NaoqiBridgeConfig`, `RobotSettings`, `StreamSettings`, `TouchStream`, `JointsStream`, `AudioStream`, `SimSettings`, `ViewerSettings`, `Backend`, `SimSpawn`);
 - the stream values (`TouchEvent`, `TouchPart`, `JointsState`, `MicChunk`) and the `Event` / `Observable` types;
 - `BehaviorInfos`, `LocalizedString`;
-- the errors (`BridgeError`, `NotRunningError`, `NotPlayingError`, `MotorsOffError`, `CommandFailedError`, `ConfigError`, `RobotConnectionError`). Library modules only use `logging.getLogger(__name__)`; `logging.basicConfig` belongs to the CLIs.
+- the errors (`BridgeError`, `NotRunningError`, `NotPlayingError`, `MotorsOffError`, `CommandFailedError`, `ViewerError`, `ConfigError`, `RobotConnectionError`). Library modules only use `logging.getLogger(__name__)`; `logging.basicConfig` belongs to the CLIs.
 
 ## Open questions
 

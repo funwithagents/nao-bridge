@@ -1,7 +1,8 @@
 {
   "bridge": {
     "backend": "real",
-    "robot": { "ip": "192.168.1.42", "port": 9559, "connect_timeout_s": 5.0 }
+    "robot": { "ip": "192.168.1.42", "port": 9559, "connect_timeout_s": 5.0 },
+    "viewer": { "enabled": false, "config": { "ghost": true } }
   },
   "server": { "transport": "stdio" }
 }

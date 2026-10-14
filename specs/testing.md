@@ -62,6 +62,7 @@ The live tier runs against one target per run, chosen by the environment:
 | `NAOQI_E2E_TARGET` | `sim` (when unset), `real` | The backend the tests' bridges use; the words are the config's backends |
 | `NAOQI_E2E_SIM_VERSION` | `2.1` (when unset), `2.8` | `sim`: the NAOqi version of the sim |
 | `NAOQI_E2E_SIM_VIEWER` | a flag (`1`, `true`, `yes`) | `sim`: the sim window instead of a headless sim, to watch the run |
+| `NAOQI_E2E_VIEWER` | a flag (`1`, `true`, `yes`) | Either target: run the viewer test, which opens the bridge's viewer window ([viewer.md](viewer.md), "Testing"); needs a display, so never in CI |
 | `NAOQI_E2E_IP`, `NAOQI_E2E_PORT` | an address, a port (9559 when unset) | `real`: the robot |
 
 An unknown target or version fails the session at collection (`pytest.UsageError`).

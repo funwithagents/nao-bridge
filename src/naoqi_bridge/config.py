@@ -9,8 +9,9 @@ A default is declared once, on the dataclass field: ``parse_block`` reads only t
 keys present in the JSON and lets the dataclass apply its defaults for the rest. The
 value readers (``as_*``), ``parse_block`` and the ``JsonConfig`` base are public so
 configs that wrap a ``NaoqiBridgeConfig`` (the servers') validate the same way. This
-module imports neither ``qi`` nor ``mcp`` nor ``websockets``, and naoqi-sim's config
-module only when it reads a ``sim.config`` (specs/sim.md).
+module imports neither ``qi`` nor ``mcp`` nor ``websockets``, and naoqi-sim's and
+naoqi-viewer's config modules only when it reads a ``sim.config`` (specs/sim.md) or a
+``viewer.config`` (specs/viewer.md).
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 
 if TYPE_CHECKING:
     from naoqi_sim import NaoqiSimConfig
+    from naoqi_viewer import NaoqiViewerConfig
 
 __all__ = [
     "AUDIO_CHANNELS",
@@ -43,6 +45,7 @@ __all__ = [
     "SimSpawn",
     "StreamSettings",
     "TouchStream",
+    "ViewerSettings",
     "as_bool",
     "as_choice",
     "as_int",
@@ -61,6 +64,8 @@ SIM_SPAWNS: tuple[SimSpawn, ...] = ("never", "auto", "always")
 
 # What to install for the sim backend.
 SIM_EXTRA = "naoqi-bridge[sim]"
+# What to install for the viewer; the sim extra brings it too.
+VIEWER_EXTRA = "naoqi-bridge[viewer]"
 
 # Turns a raw JSON value found at a key path into a field's value, or raises
 # ``ConfigError``. A block's ``parse`` classmethod is one too.
@@ -340,6 +345,65 @@ class SimSettings(JsonConfig):
         )
 
 
+def viewer_installed() -> bool:
+    """Whether naoqi-viewer (the ``[viewer]`` or ``[sim]`` extra) can be imported."""
+    try:
+        importlib.import_module("naoqi_viewer.config")
+    except ImportError:
+        return False
+    return True
+
+
+# What the bridge sets in naoqi-viewer's config, so a viewer block can't
+# (specs/viewer.md, "Config: the `viewer` block").
+_VIEWER_FIELDS_SET = {
+    "mode": "always 'mirror'",
+    "headless": "always false: a mirror has a window",
+    "naoqi.url": "the robot it connects to",
+}
+
+
+def _as_naoqi_viewer_config(value: Any, key: str) -> NaoqiViewerConfig | None:
+    """naoqi-viewer's own config minus the fields the bridge sets, checked by
+    naoqi-viewer; unchecked (``None``) without it, which only a viewer that opens
+    needs."""
+    if isinstance(value, dict):
+        naoqi = value.get("naoqi")
+        present = {k for k in ("mode", "headless") if k in value}
+        if isinstance(naoqi, dict) and "url" in naoqi:
+            present.add("naoqi.url")
+        for field_key, set_to in _VIEWER_FIELDS_SET.items():
+            if field_key in present:
+                raise ConfigError(
+                    f"is set by the bridge ({set_to})", key=key_path(key, field_key)
+                )
+    try:
+        viewer_config = importlib.import_module("naoqi_viewer.config")
+    except ImportError:
+        return None
+    try:
+        return viewer_config.NaoqiViewerConfig.from_dict(value)
+    except viewer_config.ConfigError as e:
+        raise ConfigError(e.detail, key=key_path(key, e.key)) from None
+
+
+@dataclass(frozen=True)
+class ViewerSettings(JsonConfig):
+    """A naoqi-viewer window mirroring the robot (specs/viewer.md); opened on ``real``
+    and ``sim``, ignored with a warning on ``fake``."""
+
+    enabled: bool = False
+    # naoqi-viewer's own config, without mode, headless and naoqi.url, which the
+    # bridge sets; None: its defaults.
+    config: NaoqiViewerConfig | None = None
+
+    @classmethod
+    def parse(cls, data: Any, path: str) -> Self:
+        return parse_block(
+            cls, data, path, enabled=as_bool, config=_as_naoqi_viewer_config
+        )
+
+
 @dataclass(frozen=True)
 class NaoqiBridgeConfig(JsonConfig):
     """Which robot and what to stream (specs/config.md). Defaults to the offline fake."""
@@ -348,6 +412,7 @@ class NaoqiBridgeConfig(JsonConfig):
     robot: RobotSettings = field(default_factory=RobotSettings)
     streams: StreamSettings = field(default_factory=StreamSettings)
     sim: SimSettings = field(default_factory=SimSettings)
+    viewer: ViewerSettings = field(default_factory=ViewerSettings)
 
     def __post_init__(self) -> None:
         _require(
@@ -366,6 +431,12 @@ class NaoqiBridgeConfig(JsonConfig):
             f"'sim' needs naoqi-sim: install {SIM_EXTRA} (macOS arm64, Linux x86_64, "
             "Windows x64)",
         )
+        _require(
+            not self.viewer.enabled or self.backend == "fake" or viewer_installed(),
+            "viewer.enabled",
+            f"needs naoqi-viewer: install {VIEWER_EXTRA} (macOS arm64, Linux x86_64, "
+            "Windows x64)",
+        )
 
     @classmethod
     def parse(cls, data: Any, path: str) -> Self:
@@ -377,4 +448,5 @@ class NaoqiBridgeConfig(JsonConfig):
             robot=RobotSettings.parse,
             streams=StreamSettings.parse,
             sim=SimSettings.parse,
+            viewer=ViewerSettings.parse,
         )

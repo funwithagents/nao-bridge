@@ -31,7 +31,7 @@ from .config import (
     as_str,
     parse_block,
 )
-from .errors import BridgeError
+from .errors import BridgeError, ViewerError
 from .robot import RobotConnectionError
 
 __all__ = [
@@ -430,6 +430,9 @@ class NaoqiWebsocketServer:
             await self.naoqi_bridge.start()
         except RobotConnectionError as e:
             logger.error("Could not connect to the robot: %s", e)
+            return False
+        except ViewerError as e:
+            logger.error("Could not open the viewer: %s", e)
             return False
         settings = self.config.server
         host = settings.host or _lan_ip()

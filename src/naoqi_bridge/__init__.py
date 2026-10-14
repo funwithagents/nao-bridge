@@ -12,6 +12,7 @@ from .config import (
     SimSpawn,
     StreamSettings,
     TouchStream,
+    ViewerSettings,
 )
 from .errors import (
     BridgeError,
@@ -19,6 +20,7 @@ from .errors import (
     MotorsOffError,
     NotPlayingError,
     NotRunningError,
+    ViewerError,
 )
 from .events import Event
 from .microphone import MicChunk
@@ -51,4 +53,6 @@ __all__ = [
     "TouchEvent",
     "TouchPart",
     "TouchStream",
+    "ViewerError",
+    "ViewerSettings",
 ]

@@ -19,7 +19,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .bridge import NaoqiBridge
 from .config import ConfigError, JsonConfig, NaoqiBridgeConfig, as_choice, parse_block
-from .errors import BridgeError
+from .errors import BridgeError, ViewerError
 from .robot import RobotConnectionError
 
 logger = logging.getLogger(__name__)
@@ -203,6 +203,9 @@ class NaoqiMcpServer:
             asyncio.run(self.serve())
         except RobotConnectionError as e:
             logger.error("Could not connect to the robot: %s", e)
+            return False
+        except ViewerError as e:
+            logger.error("Could not open the viewer: %s", e)
             return False
         return True
 

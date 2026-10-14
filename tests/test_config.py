@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from naoqi_sim import NaoqiSimConfig
+from naoqi_viewer import NaoqiViewerConfig
 
 from naoqi_bridge.config import (
     AudioStream,
@@ -18,6 +19,7 @@ from naoqi_bridge.config import (
     SimSettings,
     StreamSettings,
     TouchStream,
+    ViewerSettings,
 )
 from naoqi_bridge.naoqi_mcp_server import McpServerSettings, NaoqiMcpServerConfig
 from naoqi_bridge.naoqi_websocket_server import (
@@ -284,6 +286,75 @@ def test_without_naoqi_sim_only_the_sim_backend_is_refused(
         {"backend": "fake", "sim": {"config": {"naoqi": {"version": "2.1"}}}}
     )
     assert config.sim.config is None
+
+
+# endregion
+
+# region The viewer block (specs/viewer.md "Config: the `viewer` block")
+
+REAL = {"backend": "real", "robot": {"ip": "192.168.1.42"}}
+
+
+def test_a_naoqi_viewer_config_passes_through_as_viewer_config():
+    block = {"ghost": True, "naoqi": {"rate_hz": 25}, "world": {"scene": "table"}}
+    config = NaoqiBridgeConfig.from_dict(
+        {**REAL, "viewer": {"enabled": True, "config": block}}
+    )
+    assert config.viewer == ViewerSettings(
+        enabled=True, config=NaoqiViewerConfig.from_dict(block)
+    )
+    assert NaoqiBridgeConfig.from_dict({}).viewer == ViewerSettings(False, None)
+
+
+@pytest.mark.parametrize(
+    ("block", "key"),
+    [
+        ({"mode": "mirror"}, "viewer.config.mode"),
+        ({"headless": False}, "viewer.config.headless"),
+        ({"naoqi": {"url": "tcp://10.0.0.2:9559"}}, "viewer.config.naoqi.url"),
+    ],
+)
+def test_what_the_bridge_sets_is_refused_in_viewer_config(block: dict, key: str):
+    # Even a value the bridge would set itself: the robot decides it, not the file.
+    with pytest.raises(ConfigError, match="is set by the bridge") as caught:
+        NaoqiBridgeConfig.from_dict({**REAL, "viewer": {"config": block}})
+    assert caught.value.key == key
+
+
+def test_naoqi_viewers_own_errors_come_back_under_viewer_config():
+    with pytest.raises(ConfigError) as caught:
+        NaoqiBridgeConfig.from_dict({"viewer": {"config": {"world": {"variant": "x"}}}})
+    assert caught.value.key == "viewer.config.world.variant"
+    with pytest.raises(ConfigError, match="unknown key"):
+        NaoqiBridgeConfig.from_dict({"viewer": {"config": {"gost": True}}})
+    with pytest.raises(ConfigError) as caught:
+        NaoqiBridgeConfig.from_dict({"viewer": {"enabled": "yes"}})
+    assert caught.value.key == "viewer.enabled"
+
+
+@pytest.mark.parametrize("backend", ["real", "sim"])
+def test_without_naoqi_viewer_an_enabled_viewer_is_refused_where_it_would_open(
+    monkeypatch: pytest.MonkeyPatch, backend: str
+):
+    monkeypatch.setitem(sys.modules, "naoqi_viewer.config", None)
+    data = {**REAL, "backend": backend, "viewer": {"enabled": True}}
+    with pytest.raises(ConfigError, match=r"naoqi-bridge\[viewer\]") as caught:
+        NaoqiBridgeConfig.from_dict(data)
+    assert caught.value.key == "viewer.enabled"
+
+
+def test_without_naoqi_viewer_a_file_that_switches_backends_still_loads(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setitem(sys.modules, "naoqi_viewer.config", None)
+    on_fake = NaoqiBridgeConfig.from_dict(
+        {"viewer": {"enabled": True, "config": {"ghost": True}}}
+    )
+    assert on_fake.viewer == ViewerSettings(enabled=True, config=None)
+    disabled = NaoqiBridgeConfig.from_dict(
+        {**REAL, "viewer": {"enabled": False, "config": {"ghost": True}}}
+    )
+    assert disabled.viewer.config is None
 
 
 # endregion
