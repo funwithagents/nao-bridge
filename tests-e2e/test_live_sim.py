@@ -1,12 +1,12 @@
-"""Live: the sim backend itself (specs/sim.md), against the run's naoqi-sim. What only
-a running naoqi-sim shows: borrowing it leaves it running, and a config that asks for
-a sim of its own or another version is refused. Skipped on a robot."""
+"""Live: the sim backend itself (specs/sim.md), against the session's naoqi-sim. What
+only a running naoqi-sim shows: borrowing it leaves it running, and a config that asks
+for a sim of its own or another version is refused. Skipped on a robot."""
 
 import asyncio
 
 import naoqi_sim
 import pytest
-from support import RUN_SIM, SIM_VERSION, SIM_VERSIONS, TARGET
+from support import SIM_VERSION, SIM_VERSIONS, TARGET
 
 from naoqi_bridge import NaoqiBridge, NaoqiBridgeConfig, RobotConnectionError
 from naoqi_bridge.config import SimSpawn
@@ -15,10 +15,9 @@ pytest.importorskip("qi")
 
 
 @pytest.fixture(autouse=True)
-def run_sim() -> None:
+def sim_target_only() -> None:
     if TARGET != "sim":
         pytest.skip("tests the sim backend: NAOQI_E2E_TARGET is not sim")
-    RUN_SIM.require()
 
 
 def sim_bridge(spawn: SimSpawn, version: str = SIM_VERSION) -> NaoqiBridge:

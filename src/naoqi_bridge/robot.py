@@ -1,8 +1,8 @@
 """Connection seam between naoqi-bridge and a Naoqi robot.
 
-Specified by [specs/robot.md](../../specs/robot.md). ``AnyNaoqiRobot`` is the Protocol listing
+Specified by [specs/robot.md](../../specs/robot.md). ``NaoqiRobot`` is the Protocol listing
 the Naoqi capabilities the bridge consumes, with the types and constants both
-implementations share. ``NaoqiRobot`` ([naoqi_robot.py](naoqi_robot.py)) implements it
+implementations share. ``RealNaoqiRobot`` ([real_robot.py](real_robot.py)) implements it
 over a ``qi`` session and ``FakeNaoqiRobot`` ([fake_robot.py](fake_robot.py)) offline,
 recording every command. ``build_robot`` selects one from the bridge config.
 """
@@ -19,8 +19,8 @@ __all__ = [
     "AUDIO_CHANNEL_CODES",
     "AUDIO_SAMPLE_RATE",
     "TOUCH_KEYS",
-    "AnyNaoqiRobot",
     "AudioCallback",
+    "NaoqiRobot",
     "RobotConnectionError",
     "TouchCallback",
     "TouchPart",
@@ -55,7 +55,7 @@ class RobotConnectionError(RuntimeError):
     """The robot could not be reached, or the real backend lacks the ``qi`` package."""
 
 
-class AnyNaoqiRobot(Protocol):
+class NaoqiRobot(Protocol):
     """The Naoqi slice the bridge consumes. Every method blocks and raises on failure."""
 
     def connect(self, cancel: threading.Event | None = None) -> None: ...
@@ -85,23 +85,25 @@ class AnyNaoqiRobot(Protocol):
     def unsubscribe_audio(self) -> None: ...
 
 
-def build_robot(config: NaoqiBridgeConfig) -> AnyNaoqiRobot:
-    """Build (not connect) the robot for ``config.backend``: the fake, or a Naoqi over
-    ``qi``, at ``robot.ip`` on ``real`` and at naoqi-sim's fixed address on ``sim``."""
+def build_robot(config: NaoqiBridgeConfig) -> NaoqiRobot:
+    """Build (not connect) the robot for ``config.backend``: ``FakeNaoqiRobot``,
+    ``RealNaoqiRobot`` at ``robot.ip``, or ``SimNaoqiRobot`` at naoqi-sim's fixed
+    address."""
     # Imported here: both modules import this one for the shared types.
     from .fake_robot import FakeNaoqiRobot
-    from .naoqi_robot import NaoqiRobot
+    from .real_robot import RealNaoqiRobot
 
     if config.backend == "fake":
         return FakeNaoqiRobot()
     robot = config.robot
     if config.backend == "sim":
-        from .sim import SIM_HOST, SIM_PORT, naoqi_sim_config
+        from .sim import naoqi_sim_config
+        from .sim_robot import SimNaoqiRobot
 
-        return NaoqiRobot(
-            SIM_HOST,
-            SIM_PORT,
+        return SimNaoqiRobot(
             connect_timeout_s=robot.connect_timeout_s,
             sit_through_crouch=naoqi_sim_config(config.sim).naoqi.version == "2.8",
         )
-    return NaoqiRobot(robot.ip, robot.port, connect_timeout_s=robot.connect_timeout_s)
+    return RealNaoqiRobot(
+        robot.ip, robot.port, connect_timeout_s=robot.connect_timeout_s
+    )

@@ -2,7 +2,7 @@
 
 ``acquire_sim`` starts a naoqi-sim and owns it, or borrows the one already running on
 this machine, as ``sim.spawn`` says; ``SimLease.release`` stops an owned sim and leaves
-a borrowed one running. The bridge then connects its ordinary ``NaoqiRobot`` to
+a borrowed one running. The bridge then connects its ordinary ``RealNaoqiRobot`` to
 ``SIM_HOST:SIM_PORT``. This is the one module that starts naoqi-sim, imported inside
 the functions, so ``naoqi_bridge`` imports without the ``[sim]`` extra.
 """
@@ -46,6 +46,13 @@ class SimLease:
     # What the sim's NaoqiSim service reports, e.g. "2.1.4.13".
     naoqi_version: str
     _sim: NaoqiSim | None = field(default=None, repr=False)
+
+    @property
+    def sim(self) -> NaoqiSim | None:
+        """The ``NaoqiSim`` this lease started, for naoqi-sim's own API (its fake
+        microphone, its devices); ``None`` when borrowed (the process that started it
+        holds it) or once released."""
+        return self._sim
 
     async def release(self) -> None:
         """Stop an owned sim (its containers go down, in seconds); a no-op on a

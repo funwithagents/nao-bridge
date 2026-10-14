@@ -21,7 +21,7 @@ This overview is the map of the project: what it is for, how the parts fit, the 
 | Robot streams: touch events, joint angles, microphone audio | Camera images, perception, speech recognition (open questions below) |
 | An MCP server and a WebSocket server over the bridge | Authentication, multi-client arbitration (the WebSocket server takes one client at a time) |
 | `real` (Naoqi over `qi`), `sim` (naoqi-sim, started or borrowed) and `fake` (offline) backends | Simulating Naoqi itself: naoqi-sim does, the bridge only starts, borrows and stops it |
-| Naoqi 2.1.4.13 on Nao v5, the only verified target | Nao v6, Pepper and newer Naoqi: expected to need adjustments inside `NaoqiRobot` only ([robot.md](robot.md)) |
+| Naoqi 2.1.4.13 on Nao v5, the only verified target | Nao v6, Pepper and newer Naoqi: expected to need adjustments inside `RealNaoqiRobot` only ([robot.md](robot.md)) |
 
 ## Architecture
 
@@ -36,22 +36,23 @@ This overview is the map of the project: what it is for, how the parts fit, the 
                      ┌───────▼────────┐   built from NaoqiBridgeConfig
                      │  NaoqiBridge   │   verbs · catalog · on_touch · joints · mic
                      └──┬─────────┬───┘
-     sim backend:       │         │ AnyNaoqiRobot Protocol (blocking calls, run off the loop)
-     start or borrow ┌──▼──────┐  └─────────────┬───────────────────┐
-     the sim first   │ sim.py  │        ┌───────▼────────┐  ┌───────▼────────┐
-                     │ (lease) │        │   NaoqiRobot   │  │ FakeNaoqiRobot │
-                     └──┬──────┘        │   qi session   │  │   in-process   │
-                        │ NaoqiSim      └───────┬────────┘  └────────────────┘
-                        │                       │ tcp://<ip>:9559 (sim: 127.0.0.1)
-                        └──────────────▶  Naoqi: a Nao, or naoqi-sim's NAOqi in Docker
+     sim backend:       │         │ NaoqiRobot Protocol (blocking calls, run off the loop)
+     start or borrow ┌──▼──────┐  └───────┬──────────────────┬──────────────────┐
+     the sim first   │ sim.py  │  ┌───────▼────────┐ ┌───────▼────────┐ ┌───────▼────────┐
+                     │ (lease) │  │ RealNaoqiRobot │ │ SimNaoqiRobot  │ │ FakeNaoqiRobot │
+                     └──┬──────┘  │   qi session   │ │ (a Real one)   │ │   in-process   │
+                        │         └───────┬────────┘ └───────┬────────┘ └────────────────┘
+                        │ NaoqiSim        │ tcp://<ip>:9559  │ tcp://127.0.0.1:9559
+                        └──────────▶ Naoqi: a Nao, or naoqi-sim's NAOqi in Docker
 ```
 
 | Part | Module | Role | Spec |
 | --- | --- | --- | --- |
 | Config | `config.py` | `NaoqiBridgeConfig` (backend, robot, streams, sim), the `from_dict` / `from_json` / `from_json_file` loaders, `ConfigError` naming the key | [config.md](config.md) |
-| Robot seam | `robot.py` | The `AnyNaoqiRobot` Protocol (the exact Naoqi slice the bridge consumes), shared constants and types, `RobotConnectionError`, `build_robot(config)` | [robot.md](robot.md) |
-| Real backend | `naoqi_robot.py` | `NaoqiRobot`: each Protocol method as Naoqi service calls over a `qi` session, imported lazily; bounded connection attempts | [robot.md](robot.md) |
+| Robot seam | `robot.py` | The `NaoqiRobot` Protocol (the exact Naoqi slice the bridge consumes), shared constants and types, `RobotConnectionError`, `build_robot(config)` | [robot.md](robot.md) |
+| Real backend | `real_robot.py` | `RealNaoqiRobot`: each Protocol method as Naoqi service calls over a `qi` session, imported lazily; bounded connection attempts | [robot.md](robot.md) |
 | Sim | `sim.py` | The `sim` backend's lease: start a naoqi-sim and own it, or borrow the one running, as `sim.spawn` says; the one module that imports `naoqi_sim` | [sim.md](sim.md) |
+| Sim robot | `sim_robot.py` | `SimNaoqiRobot`: `RealNaoqiRobot` at naoqi-sim's address; Sit through Crouch on NAOqi 2.8 | [robot.md](robot.md), [sim.md](sim.md) |
 | Fake backend | `fake_robot.py` | `FakeNaoqiRobot`: records commands, serves a fixed package list, behaviors that take time, motors that start off, sensor events and paced audio | [robot.md](robot.md) |
 | Bridge | `bridge.py`, `errors.py` | `NaoqiBridge`: lifecycle, verbs that raise why they failed, behavior catalog, running-item tracking, stream APIs | [bridge.md](bridge.md) |
 | Event | `events.py` | `Event[T]`: synchronous pub/sub, for occurrences (`bridge.on_touch`) | [events.md](events.md) |
@@ -61,11 +62,11 @@ This overview is the map of the project: what it is for, how the parts fit, the 
 | WebSocket server | `naoqi_websocket_server.py` | `NaoqiWebsocketServer` (bridge + listener, one client at a time) and `ClientSession` (the JSON protocol: commands in, touch / joints / audio / log events out) | [naoqi-websocket-server.md](naoqi-websocket-server.md) |
 | Front door | `__init__.py` | Re-exports what a caller needs: `NaoqiBridge`, the config classes, the stream values, `Event` / `Observable`, the errors | [bridge.md](bridge.md) |
 
-Dependencies point one way: servers → bridge → seam → backends. `events.py` and `observable.py` import nothing from the project; `config.py` imports neither `qi`, `mcp` nor `websockets`; only `naoqi_robot.py` touches `qi`, and only when it connects; only `sim.py` starts naoqi-sim, and `config.py` reads its config class, both lazily.
+Dependencies point one way: servers → bridge → seam → backends. `events.py` and `observable.py` import nothing from the project; `config.py` imports neither `qi`, `mcp` nor `websockets`; only `real_robot.py` touches `qi`, and only when it connects; only `sim.py` starts naoqi-sim, and `config.py` reads its config class, both lazily.
 
 ## Status
 
-Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index.md) is `Done`.
+The sim robot and the live tier's session sim are being built: robot.md, sim.md and testing.md are `Updated`, and their plan in [plans/_index.md](../plans/_index.md) is `In progress`. Every other spec is `Implemented`.
 
 | Concept | State |
 | --- | --- |
@@ -91,7 +92,7 @@ Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index
 - **The config switches streams; the bridge's APIs consume them.** A stream is subscribed on the robot at `start()` only when the config enables it, and using a disabled stream's API raises `BridgeError` ([config.md](config.md)).
 - **Every verb is cancellable.** Cancelling the task is the one way to interrupt a verb: the effect it started stops, the cancel returns in bounded time, and the session stays usable. There's no rewind ([bridge.md](bridge.md) "Cancellation").
 - **Raise why, not whether.** No verb returns `bool`; each failure has a type and a message an agent can act on.
-- **The Protocol is the contract.** pyright checks both backends against `AnyNaoqiRobot`, so the fake can't drift from what the bridge calls. Units and names at the seam are Naoqi's; intent belongs to the bridge.
+- **The Protocol is the contract.** pyright checks both backends against `NaoqiRobot`, so the fake can't drift from what the bridge calls. Units and names at the seam are Naoqi's; intent belongs to the bridge.
 - **Fake is the default and honest.** `NaoqiBridgeConfig()` is the fake; a real robot always means an explicit config with `robot.ip`. The fake behaves like a robot where tests and demos need it (motors start off, behaviors last 5 s, speech 1 s and posture moves 2 s, all stoppable, audio is pushed at Naoqi's pace).
 - **Adapters hold no robot logic.** Each server maps its protocol onto bridge verbs and back; logic found in a server belongs in the bridge.
 - **The library never configures the process.** Modules log through `logging.getLogger(__name__)`; logging setup, stdout handling and exit codes belong to the CLIs.
@@ -110,12 +111,12 @@ One JSON shape, `NaoqiBridgeConfig`: `backend` (`fake` by default, `real` or `si
   | macOS arm64, Linux x86_64, Windows x64 (CPython 3.12 / 3.13) | installed by `uv sync` | `real` and `fake` |
   | macOS x86_64, Linux aarch64, Windows arm64 | absent | `fake` only |
 
-- `naoqi_bridge` imports everywhere, since `qi` is imported only when `NaoqiRobot` connects. That connection makes one attempt bounded by `connect_timeout_s`, which a cancelled `start()` gives up in flight ([robot.md](robot.md)).
+- `naoqi_bridge` imports everywhere, since `qi` is imported only when `RealNaoqiRobot` connects. That connection makes one attempt bounded by `connect_timeout_s`, which a cancelled `start()` gives up in flight ([robot.md](robot.md)).
 - Console scripts: `naoqi-mcp-server`, `naoqi-websocket-server`.
 
 ## Testing and CI
 
-- Two tiers, split by directory ([testing.md](testing.md)): `tests/`, fast and deterministic, runs the bridge and both servers on `FakeNaoqiRobot` and `NaoqiRobot` against a stub `qi`; `tests-e2e/`, opt-in, runs against a headless naoqi-sim by default (one per run, `NAOQI_E2E_SIM_VERSION`, `NAOQI_E2E_SIM_VIEWER=1` for the window; skips without Docker or the images unless `NAOQI_E2E_TARGET=sim` is set) or a real Nao (`NAOQI_E2E_TARGET=real`, `NAOQI_E2E_IP`). It has three levels of risk: safe, motion (`NAOQI_E2E_ALLOW_MOTION=1`, always on a sim) and interactive (`NAOQI_E2E_INTERACTIVE=1`, skipped on a sim). It prints what it measured, such as cancel latencies and the audio chunk size.
+- Two tiers, split by directory ([testing.md](testing.md)): `tests/`, fast and deterministic, runs the bridge and both servers on `FakeNaoqiRobot`, and `RealNaoqiRobot` / `SimNaoqiRobot` against a stub `qi`; `tests-e2e/`, opt-in, runs against a headless naoqi-sim by default (one per session, owned by the `live_sim` fixture, which gives tests the `NaoqiSim`; `NAOQI_E2E_SIM_VERSION`, `NAOQI_E2E_SIM_VIEWER=1` for the window; skips without Docker or the images unless `NAOQI_E2E_TARGET=sim` is set) or a real Nao (`NAOQI_E2E_TARGET=real`, `NAOQI_E2E_IP`). It has three levels of risk: safe, motion (`NAOQI_E2E_ALLOW_MOTION=1`, always on a sim) and interactive (`NAOQI_E2E_INTERACTIVE=1`, skipped on a sim). It prints what it measured, such as cancel latencies and the audio chunk size.
 - The fast tier makes fake behaviors instant through an autouse fixture; a test that needs a running behavior sets its duration on the fake.
 - CI ([ci.md](ci.md)) runs `check` (ruff lint and format, pyright) on `ubuntu-24.04` and `fast-tier` on `ubuntu-24.04`, `macos-15` and `windows-2025`, for every pull request and push to `main`. Each runner installs its real `qi` wheel, so the `qi`-gated tests run on all three. `e2e-sim` runs the live tier on a headless sim, once per NAOqi version (2.1, 2.8), with the sim images built and cached by the runner.
 - `tests/test_project_map.py` keeps [AGENTS.md](../AGENTS.md)'s project map and the specs' frontmatter honest.
@@ -125,7 +126,7 @@ One JSON shape, `NaoqiBridgeConfig`: `backend` (`fake` by default, `real` or `si
 Collected from the concept specs, which own them.
 
 - **The sim** ([sim.md](sim.md)): touch on a sim waits for naoqi-sim's touch input; dances, apps and body actions for packages a sim can install; several sims per machine for naoqi-sim's configurable ports.
-- **Newer robots** ([robot.md](robot.md)): only Naoqi 2.1.4.13 / Nao v5 is verified. Nao v6 (Naoqi 2.8) or Pepper may need different service calls inside `NaoqiRobot`; the Protocol shouldn't change.
+- **Newer robots** ([robot.md](robot.md)): only Naoqi 2.1.4.13 / Nao v5 is verified. Nao v6 (Naoqi 2.8) or Pepper may need different service calls inside `RealNaoqiRobot`; the Protocol shouldn't change.
 - **Cancellation** ([bridge.md](bridge.md)): whether the newest `say` should interrupt the one in flight; checking live that `stopAll` also stops animated speech's gestures.
 - **Microphone** ([microphone.md](microphone.md)): Naoqi's real chunk size at 16 kHz mono is unmeasured (the fake's 1360 samples is a placeholder); 48 kHz four-channel capture and a gap signal in the stream are deferred.
 - **Config blocks** ([config.md](config.md)): motion, session state (what the robot does at start and stop) and catalog rules are candidate blocks, added when needed.

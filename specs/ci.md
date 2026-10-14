@@ -43,7 +43,7 @@ The jobs and the matrix entries run side by side, each on its own runner, and no
 
 ### The `e2e-sim` job
 
-One entry per NAOqi version, each on its own runner, since one sim runs per machine. The bridge is verified on 2.1; the 2.8 entry is where `NaoqiRobot`'s 2.8 gaps show, and it is held to the same bar. In order:
+One entry per NAOqi version, each on its own runner, since one sim runs per machine. The bridge is verified on 2.1; the 2.8 entry is where `RealNaoqiRobot`'s 2.8 gaps show, and it is held to the same bar. In order:
 
 1. **Disk.** The 2.8 image is about 6 GB and its `docker save` archive as much again: the entry first deletes the runner's preinstalled toolchains the project never uses (Android SDK, .NET, GHC, CodeQL), about 25 GB. Both entries do it, so they stay alike.
 2. **Sync**: `uv sync --locked`, which installs the `[sim]` extra through the dev group ([project.md](project.md)).

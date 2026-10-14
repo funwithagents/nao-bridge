@@ -237,7 +237,7 @@ def _bridge(spawn: SimSpawn = "auto") -> NaoqiBridge:
 
 @pytest.fixture
 def robot(monkeypatch: pytest.MonkeyPatch, machine: Machine) -> FakeNaoqiRobot:
-    """The bridge's robot on sim: a fake standing in for NaoqiRobot at the sim's
+    """The bridge's robot on sim: a fake standing in for RealNaoqiRobot at the sim's
     address (build_robot's choice is tested in test_robot.py), logging into the
     machine's events."""
 

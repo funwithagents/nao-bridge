@@ -6,7 +6,11 @@
 # this tier deterministic and network-free — anything that hits a real service
 # belongs in tests-e2e/ instead.
 
+import sys
+import types
+
 import pytest
+from qi_stub import StubSession
 
 from naoqi_bridge.fake_robot import FakeNaoqiRobot
 
@@ -24,3 +28,15 @@ def instant_fake_behaviors(
         monkeypatch.setattr(FakeNaoqiRobot, "DEFAULT_BEHAVIOR_DURATION_S", 0.0)
         monkeypatch.setattr(FakeNaoqiRobot, "DEFAULT_SPEECH_DURATION_S", 0.0)
         monkeypatch.setattr(FakeNaoqiRobot, "DEFAULT_POSTURE_DURATION_S", 0.0)
+
+
+@pytest.fixture
+def stub_qi(monkeypatch: pytest.MonkeyPatch) -> type[StubSession]:
+    StubSession.failures = 0
+    StubSession.silent = 0
+    StubSession.connects = 0
+    StubSession.closed = 0
+    StubSession.futures = []
+    StubSession.calls = []
+    monkeypatch.setitem(sys.modules, "qi", types.SimpleNamespace(Session=StubSession))
+    return StubSession

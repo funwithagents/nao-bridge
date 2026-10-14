@@ -34,6 +34,7 @@ Implementation plans for naoqi-bridge — each plan turns a settled part of a sp
 | [202610131500_libqi-index-and-windows.md](202610131500_libqi-index-and-windows.md) | `qi>=3.1.8,<4` from the libqi package index, Windows x64 joins the real backend (others stay fake-only); one connect attempt, `connect_tries` removed, a cancelled `start()` gives up the connection in flight; fast tier on Linux, macOS and Windows; two races Windows exposed fixed (catalog stops confirm the stop, a session closed while opening) | Done |
 | [202610131752_nao-names-to-naoqi.md](202610131752_nao-names-to-naoqi.md) | Robot names to Naoqi: `NaoqiRobot` (in `naoqi_robot.py`, was `RealNaoRobot`), `FakeNaoqiRobot`, the `AnyNaoqiRobot` Protocol, `NaoqiBehavior`; the live tier's `NAOQI_E2E_*` variables; the WebSocket protocol's `NaoqiState`, `protocolVersion` 2 | Done |
 | [202610131840_sim-backend.md](202610131840_sim-backend.md) | The `sim` backend: a naoqi-sim the bridge starts and owns or borrows (`sim.spawn`), the `[sim]` extra; the live tier on a sim by default (`NAOQI_E2E_TARGET`, `NAOQI_E2E_SIM_VERSION`, `NAOQI_E2E_SIM_VIEWER`), one sim per run; the `e2e-sim` CI job on 2.1 and 2.8 | Done |
+| [202610140902_sim-robot-and-session-sim.md](202610140902_sim-robot-and-session-sim.md) | One robot class per backend (`NaoqiRobot` Protocol, `RealNaoqiRobot`, `SimNaoqiRobot` with the 2.8 Sit workaround, `FakeNaoqiRobot`); `SimLease.sim`; the live tier owns one sim per session (`live_sim`, `spawn: "always"`) and a test plays into its microphone | In progress |
 
 ## Status legend
 

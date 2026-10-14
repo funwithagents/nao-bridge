@@ -4,8 +4,9 @@ import pytest
 
 from naoqi_bridge.config import NaoqiBridgeConfig, RobotSettings
 from naoqi_bridge.fake_robot import FakeNaoqiRobot
-from naoqi_bridge.naoqi_robot import NaoqiRobot
+from naoqi_bridge.real_robot import RealNaoqiRobot
 from naoqi_bridge.robot import build_robot
+from naoqi_bridge.sim_robot import SimNaoqiRobot
 
 
 def test_build_robot_follows_the_config():
@@ -15,7 +16,7 @@ def test_build_robot_follows_the_config():
         robot=RobotSettings(ip="10.0.0.5", port=9600, connect_timeout_s=2.5),
     )
     real = build_robot(config)
-    assert isinstance(real, NaoqiRobot)
+    assert isinstance(real, RealNaoqiRobot)
     assert (real.ip, real.port, real.connect_timeout_s) == ("10.0.0.5", 9600, 2.5)
 
 
@@ -32,7 +33,7 @@ def test_sim_connects_to_naoqi_sims_fixed_address():
         robot=RobotSettings(ip="10.0.0.5", port=9600, connect_timeout_s=2.5),
     )
     sim = build_robot(config)
-    assert isinstance(sim, NaoqiRobot)
+    assert isinstance(sim, SimNaoqiRobot)
     assert (sim.ip, sim.port, sim.connect_timeout_s) == ("127.0.0.1", 9559, 2.5)
 
 
@@ -47,9 +48,5 @@ def test_sim_connects_to_naoqi_sims_fixed_address():
 def test_only_the_2_8_sim_sits_through_crouch(sim: dict, through_crouch: bool):
     # NAOqi 2.8's desktop robot can't sit from Stand (specs/sim.md).
     robot = build_robot(NaoqiBridgeConfig.from_dict({"backend": "sim", "sim": sim}))
-    assert isinstance(robot, NaoqiRobot)
+    assert isinstance(robot, SimNaoqiRobot)
     assert robot.sit_through_crouch is through_crouch
-    real = build_robot(
-        NaoqiBridgeConfig(backend="real", robot=RobotSettings(ip="10.0.0.5"))
-    )
-    assert isinstance(real, NaoqiRobot) and not real.sit_through_crouch

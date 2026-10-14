@@ -4,8 +4,10 @@ code:
   - src/naoqi_bridge/config.py
   - src/naoqi_bridge/bridge.py
   - src/naoqi_bridge/robot.py
+  - src/naoqi_bridge/sim_robot.py
 tests:
   - tests/test_sim.py
+  - tests/test_sim_robot.py
   - tests/test_config.py
   - tests/test_bridge.py
   - tests-e2e/test_live_sim.py
@@ -13,7 +15,7 @@ tests:
 
 # The `sim` backend
 
-**Status:** Implemented
+**Status:** Updated
 
 ## Purpose
 
@@ -22,7 +24,7 @@ A third backend, next to `real` and `fake`: a simulated Nao from [naoqi-sim](htt
 - a developer runs the bridge, both servers and an agent against a Nao that speaks, moves and hears, on their machine, from one config file;
 - the live tier ([testing.md](testing.md)) runs on a headless sim locally and in CI ([ci.md](ci.md)), not only on a robot someone holds.
 
-naoqi-sim already serves any qi client at `tcp://127.0.0.1:9559`, so a sim was reachable before as `real` at `127.0.0.1`. The backend adds what that left to the user: **starting and stopping the sim with the bridge**, from the config, and knowing that the target is naoqi-sim of the version asked for. Once connected, the verbs, the catalog and the streams run through the same `NaoqiRobot` as on a robot. The one exception is sitting on a 2.8 sim (below, "What a sim offers the bridge"), a workaround for a limit of Aldebaran's 2.8 desktop suite that naoqi-sim documents.
+naoqi-sim already serves any qi client at `tcp://127.0.0.1:9559`, so a sim was reachable before as `real` at `127.0.0.1`. The backend adds what that left to the user: **starting and stopping the sim with the bridge**, from the config, and knowing that the target is naoqi-sim of the version asked for. Once connected, the verbs, the catalog and the streams run through the same `RealNaoqiRobot` as on a robot. The one exception is sitting on a 2.8 sim (below, "What a sim offers the bridge"), a workaround for a limit of Aldebaran's 2.8 desktop suite that naoqi-sim documents.
 
 ## Decided
 
@@ -44,7 +46,7 @@ naoqi-sim already serves any qi client at `tcp://127.0.0.1:9559`, so a sim was r
 }
 ```
 
-- The robot is `NaoqiRobot("127.0.0.1", 9559, connect_timeout_s=robot.connect_timeout_s)` ([robot.md](robot.md)): naoqi-sim's fixed address, one sim per machine. `robot.ip` and `robot.port` are validated but not applied, as the `robot` block on `fake`.
+- The robot is a `SimNaoqiRobot` ([robot.md](robot.md)): a `RealNaoqiRobot` at `127.0.0.1:9559`, naoqi-sim's fixed address, one sim per machine. It knows nothing of the sim's lifecycle, which is the bridge's (below). `robot.ip` and `robot.port` are validated but not applied, as the `robot` block on `fake`.
 - naoqi-sim owns everything about the sim (Docker, the images, the containers, the host devices, the viewer); the bridge only calls its public API (`NaoqiSim`, `read_status`) and never `docker` itself.
 - `sim.config` is a naoqi-sim config file as it is: one pastes in, and copies back out to `naoqi-sim run --config`, unchanged.
 
@@ -73,6 +75,9 @@ class SimLease:
     owned: bool       # True when this lease started the sim; release() then stops it
     naoqi_version: str
 
+    @property
+    def sim(self) -> NaoqiSim | None: ...  # the NaoqiSim this lease started; None when borrowed or released
+
     async def release(self) -> None: ...   # stops an owned sim; a no-op on a borrowed one
 
 
@@ -82,6 +87,7 @@ async def acquire_sim(settings: SimSettings) -> SimLease: ...
 - `acquire_sim` applies the table above. Its blocking work (`read_status`, the boot wait) runs in naoqi-sim's own threads; `NaoqiSim.start()` is already async.
 - **Cancel-safe**: a cancelled `acquire_sim` stops a sim it was starting before re-raising (naoqi-sim's `start()` does it, [naoqi-sim's API](https://github.com/funwithagents/naoqi-sim/blob/main/specs/runtime/api.md) "Lifecycle"), and gives up a boot wait at its next poll (1 s).
 - `release()` of an owned sim is `NaoqiSim.stop()`: the containers go down (seconds), the package store volumes stay.
+- **`sim`** is naoqi-sim's own object, for its own API: the fake microphone a test plays into, and the devices to come (touch). naoqi-sim keeps that API in the process that started the sim, so only an owned lease has it. The bridge's lease is its own; the live tier's session fixture holds one directly ([testing.md](testing.md), "Live tier: the target").
 
 ### In the bridge's lifecycle
 
@@ -117,8 +123,8 @@ The sim is a desktop NAOqi with naoqi-sim's replacements; from the bridge's side
 | Audio stream | naoqi-sim's `ALAudioDevice` replacement: its audio input's source (`fake`, `mic`), or none |
 | Touch | Not yet: naoqi-sim's touch input is not built |
 | Catalog | The `animations` package only: no dances, no apps, no body actions; reactions from what `animations` holds |
-| NAOqi 2.8 | Runs; the bridge is verified on 2.1 only, so 2.8 is where `NaoqiRobot`'s 2.8 gaps show first |
-| Sit, on 2.8 | The 2.8 desktop suite has no DCM, so its robot has no inertial sensor: `ALRobotPosture` takes the lean of Stand → Sit for a push and stays standing, and from Crouch it reaches Sit but often reports it didn't (naoqi-sim's known issue). So on a 2.8 sim `NaoqiRobot` sits through Crouch and judges the move by `getPosture()` ([robot.md](robot.md), "`NaoqiRobot`"): `sit_down` works, in 15 to 25 s. Everywhere else, Sit is asked for directly |
+| NAOqi 2.8 | Runs; the bridge is verified on 2.1 only, so 2.8 is where `RealNaoqiRobot`'s 2.8 gaps show first |
+| Sit, on 2.8 | The 2.8 desktop suite has no DCM, so its robot has no inertial sensor: `ALRobotPosture` takes the lean of Stand → Sit for a push and stays standing, and from Crouch it reaches Sit but often reports it didn't (naoqi-sim's known issue). So on a 2.8 sim `RealNaoqiRobot` sits through Crouch and judges the move by `getPosture()` ([robot.md](robot.md), "`SimNaoqiRobot`"): `sit_down` works, in 15 to 25 s. Everywhere else, Sit is asked for directly |
 
 ### Example files
 

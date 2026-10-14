@@ -6,14 +6,16 @@ services you hold keys for, and a contributor (or CI) with none is never broken.
 
 Here the service is a Naoqi: a simulated Nao by default, or a real one
 (specs/testing.md "Live tier: the target"), picked by `NAOQI_E2E_TARGET` (`sim` when
-unset, `real`). On `sim`, one naoqi-sim serves the whole run (`NAOQI_E2E_SIM_VERSION`,
-`NAOQI_E2E_SIM_VIEWER`): the first test that asks for the target starts it, or borrows
-the one already running, through a bridge of its own on an event loop of its own;
-`tests-e2e/conftest.py` stops it at the end of the run. The tier has three levels of
+unset, `real`). On `sim`, one naoqi-sim serves the whole session
+(`NAOQI_E2E_SIM_VERSION`, `NAOQI_E2E_SIM_VIEWER`): the `live_sim` fixture
+(tests-e2e/conftest.py) starts it at session start and stops it at session end, and
+each test's own bridge borrows it (`spawn: "never"`). The tier has three levels of
 risk (specs/testing.md "Live tier: levels of risk"): safe (the target), motion
 (`NAOQI_E2E_ALLOW_MOTION=1`, always on a sim) and interactive
 (`NAOQI_E2E_INTERACTIVE=1`, skipped on a sim).
 """
+
+from __future__ import annotations
 
 import asyncio
 import contextlib
@@ -21,8 +23,8 @@ import logging
 import os
 import threading
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, NoReturn
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import pytest
 
@@ -34,8 +36,12 @@ from naoqi_bridge import (
     SimSettings,
     StreamSettings,
 )
-from naoqi_bridge.config import ConfigError
-from naoqi_bridge.naoqi_robot import NaoqiRobot
+from naoqi_bridge.config import SIM_EXTRA, sim_installed
+from naoqi_bridge.real_robot import RealNaoqiRobot
+from naoqi_bridge.sim import acquire_sim
+
+if TYPE_CHECKING:
+    from naoqi_sim import NaoqiSim
 
 logger = logging.getLogger("live")
 
@@ -101,8 +107,8 @@ def sim_config() -> dict[str, Any]:
 
 
 class _LoopThread:
-    """An event loop running in its own thread, for a bridge that lives as long as
-    the run: a bridge belongs to the loop that started it."""
+    """An event loop running in its own thread, for the session's sim: its start and
+    its stop run on the same loop, which every test's `asyncio.run` would not be."""
 
     def __init__(self) -> None:
         self.loop = asyncio.new_event_loop()
@@ -123,56 +129,43 @@ class _LoopThread:
         self.loop.close()
 
 
-class _RunSim:
-    """The run's sim: started (or borrowed) once, on first use; why it couldn't be,
-    kept, so later tests don't try again."""
+@contextlib.contextmanager
+def session_sim() -> Iterator[NaoqiSim | None]:
+    """The session's sim, for the `live_sim` fixture: started with `spawn: "always"`,
+    so the run owns it and holds its `NaoqiSim` (naoqi-sim's own API, which only the
+    process that started the sim has), and stopped when the session ends. On the
+    `real` target, `None`. A sim that can't start (no `[sim]` extra, no Docker, no
+    images, one already running) skips the run, or fails it when NAOQI_E2E_TARGET is
+    set."""
+    if TARGET != "sim":
+        yield None
+        return
+    if not sim_installed():
+        _unavailable(f"install {SIM_EXTRA}")
+    from naoqi_sim import NaoqiSimConfig
 
-    def __init__(self) -> None:
-        self._loop: _LoopThread | None = None
-        self._owner: NaoqiBridge | None = None
-        self._failure: str | None = None
-
-    def require(self) -> None:
-        if self._failure is None and self._owner is None:
-            self._start()
-        if self._failure is not None:
-            _unavailable(self._failure)
-
-    def _start(self) -> None:
+    settings = SimSettings(
+        spawn="always", config=NaoqiSimConfig.from_dict(sim_config())
+    )
+    # The sim's lifecycle stays on one event loop, which outlives every test's own.
+    loop = _LoopThread()
+    try:
+        lease = loop.run(acquire_sim(settings))
+    except RobotConnectionError as e:
+        loop.close()
+        _unavailable(str(e))
+    logger.warning(
+        "Live tier on a naoqi-sim, NAOqi %s (%s)",
+        SIM_VERSION,
+        "the window" if SIM_VIEWER else "headless",
+    )
+    try:
+        yield lease.sim
+    finally:
         try:
-            config = NaoqiBridgeConfig.from_dict(
-                {"backend": "sim", "sim": {"spawn": "auto", "config": sim_config()}}
-            )
-        except ConfigError as e:  # no [sim] extra
-            self._failure = str(e)
-            return
-        owner = NaoqiBridge(config)
-        loop = _LoopThread()
-        try:
-            loop.run(owner.start())
-        except RobotConnectionError as e:  # no Docker, no images, a port, a version
-            loop.close()
-            self._failure = str(e)
-            return
-        self._loop, self._owner = loop, owner
-        logger.warning(
-            "Live tier on a naoqi-sim, NAOqi %s (%s)",
-            SIM_VERSION,
-            "the window" if SIM_VIEWER else "headless",
-        )
-
-    def stop(self) -> None:
-        """Stop the run's bridge, and with it the sim if it started it."""
-        if self._loop is None or self._owner is None:
-            return
-        try:
-            self._loop.run(self._owner.stop())
+            loop.run(lease.release())
         finally:
-            self._loop.close()
-            self._loop = self._owner = None
-
-
-RUN_SIM = _RunSim()
+            loop.close()
 
 
 def _unavailable(reason: str) -> NoReturn:
@@ -187,7 +180,6 @@ def live_bridge_dict(streams: dict[str, Any] | None = None) -> dict[str, Any]:
     the run's sim (`spawn: "never"`), on real the robot at `NAOQI_E2E_IP`."""
     data: dict[str, Any]
     if TARGET == "sim":
-        RUN_SIM.require()
         data = {
             "backend": "sim",
             "sim": {"spawn": "never", "config": {"naoqi": {"version": SIM_VERSION}}},
@@ -236,7 +228,6 @@ def live_config(streams: StreamSettings | None = None) -> NaoqiBridgeConfig:
     a test never starts a second one), or the robot at `NAOQI_E2E_IP` (skips when
     it's unset)."""
     if TARGET == "sim":
-        RUN_SIM.require()
         return NaoqiBridgeConfig(
             backend="sim",
             streams=streams or StreamSettings(),
@@ -308,7 +299,7 @@ def body_action_behavior(bridge: NaoqiBridge, action_id: str) -> str:
 def naoqi(bridge: NaoqiBridge, service: str) -> object:
     """A Naoqi service, for a test that wants the robot's own view of its state."""
     robot = bridge.robot
-    assert isinstance(robot, NaoqiRobot)
+    assert isinstance(robot, RealNaoqiRobot)
     return robot._service(service)  # pyright: ignore[reportPrivateUsage]
 
 

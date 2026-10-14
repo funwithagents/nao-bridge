@@ -5,8 +5,16 @@
 # fast tier uses here — tests-e2e/ isn't a package that can import from tests/, so the
 # few lines are duplicated rather than shared.
 
+from __future__ import annotations
+
+from collections.abc import Iterator
+from typing import TYPE_CHECKING
+
 import pytest
-from support import MEASUREMENTS, RUN_SIM, check_target_settings
+from support import MEASUREMENTS, check_target_settings, session_sim
+
+if TYPE_CHECKING:
+    from naoqi_sim import NaoqiSim
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -14,10 +22,13 @@ def pytest_configure(config: pytest.Config) -> None:
     check_target_settings()
 
 
-def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """Stop the run's sim, if this run started it (specs/testing.md "Live tier: the
-    target")."""
-    RUN_SIM.stop()
+@pytest.fixture(scope="session", autouse=True)
+def live_sim() -> Iterator[NaoqiSim | None]:
+    """The session's naoqi-sim, started at session start and stopped at session end
+    (specs/testing.md "Live tier: the target"). A test that drives the sim itself
+    (plays into its microphone) takes it; `None` on the `real` target."""
+    with session_sim() as sim:
+        yield sim
 
 
 def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:

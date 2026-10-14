@@ -1,4 +1,4 @@
-"""The ``real`` backend: ``AnyNaoqiRobot`` over a ``qi`` session to a Nao.
+"""The ``real`` backend: ``NaoqiRobot`` over a ``qi`` session to a Nao.
 
 Specified by [specs/robot.md](../../specs/robot.md). ``qi`` is imported lazily on
 ``connect()``, so this module (and ``naoqi_bridge``) imports where ``qi`` isn't installed.
@@ -23,7 +23,7 @@ from .robot import (
     TouchCallback,
 )
 
-__all__ = ["NaoqiRobot"]
+__all__ = ["RealNaoqiRobot"]
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +50,8 @@ class _AudioSink:
         self._callback(nbOfChannels, nbOfSamplesByChannel, bytes(inputBuffer))
 
 
-class NaoqiRobot:
-    """``AnyNaoqiRobot`` over a ``qi`` session to a real (or Choregraphe-simulated) robot."""
+class RealNaoqiRobot:
+    """``NaoqiRobot`` over a ``qi`` session to a real (or Choregraphe-simulated) robot."""
 
     AUDIO_SERVICE_NAME = "NaoqiBridgeAudio"
 
@@ -61,15 +61,10 @@ class NaoqiRobot:
         port: int = 9559,
         *,
         connect_timeout_s: float = 5.0,
-        sit_through_crouch: bool = False,
     ) -> None:
         self.ip = ip
         self.port = port
         self.connect_timeout_s = connect_timeout_s
-        # Reach Sit from Crouch and judge it by getPosture(): the 2.8 simulated Nao
-        # can't sit otherwise (specs/sim.md, "What a sim offers the bridge").
-        self.sit_through_crouch = sit_through_crouch
-        self._posture_stopped = threading.Event()
         self._speech_stopped = threading.Event()
         self._session: Any = None
         self._services: dict[str, Any] = {}
@@ -175,21 +170,9 @@ class NaoqiRobot:
     def go_to_posture(self, posture: str, speed: float, max_tries: int) -> bool:
         robot_posture = self._service("ALRobotPosture")
         robot_posture.setMaxTryNumber(max_tries)
-        if not (self.sit_through_crouch and posture == "Sit"):
-            return bool(robot_posture.goToPosture(posture, speed))
-        # NAOqi 2.8's desktop robot has no inertial sensor: its posture manager takes
-        # the lean of Stand -> Sit for a push and stays standing, and from Crouch it
-        # reaches Sit but often reports it didn't. So: through Crouch, then ask.
-        self._posture_stopped.clear()
-        if robot_posture.getPosture() != "Crouch":
-            robot_posture.goToPosture("Crouch", speed)
-            if self._posture_stopped.is_set():
-                return False
-        robot_posture.goToPosture("Sit", speed)
-        return robot_posture.getPosture() == "Sit"
+        return bool(robot_posture.goToPosture(posture, speed))
 
     def stop_posture(self) -> None:
-        self._posture_stopped.set()  # a stop between the two legs ends the move too
         self._service("ALRobotPosture").stopMove()
 
     def set_breathing(self, chain_name: str, enabled: bool) -> None:
