@@ -4,6 +4,8 @@ code:
   - src/naoqi_bridge/bridge.py
   - src/naoqi_bridge/naoqi_mcp_server.py
   - src/naoqi_bridge/naoqi_websocket_server.py
+  - examples/configs/mcp-real.json
+  - examples/configs/websocket-real.json
 tests:
   - tests/test_config.py
   - tests/test_bridge.py
@@ -17,7 +19,7 @@ tests:
 
 One declarative description of *which robot and what to stream*. A `NaoqiBridge` is built from it, and each server wraps it in its own config. Today the same facts are spread over `NaoqiBridge` keyword arguments, server arguments and CLI flags. A config file makes a setup reproducible: switching from the robot to the fake becomes a one-word change in one file.
 
-It covers the **backend**, the **robot connection**, the **sim** a `sim` backend runs ([sim.md](sim.md)) and the **streams**. Other blocks are open questions below.
+It covers the **backend**, the **robot connection**, the **sim** a `sim` backend runs ([sim.md](sim.md)), the **streams** and the **viewer** ([viewer.md](viewer.md)). Other blocks are open questions below.
 
 ## Core concepts / Decided
 
@@ -38,11 +40,12 @@ It covers the **backend**, the **robot connection**, the **sim** a `sim` backend
       "naoqi": { "version": "2.1" },
       "viewer": { "headless": true }
     }
-  }
+  },
+  "viewer": { "enabled": true, "config": { "ghost": true } }
 }
 ```
 
-`sim` applies only on `"backend": "sim"`; on `real` (as here) it is checked and ignored.
+`sim` applies only on `"backend": "sim"`; on `real` (as here) it is checked and ignored. `viewer` opens a window mirroring the robot on `real` and `sim` ([viewer.md](viewer.md)).
 
 ```python
 @dataclass
@@ -51,6 +54,7 @@ class NaoqiBridgeConfig:
     robot: RobotSettings = field(default_factory=RobotSettings)
     streams: StreamSettings = field(default_factory=StreamSettings)
     sim: SimSettings = field(default_factory=SimSettings)
+    viewer: ViewerSettings = field(default_factory=ViewerSettings)
 
 @dataclass
 class RobotSettings:
@@ -68,6 +72,11 @@ class StreamSettings:
 class SimSettings:
     spawn: SimSpawn = "auto"                 # "never" | "auto" | "always" (sim.md, "Own it or borrow it")
     config: NaoqiSimConfig | None = None     # naoqi-sim's own config; None: naoqi-sim's defaults
+
+@dataclass
+class ViewerSettings:
+    enabled: bool = False                     # viewer.md, "Which robot it mirrors"
+    config: NaoqiViewerConfig | None = None   # naoqi-viewer's own config, minus mode, headless and naoqi.url; None: its defaults
 ```
 
 - Every block is optional. Missing blocks and fields take the defaults above. **A default is declared once**, on the dataclass field; the loaders read it from there (`dataclasses.fields`), so a default can't drift between direct construction and JSON.
@@ -81,6 +90,10 @@ The `sim` block has two keys, mirroring `SimSettings`: the bridge's `spawn` ([si
 - **Without the `[sim]` extra** naoqi-sim can't check `config`. With `backend: "sim"` that's a `ConfigError` (key `backend`) naming `naoqi-bridge[sim]`; with another backend `sim.config` is accepted unchecked and `config` stays `None`, so a file that switches backends still loads on a platform without the extra.
 - **On `real` and `fake`, `sim` is validated but not applied**, as `robot` on `fake`; on `sim`, `robot.ip` and `robot.port` are, and `robot.connect_timeout_s` applies (the qi connection to the sim).
 
+### The `viewer` block
+
+Specified in [viewer.md](viewer.md) ("Config: the `viewer` block"). In short: `enabled` is a switch; `config` is a naoqi-viewer `NaoqiViewerConfig` block, checked by naoqi-viewer's own loader (imported lazily from `naoqi_viewer.config`) with errors prefixed `viewer.config.`, except `mode`, `headless` and `naoqi.url`, which the bridge sets and which are a `ConfigError` here. Without naoqi-viewer installed, `viewer.enabled: true` on `real` or `sim` is a `ConfigError` on `viewer.enabled` naming `naoqi-bridge[viewer]`; on `fake` or disabled, `config` is accepted unchecked and stays `None`.
+
 ### Constructors and validation
 
 - Every config class has the same three constructors: `from_dict(data)`, `from_json(text)` (parses, then calls `from_dict`), and `from_json_file(path)` (reads, then calls `from_json`; an invalid-JSON error names the path). All three share one validation path.
@@ -90,7 +103,7 @@ The `sim` block has two keys, mirroring `SimSettings`: the bridge's `spawn` ([si
 - **`robot.connect_tries` is gone.** The connection makes one attempt since libqi 3.1.8 ([robot.md](robot.md)), so a config that still sets it fails as an unknown key.
 - **`real` needs `robot.ip`.** An empty IP is a `ConfigError` when the config loads.
 - **On `fake`, `robot` is validated but not applied.** A config written for the robot runs offline by changing `backend` alone.
-- `config.py` imports neither `qi` nor `mcp` nor `websockets`, and `naoqi_sim.config` only inside the `sim` loader.
+- `config.py` imports neither `qi` nor `mcp` nor `websockets`; `naoqi_sim.config` only inside the `sim` loader and `naoqi_viewer.config` only inside the `viewer` loader.
 
 ### Streams: config switches, bridge APIs
 
@@ -143,7 +156,7 @@ Each server has its own config object, wrapping a `NaoqiBridgeConfig` under `bri
 
 - `naoqi-mcp-server --config path.json` and `naoqi-websocket-server --config path.json`. The `--fake-robot`, `--ip`, `--port`, `--websocket-port`, `--with-joints-data` and `--with-audio-data` flags are **removed**.
 - Without `--config`, the server runs on its default config, which is the `fake` backend.
-- A config error exits 2 with the `ConfigError` message. An unreachable robot, or a sim that can't be started or borrowed ([sim.md](sim.md), "Errors"), exits 1.
+- A config error exits 2 with the `ConfigError` message. An unreachable robot, a sim that can't be started or borrowed ([sim.md](sim.md), "Errors"), or a viewer that can't launch (`ViewerError`, [viewer.md](viewer.md), "Errors"), exits 1.
 
 ### Example files
 
@@ -151,6 +164,7 @@ Each server has its own config object, wrapping a `NaoqiBridgeConfig` under `bri
 - `mcp-fake.json` and `mcp-real.json`
 - `websocket-fake.json` and `websocket-real.json` (all three streams on)
 - `mcp-sim.json` and `websocket-sim.json` ([sim.md](sim.md), "Example files")
+- `mcp-real.json` and `websocket-real.json` carry a disabled `viewer` block with the ghost on ([viewer.md](viewer.md), "Example files")
 
 The README's Claude Desktop / Tiny Agents snippets point `--config` at them.
 

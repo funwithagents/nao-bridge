@@ -20,7 +20,7 @@ from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from .config import Backend, NaoqiBridgeConfig
 from .errors import (
@@ -35,6 +35,10 @@ from .microphone import MicFeed
 from .observable import Observable
 from .robot import TOUCH_KEYS, NaoqiRobot, TouchPart, build_robot
 from .sim import SimLease, acquire_sim
+from .viewer import close_viewer, open_viewer, viewer_target
+
+if TYPE_CHECKING:
+    from naoqi_viewer import NaoqiViewer
 
 __all__ = [
     "REACTION_TYPES",
@@ -265,6 +269,8 @@ class NaoqiBridge:
         self._robot: NaoqiRobot | None = None
         # The sim the bridge started or borrows, on the sim backend.
         self._sim: SimLease | None = None
+        # The viewer window mirroring the robot, when the config opens one.
+        self._viewer: NaoqiViewer | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._joints_task: asyncio.Task[None] | None = None
         self._catalog = BehaviorCatalog()
@@ -320,7 +326,7 @@ class NaoqiBridge:
         sim = await acquire_sim(self._config.sim) if self.backend == "sim" else None
         robot = build_robot(self._config)
         cancel_connect = threading.Event()
-        bring_up = asyncio.ensure_future(self._bring_up(robot, cancel_connect))
+        bring_up = asyncio.ensure_future(self._bring_up(robot, cancel_connect, sim))
         try:
             await asyncio.shield(bring_up)
         except asyncio.CancelledError:
@@ -342,11 +348,14 @@ class NaoqiBridge:
             )
 
     async def _bring_up(
-        self, robot: NaoqiRobot, cancel_connect: threading.Event
+        self,
+        robot: NaoqiRobot,
+        cancel_connect: threading.Event,
+        sim: SimLease | None,
     ) -> None:
         """Connect ``robot`` (giving up once ``cancel_connect`` is set), subscribe the
-        enabled streams and load the catalog; a failure after the connection tears
-        down what already came up."""
+        enabled streams, load the catalog and, last, open the viewer; a failure after
+        the connection tears down what already came up."""
         streams = self._config.streams
         await asyncio.to_thread(robot.connect, cancel_connect)
         self._loop = asyncio.get_running_loop()
@@ -356,6 +365,9 @@ class NaoqiBridge:
             if streams.audio.enabled:
                 await self._mic.start(robot, streams.audio.channel)
             self._catalog = build_catalog(await asyncio.to_thread(robot.list_packages))
+            url = viewer_target(self._config, sim)
+            if url is not None:
+                self._viewer = await open_viewer(self._config.viewer, url)
         except BaseException:
             await self._teardown(robot)
             raise
@@ -381,6 +393,7 @@ class NaoqiBridge:
         await _owned(self._shut_down(robot))  # owned once begun, past a cancel
 
     async def _shut_down(self, robot: NaoqiRobot) -> None:
+        await self._close_viewer()  # first: the window never shows a robot gone
         if self._joints_task is not None:
             self._joints_task.cancel()
             await asyncio.gather(self._joints_task, return_exceptions=True)
@@ -402,7 +415,13 @@ class NaoqiBridge:
         except Exception:
             logger.exception("Stopping the naoqi-sim failed")
 
+    async def _close_viewer(self) -> None:
+        viewer, self._viewer = self._viewer, None
+        if viewer is not None:
+            await close_viewer(viewer)
+
     async def _teardown(self, robot: NaoqiRobot) -> None:
+        await self._close_viewer()
         await self._mic.stop()
         steps: list[Callable[[], None]] = []
         if self._config.streams.touch.enabled:

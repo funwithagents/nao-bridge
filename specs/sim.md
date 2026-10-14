@@ -93,6 +93,7 @@ async def acquire_sim(settings: SimSettings) -> SimLease: ...
 
 - **`start()`** on `sim` acquires the lease first, then builds and connects the robot as on `real`, subscribes the streams and loads the catalog. If a later step fails or `start()` is cancelled, the robot is closed and the lease released before the error propagates ([bridge.md](bridge.md), "Construction and lifecycle").
 - **`stop()`** closes the robot, then releases the lease, last; owned once begun, like the rest of `stop()`. Stopping a bridge that owns its sim takes the few seconds of `docker compose down`.
+- **The bridge's viewer** ([viewer.md](viewer.md)) mirrors a borrowed sim, or one it started headless; a sim it started with its own window is not mirrored twice (a warning says so).
 - `bridge.backend` is `"sim"`. The WebSocket server's `NaoqiState.fakeRobot` is `false` on it, as on `real`.
 
 ### Errors

@@ -66,6 +66,22 @@ bridge = NaoqiBridge.from_dict(
 
 The live tests run on a headless sim by default: `uv run pytest tests-e2e` (`NAOQI_E2E_SIM_VERSION=2.8` for 2.8, `NAOQI_E2E_SIM_VIEWER=1` to watch it in the sim window; `NAOQI_E2E_TARGET=real NAOQI_E2E_IP=…` for a robot). See [specs/testing.md](specs/testing.md).
 
+## Watching the robot: the viewer
+
+The bridge can open a [naoqi-viewer](https://github.com/funwithagents/naoqi-viewer) window that mirrors the robot it drives: the NAO model, posed live from the robot's joints, with the commanded pose as a ghost if you ask for it ([specs/viewer.md](specs/viewer.md)). It only reads; it never moves the robot. It needs the `[viewer]` extra (`[sim]` brings it too; `uv sync --dev` installs both) and a display:
+
+```python
+bridge = NaoqiBridge.from_dict(
+    {
+        "backend": "real",
+        "robot": {"ip": "192.168.1.42"},
+        "viewer": {"enabled": True, "config": {"ghost": True}},
+    }
+)
+```
+
+The window opens when the bridge starts and closes when it stops. `viewer.config` is a naoqi-viewer config (scene, model variant, ghost, polling rate), minus the mode and the robot's address, which the bridge sets. On `fake` there is no Naoqi to mirror, and a sim the bridge started already shows its own window: in both cases the viewer is skipped with a warning. Aldebaran's meshes, instead of the placeholder model: `uv run naoqi-viewer fetch-meshes` once, after its license prompt.
+
 ## NaoqiBridge
 
 The high-level async API to drive Nao.
@@ -111,6 +127,7 @@ The bridge is built from a `NaoqiBridgeConfig`, in code or from JSON (`NaoqiBrid
 - **`robot`**: the robot's address, and how long to wait for it: one connection attempt of at most `connect_timeout_s`, so a wrong address fails within 5 s by default. Validated but ignored on `fake`, so switching backend is a one-word change
 - **`streams`**: which robot streams the bridge subscribes to; `channel` picks the microphone (`front`, `rear`, `left`, `right`)
 - **`sim`**: on `sim`, whether to start the sim or use the running one (`spawn`) and the naoqi-sim config (`config`). Validated but ignored on the other backends
+- **`viewer`**: a window mirroring the robot (`enabled`) and its naoqi-viewer config (`config`), see [above](#watching-the-robot-the-viewer)
 
 A malformed config raises `ConfigError` naming the key (e.g. `streams.joints.period_s must be a positive, finite number`). Full reference: [specs/config.md](specs/config.md).
 

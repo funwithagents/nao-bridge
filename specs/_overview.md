@@ -59,10 +59,11 @@ This overview is the map of the project: what it is for, how the parts fit, the 
 | Observable | `observable.py` | `Observable[T]`: readable and subscribable latest-wins state (`bridge.joints`) | [observable.md](observable.md) |
 | Mic feed | `microphone.py` | `MicFeed`: one subscription to Naoqi's pushed audio, a 200-chunk ring, any number of `audio_input()` subscribers | [microphone.md](microphone.md) |
 | MCP server | `naoqi_mcp_server.py` | `NaoqiMcpServer`: verbs as MCP tools returning status strings; behaviors return once started; stdout reserved for JSON-RPC | [naoqi-mcp-server.md](naoqi-mcp-server.md) |
+| Viewer | `viewer.py` | A naoqi-viewer mirror window on the robot the bridge drives, opened with the session; the one module that launches naoqi-viewer | [viewer.md](viewer.md) |
 | WebSocket server | `naoqi_websocket_server.py` | `NaoqiWebsocketServer` (bridge + listener, one client at a time) and `ClientSession` (the JSON protocol: commands in, touch / joints / audio / log events out) | [naoqi-websocket-server.md](naoqi-websocket-server.md) |
 | Front door | `__init__.py` | Re-exports what a caller needs: `NaoqiBridge`, the config classes, the stream values, `Event` / `Observable`, the errors | [bridge.md](bridge.md) |
 
-Dependencies point one way: servers → bridge → seam → backends. `events.py` and `observable.py` import nothing from the project; `config.py` imports neither `qi`, `mcp` nor `websockets`; only `real_robot.py` touches `qi`, and only when it connects; only `sim.py` starts naoqi-sim, and `config.py` reads its config class, both lazily.
+Dependencies point one way: servers → bridge → seam → backends. `events.py` and `observable.py` import nothing from the project; `config.py` imports neither `qi`, `mcp` nor `websockets`; only `real_robot.py` touches `qi`, and only when it connects; only `sim.py` starts naoqi-sim and only `viewer.py` launches naoqi-viewer, and `config.py` reads their config classes, all lazily.
 
 ## Status
 
@@ -76,6 +77,7 @@ Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index
 | `Event`, `Observable`, mic feed | Built and tested ([events.md](events.md), [observable.md](observable.md), [microphone.md](microphone.md)) |
 | MCP server | Built and tested ([naoqi-mcp-server.md](naoqi-mcp-server.md)) |
 | WebSocket server, protocol version 1 | Built and tested ([naoqi-websocket-server.md](naoqi-websocket-server.md)) |
+| Viewer (naoqi-viewer mirror window, `[viewer]` extra) | Built and tested; the live check (`NAOQI_E2E_VIEWER=1`) passes locally on a 2.1 sim, as `real` and as a borrowed `sim`; not in CI, which has no display ([viewer.md](viewer.md)) |
 | Project tooling, two test tiers, CI | In place ([project.md](project.md), [testing.md](testing.md), [ci.md](ci.md)) |
 | Live tier | Verbs, streams, cancellation and both servers, in three opt-in levels (safe, motion, interactive); passes on 2.1 and 2.8 sims, locally and in CI (`e2e-sim`); not yet run on a robot ([analysis](../analysis/202610091738_not-yet-tested-on-a-robot.md)) |
 | `sim` backend, live tier on a sim, `e2e-sim` CI job | Built and tested; the live tier passes on 2.1 and 2.8 sims, locally and in CI ([sim.md](sim.md), [ci.md](ci.md)) |
@@ -99,7 +101,7 @@ Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index
 
 ## Configuration
 
-One JSON shape, `NaoqiBridgeConfig`: `backend` (`fake` by default, `real` or `sim`), `robot` (`ip`, `port`, `connect_timeout_s`), `streams` (`touch`, `joints`, `audio`, all off by default) and `sim` (`spawn`: `auto` by default, `never` or `always`; `config`: a naoqi-sim config as it is). Unknown keys, bad types and a `real` backend without an IP fail at load with a `ConfigError` naming the key path. Each server wraps it as `{"bridge": …, "server": …}`, and its CLI takes `--config FILE` only (exit 2 on a bad config, 1 on an unreachable robot or an unavailable sim). Ready-made files live in `examples/configs/`. Details: [config.md](config.md).
+One JSON shape, `NaoqiBridgeConfig`: `backend` (`fake` by default, `real` or `sim`), `robot` (`ip`, `port`, `connect_timeout_s`), `streams` (`touch`, `joints`, `audio`, all off by default) and `sim` (`spawn`: `auto` by default, `never` or `always`; `config`: a naoqi-sim config as it is) and `viewer` (`enabled`; `config`: a naoqi-viewer config, minus what the bridge sets). Unknown keys, bad types and a `real` backend without an IP fail at load with a `ConfigError` naming the key path. Each server wraps it as `{"bridge": …, "server": …}`, and its CLI takes `--config FILE` only (exit 2 on a bad config, 1 on an unreachable robot or an unavailable sim). Ready-made files live in `examples/configs/`. Details: [config.md](config.md).
 
 ## Packaging and platforms
 
@@ -129,6 +131,7 @@ Collected from the concept specs, which own them.
 - **Newer robots** ([robot.md](robot.md)): only Naoqi 2.1.4.13 / Nao v5 is verified. Nao v6 (Naoqi 2.8) or Pepper may need different service calls inside `RealNaoqiRobot`; the Protocol shouldn't change.
 - **Cancellation** ([bridge.md](bridge.md)): whether the newest `say` should interrupt the one in flight; checking live that `stopAll` also stops animated speech's gestures.
 - **Microphone** ([microphone.md](microphone.md)): Naoqi's real chunk size at 16 kHz mono is unmeasured (the fake's 1360 samples is a placeholder); 48 kHz four-channel capture and a gap signal in the stream are deferred.
+- **The viewer** ([viewer.md](viewer.md)): mirroring the fake (needs a naoqi-viewer pose source fed by the bridge), reopening a closed window, a second window on a borrowed sim that shows its own.
 - **Config blocks** ([config.md](config.md)): motion, session state (what the robot does at start and stop) and catalog rules are candidate blocks, added when needed.
 - **WebSocket protocol** ([naoqi-websocket-server.md](naoqi-websocket-server.md)): no machine-readable schema, no authentication.
 - **Publishing on PyPI** ([project.md](project.md)): naoqi-bridge installs from its repository; a published wheel would resolve `qi` through the libqi index. Undecided.
