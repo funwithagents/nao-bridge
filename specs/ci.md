@@ -7,11 +7,11 @@ tests:
 
 # Continuous integration
 
-**Status:** Implemented
+**Status:** Updated
 
 ## Purpose
 
-The verification gate of [AGENTS.md](../AGENTS.md) — lint, type check, tests — runs on GitHub's hosted runners for every pull request and every push to `main`, so it is a machine's verdict on each change and not only a local command. CI runs what needs no hardware and no credentials ([testing.md](testing.md)): the static checks, the fast tier, and the live tier against a simulated Nao the runner builds itself ([sim.md](sim.md)). Like [testing.md](testing.md) this is a cross-cutting practice, not a runtime concept: nothing here ships in the library, and the one file that implements it is the workflow.
+The verification gate of [AGENTS.md](../AGENTS.md) — lint, type check, tests — runs on GitHub's hosted runners for every pull request and every push to `main`, so it is a machine's verdict on each change and not only a local command. CI runs what needs no hardware ([testing.md](testing.md)): the static checks, the fast tier, and the live tier against a simulated Nao the runner builds itself ([sim.md](sim.md)). Like [testing.md](testing.md) this is a cross-cutting practice, not a runtime concept: nothing here ships in the library, and the one file that implements it is the workflow.
 
 ## Decided
 
@@ -52,20 +52,26 @@ One entry per NAOqi version, each on its own runner, since one sim runs per mach
 5. **Restore** (`actions/cache/restore`): one archive per version, the `docker save` of the version's NAOqi image and the `tts` image, with `images.json`, naoqi-sim's record of the verified image IDs. On a hit, `docker load`, then the archive is deleted to free its space; the IDs survive the save and load, so naoqi-sim accepts the images as verified.
 6. **On a miss**: `uv run naoqi-sim fetch-and-build-images <version>`, which downloads Aldebaran's public suite, builds the images and checks they boot, as on a user's machine; then `docker save` and **save** (`actions/cache/save`) right away, before the tests, so a failing live tier doesn't rebuild next run. The image data (the downloads) are deleted, never cached.
 7. **System packages**: `libegl1` and `libgl1-mesa-dri`, Mesa's display-less GL, which the headless viewer renders the sim's camera through.
-8. **The live tier**: `uv run pytest tests-e2e -rs` with `NAOQI_E2E_TARGET=sim` (a sim that can't run fails, never skips) and `NAOQI_E2E_SIM_VERSION` set to the entry's version, warnings and errors logged live (`-o log_cli=true --log-cli-level=WARNING`).
+8. **The live tier**: `uv run pytest tests-e2e -rs` with `NAOQI_E2E_TARGET=sim` (a sim that can't run fails, never skips), `NAOQI_E2E_SIM_VERSION` set to the entry's version, the `sim` profile applying by default (below), warnings and errors logged live (`-o log_cli=true --log-cli-level=WARNING`).
 9. **On failure**: the end of the sim's container logs (`docker logs` on the `naoqi-sim-*` containers still there).
 
 **Licensing.** The images contain Aldebaran's software, downloaded from its public repositories as a user does. They go to this repository's Actions cache only: nothing is pushed to a registry, attached to a release or uploaded as an artifact.
 
-### Expected skips
+### Required capabilities and expected skips
 
-The tests that skip by design in `e2e-sim`, the same six on both entries; any other skip there is a fault. Measured on local runs of both versions (21 passed, 6 skipped each).
+Each `e2e-sim` entry runs on the `sim` target, so the harness holds it to the `sim` profile (`sim`, `audio_in`, `audio_inject`, `camera`, `room_to_move`: [testing_support.md](testing_support.md) "Profiles") with no variable to set. A sim that comes up without one of them, an audio input or a render camera that didn't start, fails the run, every test erroring at setup with the missing name, instead of turning green with the tests that needed it skipped. CI declares nothing; `room_to_move` comes with the `sim` target.
 
-| Test | Why |
-|---|---|
-| `test_live_cancellation.py::test_a_cancelled_dance_stops_on_the_robot` (both cases), `test_live_motion.py::test_stop_dance_ends_a_dance_and_its_verb_returns` | No dance: the sim has the `animations` package only ([sim.md](sim.md)) |
-| `test_live_cancellation.py::test_a_cancelled_body_action_stops_on_the_robot`, `test_live_motion.py::test_a_body_action_and_a_reaction_run_to_their_end` | No body action, for the same reason |
-| `test_live_streams.py::test_a_head_touch_reaches_on_touch` | The interactive level is skipped on a sim: naoqi-sim has no touch input yet |
+What a sim lacks then skips by design, named by the skip reason (`-rs`), and is the same on both entries:
+
+| Missing | Skipped | Why |
+|---|---|---|
+| `dances` | `stop_dance`, cancelling a dance (both cases) | The sim has the `animations` package only ([sim.md](sim.md)) |
+| `body_actions` | A body action and a reaction run to their end, cancelling a body action | Same reason |
+| `apps` | The app tests | Same reason |
+| `touch_sensors`, `person_present` | A head touch reaches `on_touch` | naoqi-sim has no touch input yet, and nobody stands at a runner |
+| `display` | The viewer test | The runners have no display (`NAOQI_E2E_VIEWER` unset) |
+
+A capability the sim gains (naoqi-sim's touch input, a test package with a dance) needs no workflow change: the tests that need it start running, and the harness's `live target` summary shows it. Add it to the `sim` profile once it should never go missing.
 
 ### What CI does not run
 
@@ -88,12 +94,12 @@ On PR #6 (Oct 13, 2026), the first runs:
 | `e2e-sim` 2.1 | 10 min (tests 3 min 30 s) | 5 min 30 s (tests 3 min 25 s) |
 | `e2e-sim` 2.8 | 15 min | 7 min 25 s (tests 3 min 50 s) |
 
-- Both entries: 21 passed and the six expected skips. Cancel latencies: `say` 40 ms on 2.1 and 370 ms on 2.8, `stand_up` 2.4 s on both, the audio chunk 1365 samples at 16 kHz.
+- Both entries: 21 passed and the six expected skips (before the capabilities: the dance, body action and touch tests above). Cancel latencies: `say` 40 ms on 2.1 and 370 ms on 2.8, `stand_up` 2.4 s on both, the audio chunk 1365 samples at 16 kHz.
 - One cold build failed on both entries, before any test: naoqi-sim's `tts` image got an empty Piper voice file from Hugging Face (its download has no `--fail`), and the engine did not start. The next cold build passed. If it recurs, it is naoqi-sim's to make the download fail loudly and retry.
 
 ## Relationship to the other specs
 
-- **[testing.md](testing.md):** the two tiers and the no-credentials fast tier CI runs. CI is the hosted run of that strategy, with no rule of its own about what a test does.
+- **[testing.md](testing.md):** the two tiers and the hardware-free fast tier CI runs. CI is the hosted run of that strategy, with no rule of its own about what a test does.
 - **[project.md](project.md):** the `qi` platform dependency each runner installs, the tooling the `check` job runs, `.github/workflows/` in the repo shape.
 - **[sim.md](sim.md):** the `sim` backend and the naoqi-sim images `e2e-sim` builds and caches.
 - **[AGENTS.md](../AGENTS.md):** the verification gate CI automates.

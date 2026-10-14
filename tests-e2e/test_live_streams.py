@@ -1,8 +1,7 @@
-"""Live: the robot's streams. Joints and audio at the safe level, touch at the
-interactive level (someone at the robot touches its head when asked).
-
-On the target (a sim by default, or the robot at NAOQI_E2E_IP); needs `qi`. The touch
-test needs a robot, NAOQI_E2E_INTERACTIVE=1, and `-s` to see its prompt.
+"""Live: the robot's streams, on the target. Joints on any target, audio where Naoqi
+pushes it (`audio_in`), a tone played into the sim's microphone (`audio_inject`), and
+a head touch where a person can press the sensors (`touch_sensors`, `person_present`:
+NAOQI_E2E_INTERACTIVE=1, with `-s` to see the prompt).
 """
 
 from __future__ import annotations
@@ -10,14 +9,10 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from support import MEASUREMENTS, live_config, live_session, require_interactive
-
-if TYPE_CHECKING:
-    from naoqi_sim import NaoqiSim
+from support import MEASUREMENTS
 
 from naoqi_bridge import (
     AudioStream,
@@ -27,8 +22,7 @@ from naoqi_bridge import (
     TouchEvent,
     TouchStream,
 )
-
-pytest.importorskip("qi")
+from naoqi_bridge.testing import LiveTarget, live_config, live_session
 
 
 def test_joints_are_sampled_from_the_robot():
@@ -54,6 +48,7 @@ def test_joints_are_sampled_from_the_robot():
     assert later.names == first.names
 
 
+@pytest.mark.requires("audio_in")
 def test_audio_arrives_at_16_khz_mono():
     config = live_config(
         StreamSettings(audio=AudioStream(enabled=True, channel="front"))
@@ -84,14 +79,14 @@ def test_audio_arrives_at_16_khz_mono():
     assert 12000 < rate < 20000  # about 16 kHz, give or take a chunk at the edges
 
 
+@pytest.mark.requires("audio_inject")
 def test_a_sound_played_into_the_sims_microphone_reaches_audio_input(
-    live_sim: NaoqiSim | None,
+    live_target: LiveTarget,
 ):
     # Drives the sim itself: a 440 Hz tone into naoqi-sim's fake microphone must come
-    # out of the bridge's audio stream (specs/testing.md "Live tier: the target").
-    if live_sim is None:
-        pytest.skip("plays into naoqi-sim's microphone: the sim target only")
-    sim = live_sim
+    # out of the bridge's audio stream (specs/testing.md "Live tier: the harness").
+    sim = live_target.sim
+    assert sim is not None  # audio_inject: the session owns the sim
     rate = 16000
     tone = (8000 * np.sin(2 * np.pi * 440 * np.arange(rate) / rate)).astype(np.int16)
     config = live_config(
@@ -119,8 +114,8 @@ def test_a_sound_played_into_the_sims_microphone_reaches_audio_input(
     assert abs(peak - 440) < 20
 
 
+@pytest.mark.requires("touch_sensors", "person_present")
 def test_a_head_touch_reaches_on_touch(capsys: pytest.CaptureFixture[str]):
-    require_interactive()
     config = live_config(StreamSettings(touch=TouchStream(enabled=True)))
 
     async def run() -> TouchEvent:

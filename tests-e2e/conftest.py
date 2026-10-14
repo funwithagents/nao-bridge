@@ -4,37 +4,27 @@
 # run it explicitly with `uv run pytest tests-e2e`. Mirror any isolation fixture the
 # fast tier uses here — tests-e2e/ isn't a package that can import from tests/, so the
 # few lines are duplicated rather than shared.
+#
+# The tier runs on the bridge's shipped harness, `naoqi_bridge.testing`
+# (specs/testing_support.md): its plugin owns the session's target, probes its
+# capabilities, and gates each test on its `@pytest.mark.requires(...)`. A consumer
+# names the plugin in its rootdir conftest's `pytest_plugins`; this conftest isn't the
+# rootdir's, so it registers the plugin itself.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import TYPE_CHECKING
-
 import pytest
-from support import MEASUREMENTS, check_target_settings, session_sim
-
-if TYPE_CHECKING:
-    from naoqi_sim import NaoqiSim
+from support import MEASUREMENTS
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """An unknown NAOQI_E2E_TARGET or NAOQI_E2E_SIM_VERSION fails the run at once."""
-    check_target_settings()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def live_sim() -> Iterator[NaoqiSim | None]:
-    """The session's naoqi-sim, started at session start and stopped at session end
-    (specs/testing.md "Live tier: the target"). A test that drives the sim itself
-    (plays into its microphone) takes it; `None` on the `real` target."""
-    with session_sim() as sim:
-        yield sim
+    config.pluginmanager.import_plugin("naoqi_bridge.testing.plugin")
 
 
 def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
     """Print what the tests measured on the robot: cancel latencies, to tune the
     bridge's stop retry on real numbers, and the audio chunk size
-    (specs/testing.md "Live tier: levels of risk")."""
+    (specs/testing.md "Live tier: capabilities")."""
     if not MEASUREMENTS:
         return
     terminalreporter.section("measured live")

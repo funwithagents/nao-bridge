@@ -1,7 +1,7 @@
 """The bridge's viewer on the target (specs/viewer.md): its window opens with the
 session, mirrors the robot, and closes with it.
 
-Opt-in with `NAOQI_E2E_VIEWER=1`: a window needs a display, so it never runs in CI.
+Needs `display` (NAOQI_E2E_VIEWER=1): a window needs a display, so it never runs in CI.
 On the sim target the bridge borrows the session's sim, so it opens its own mirror.
 """
 
@@ -9,16 +9,16 @@ import asyncio
 import dataclasses
 
 import pytest
-from support import live_config, require_flag, wait_until
+from support import wait_until
 
 from naoqi_bridge import NaoqiBridge, ViewerSettings
+from naoqi_bridge.testing import live_config
 
-pytest.importorskip("qi")
 pytest.importorskip("naoqi_viewer")
 
 
+@pytest.mark.requires("display")
 def test_the_viewer_opens_with_the_bridge_and_closes_with_it():
-    require_flag("NAOQI_E2E_VIEWER")
     config = dataclasses.replace(live_config(), viewer=ViewerSettings(enabled=True))
 
     async def run() -> None:

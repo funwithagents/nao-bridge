@@ -4,8 +4,9 @@ A cancelled verb must come back quickly with the robot stopped, the bridge's tra
 empty, no stop warning logged, and the session ready for the next verb. Each cancel's
 latency is printed in the run's summary.
 
-Safe level: a cancelled `say`. Motion level (NAOQI_E2E_ALLOW_MOTION=1 on a robot, always
-on a sim): dances, body actions, postures and reactions. The cancelled `start()` needs `qi` only.
+On any target: a cancelled `say`, and a cancelled `start()` (which needs `qi` only).
+With `room_to_move` (always on a sim; NAOQI_E2E_ALLOW_MOTION=1 on a robot): postures and
+reactions, and the dances, body actions and apps the robot's catalog holds.
 """
 
 import asyncio
@@ -17,21 +18,20 @@ import pytest
 from support import (
     CANCEL_BOUND_S,
     MEASUREMENTS,
+    app_behavior,
     behavior_running,
     body_action_behavior,
     dance_behavior,
+    first_app,
     first_body_action,
     first_dance,
-    live_config,
-    live_session,
     measure_cancel,
     stop_warnings,
     wait_until,
 )
 
 from naoqi_bridge import NaoqiBridge, NaoqiBridgeConfig, RobotSettings
-
-pytest.importorskip("qi")
+from naoqi_bridge.testing import live_config, live_session
 
 LONG_SENTENCE = (
     "I am going to talk for quite a while now, so that the test has all the time "
@@ -44,7 +44,7 @@ def bridge_warnings(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING, logger="naoqi_bridge.bridge")
 
 
-# --- Safe ---------------------------------------------------------------------
+# --- Any target ---------------------------------------------------------------
 
 
 def test_a_cancelled_say_stops_the_speech(caplog: pytest.LogCaptureFixture):
@@ -112,13 +112,14 @@ async def cancel_behavior_verb(
     return elapsed
 
 
+@pytest.mark.requires("room_to_move", "dances")
 @pytest.mark.parametrize("after_s", [2.0, 0.0], ids=["mid-dance", "at-once"])
 def test_a_cancelled_dance_stops_on_the_robot(
     after_s: float, caplog: pytest.LogCaptureFixture
 ):
     async def run() -> float:
         async with live_session(live_config(), motion=True) as bridge:
-            dance_id = first_dance(bridge)  # skips before the robot moves
+            dance_id = first_dance(bridge)
             await bridge.stand_up()
             behavior = dance_behavior(bridge, dance_id)
             dancing = asyncio.create_task(bridge.dance(dance_id))
@@ -137,10 +138,11 @@ def test_a_cancelled_dance_stops_on_the_robot(
     assert stop_warnings(caplog) == []
 
 
+@pytest.mark.requires("room_to_move", "body_actions")
 def test_a_cancelled_body_action_stops_on_the_robot(caplog: pytest.LogCaptureFixture):
     async def run() -> float:
         async with live_session(live_config(), motion=True) as bridge:
-            action_id = first_body_action(bridge)  # skips before the robot moves
+            action_id = first_body_action(bridge)
             await bridge.stand_up()
             moving = asyncio.create_task(bridge.body_action(action_id))
             return await cancel_behavior_verb(
@@ -156,6 +158,26 @@ def test_a_cancelled_body_action_stops_on_the_robot(caplog: pytest.LogCaptureFix
     assert stop_warnings(caplog) == []
 
 
+@pytest.mark.requires("room_to_move", "apps")
+def test_a_cancelled_app_stops_on_the_robot(caplog: pytest.LogCaptureFixture):
+    async def run() -> float:
+        async with live_session(live_config(), motion=True) as bridge:
+            app_id = first_app(bridge)
+            running = asyncio.create_task(bridge.run_app(app_id))
+            return await cancel_behavior_verb(
+                bridge,
+                "app",
+                running,
+                app_behavior(bridge, app_id),
+                lambda: bridge.current_apps,
+                1.0,
+            )
+
+    assert asyncio.run(run()) < CANCEL_BOUND_S
+    assert stop_warnings(caplog) == []
+
+
+@pytest.mark.requires("room_to_move")
 def test_a_timeout_around_a_reaction_stops_it(caplog: pytest.LogCaptureFixture):
     async def run() -> tuple[float, bool]:
         async with live_session(live_config(), motion=True) as bridge:
@@ -184,6 +206,7 @@ def test_a_timeout_around_a_reaction_stops_it(caplog: pytest.LogCaptureFixture):
     assert stop_warnings(caplog) == []
 
 
+@pytest.mark.requires("room_to_move")
 def test_a_cancelled_stand_up_stops_the_move(caplog: pytest.LogCaptureFixture):
     async def run() -> tuple[float, float]:
         async with live_session(live_config(), motion=True) as bridge:

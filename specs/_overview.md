@@ -67,7 +67,7 @@ Dependencies point one way: servers → bridge → seam → backends. `events.py
 
 ## Status
 
-Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index.md) is `Done`.
+Every plan in [plans/_index.md](../plans/_index.md) is `Done`. The live tier is being redesigned around capabilities: [testing_support.md](testing_support.md) is `Stable`, and [testing.md](testing.md), [ci.md](ci.md) and [project.md](project.md) are `Updated` until it's built.
 
 | Concept | State |
 | --- | --- |
@@ -79,7 +79,7 @@ Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index
 | WebSocket server, protocol version 1 | Built and tested ([naoqi-websocket-server.md](naoqi-websocket-server.md)) |
 | Viewer (naoqi-viewer mirror window, `[viewer]` extra) | Built and tested; the live check (`NAOQI_E2E_VIEWER=1`) passes locally on a 2.1 sim, as `real` and as a borrowed `sim`; not in CI, which has no display ([viewer.md](viewer.md)) |
 | Project tooling, two test tiers, CI | In place ([project.md](project.md), [testing.md](testing.md), [ci.md](ci.md)) |
-| Live tier | Verbs, streams, cancellation and both servers, in three opt-in levels (safe, motion, interactive); passes on 2.1 and 2.8 sims, locally and in CI (`e2e-sim`); not yet run on a robot ([analysis](../analysis/202610091738_not-yet-tested-on-a-robot.md)) |
+| Live tier | Verbs, streams, cancellation and both servers, in three opt-in levels (safe, motion, interactive), to be regated on capabilities ([testing_support.md](testing_support.md), Stable); passes on 2.1 and 2.8 sims, locally and in CI (`e2e-sim`); not yet run on a robot ([analysis](../analysis/202610091738_not-yet-tested-on-a-robot.md)) |
 | `sim` backend, live tier on a sim, `e2e-sim` CI job | Built and tested; the live tier passes on 2.1 and 2.8 sims, locally and in CI ([sim.md](sim.md), [ci.md](ci.md)) |
 
 ## How a call flows
@@ -118,7 +118,7 @@ One JSON shape, `NaoqiBridgeConfig`: `backend` (`fake` by default, `real` or `si
 
 ## Testing and CI
 
-- Two tiers, split by directory ([testing.md](testing.md)): `tests/`, fast and deterministic, runs the bridge and both servers on `FakeNaoqiRobot`, and `RealNaoqiRobot` / `SimNaoqiRobot` against a stub `qi`; `tests-e2e/`, opt-in, runs against a headless naoqi-sim by default (one per session, owned by the `live_sim` fixture, which gives tests the `NaoqiSim`; `NAOQI_E2E_SIM_VERSION`, `NAOQI_E2E_SIM_VIEWER=1` for the window; skips without Docker or the images unless `NAOQI_E2E_TARGET=sim` is set) or a real Nao (`NAOQI_E2E_TARGET=real`, `NAOQI_E2E_IP`). It has three levels of risk: safe, motion (`NAOQI_E2E_ALLOW_MOTION=1`, always on a sim) and interactive (`NAOQI_E2E_INTERACTIVE=1`, skipped on a sim). It prints what it measured, such as cancel latencies and the audio chunk size.
+- Two tiers, split by directory ([testing.md](testing.md)): `tests/`, fast and deterministic, runs the bridge and both servers on `FakeNaoqiRobot`, and `RealNaoqiRobot` / `SimNaoqiRobot` against a stub `qi`; `tests-e2e/`, opt-in, runs against a headless naoqi-sim by default (one per session, owned by the harness's `live_target` fixture, which gives tests the `NaoqiSim`; `NAOQI_E2E_SIM_VERSION`, `NAOQI_E2E_SIM_VIEWER=1` for the window; skips without Docker or the images unless `NAOQI_E2E_TARGET=sim` is set) or a real Nao (`NAOQI_E2E_TARGET=real`, `NAOQI_E2E_IP`). Its tests gate on **capabilities**, never on the target: probed from the target (`dances`, `audio_inject`, `touch_sensors`, …) or declared by the person running the tests (`room_to_move` from `NAOQI_E2E_ALLOW_MOTION`, always held on a sim; `person_present` from `NAOQI_E2E_INTERACTIVE`; `display` from `NAOQI_E2E_VIEWER`), through `@pytest.mark.requires(...)`. A profile names what a kind of target must offer (`sim`, the default on a sim; `nao`), and a capability it names that's missing fails the run. The harness ships as `naoqi_bridge.testing` ([testing_support.md](testing_support.md)). It prints what it measured, such as cancel latencies and the audio chunk size.
 - The fast tier makes fake behaviors instant through an autouse fixture; a test that needs a running behavior sets its duration on the fake.
 - CI ([ci.md](ci.md)) runs `check` (ruff lint and format, pyright) on `ubuntu-24.04` and `fast-tier` on `ubuntu-24.04`, `macos-15` and `windows-2025`, for every pull request and push to `main`. Each runner installs its real `qi` wheel, so the `qi`-gated tests run on all three. `e2e-sim` runs the live tier on a headless sim, once per NAOqi version (2.1, 2.8), with the sim images built and cached by the runner.
 - `tests/test_project_map.py` keeps [AGENTS.md](../AGENTS.md)'s project map and the specs' frontmatter honest.
@@ -135,5 +135,6 @@ Collected from the concept specs, which own them.
 - **Config blocks** ([config.md](config.md)): motion, session state (what the robot does at start and stop) and catalog rules are candidate blocks, added when needed.
 - **WebSocket protocol** ([naoqi-websocket-server.md](naoqi-websocket-server.md)): no machine-readable schema, no authentication.
 - **Publishing on PyPI** ([project.md](project.md)): naoqi-bridge installs from its repository; a published wheel would resolve `qi` through the libqi index. Undecided.
+- **Live-tier capabilities** ([testing_support.md](testing_support.md)): `touch_inject`, `inertial` and the robot model join the vocabulary with the first test that needs them (`inertial` could also replace the 2.8 sim's Sit-through-Crouch rule); consumer-defined profiles and a `fake` target for consumers' smoke runs are deferred.
 - **CI coverage** ([ci.md](ci.md)): a Python 3.13 entry, deferred until a regression shows the need.
 - **Not yet designed:** camera images, perception (faces, people), speech recognition, and how they'd reach agents. None has a spec.

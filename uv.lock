@@ -345,13 +345,16 @@ dependencies = [
 sim = [
     { name = "naoqi-sim", extra = ["viewer"], marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32') or (platform_machine != 'x86_64' and sys_platform != 'linux' and sys_platform != 'win32')" },
 ]
+test = [
+    { name = "pytest" },
+]
 viewer = [
     { name = "naoqi-viewer", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32') or (platform_machine != 'x86_64' and sys_platform != 'linux' and sys_platform != 'win32')" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "naoqi-bridge", extra = ["sim", "viewer"] },
+    { name = "naoqi-bridge", extra = ["sim", "test", "viewer"] },
     { name = "pyright" },
     { name = "pytest" },
     { name = "ruff" },
@@ -362,14 +365,15 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.9,<2" },
     { name = "naoqi-sim", extras = ["viewer"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'sim') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'sim') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'sim')", git = "https://github.com/funwithagents/naoqi-sim?rev=e0750eab5820f5256bf95ca41b4725578fe0319e" },
     { name = "naoqi-viewer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'viewer') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'viewer') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'viewer')", git = "https://github.com/funwithagents/naoqi-viewer?rev=9964bc00df11194757251fe22c256cce3f740fe4" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=9.1.1" },
     { name = "qi", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')", specifier = ">=3.1.8,<4", index = "https://funwithagents.github.io/libqi-python/simple/" },
     { name = "websockets", specifier = ">=17.2" },
 ]
-provides-extras = ["sim", "viewer"]
+provides-extras = ["sim", "test", "viewer"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "naoqi-bridge", extras = ["sim", "viewer"] },
+    { name = "naoqi-bridge", extras = ["sim", "test", "viewer"] },
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.16.10" },
