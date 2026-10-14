@@ -67,7 +67,7 @@ Dependencies point one way: servers → bridge → seam → backends. `events.py
 
 ## Status
 
-Every plan in [plans/_index.md](../plans/_index.md) is `Done`. The live tier is being redesigned around capabilities: [testing_support.md](testing_support.md) is `Stable`, and [testing.md](testing.md), [ci.md](ci.md) and [project.md](project.md) are `Updated` until it's built.
+Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index.md) is `Done`.
 
 | Concept | State |
 | --- | --- |
@@ -79,7 +79,7 @@ Every plan in [plans/_index.md](../plans/_index.md) is `Done`. The live tier is 
 | WebSocket server, protocol version 1 | Built and tested ([naoqi-websocket-server.md](naoqi-websocket-server.md)) |
 | Viewer (naoqi-viewer mirror window, `[viewer]` extra) | Built and tested; the live check (`NAOQI_E2E_VIEWER=1`) passes locally on a 2.1 sim, as `real` and as a borrowed `sim`; not in CI, which has no display ([viewer.md](viewer.md)) |
 | Project tooling, two test tiers, CI | In place ([project.md](project.md), [testing.md](testing.md), [ci.md](ci.md)) |
-| Live tier | Verbs, streams, cancellation and both servers, in three opt-in levels (safe, motion, interactive), to be regated on capabilities ([testing_support.md](testing_support.md), Stable); passes on 2.1 and 2.8 sims, locally and in CI (`e2e-sim`); not yet run on a robot ([analysis](../analysis/202610091738_not-yet-tested-on-a-robot.md)) |
+| Live tier | Verbs, streams, cancellation and both servers, each test gated on the capabilities it needs ([testing_support.md](testing_support.md)); passes on 2.1 and 2.8 sims, in CI (and locally before the capabilities) (`e2e-sim`); not yet run on a robot ([analysis](../analysis/202610091738_not-yet-tested-on-a-robot.md)) |
 | `sim` backend, live tier on a sim, `e2e-sim` CI job | Built and tested; the live tier passes on 2.1 and 2.8 sims, locally and in CI ([sim.md](sim.md), [ci.md](ci.md)) |
 
 ## How a call flows

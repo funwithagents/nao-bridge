@@ -11,7 +11,7 @@ tests:
 
 # Testing support (shipped live-tier harness)
 
-**Status:** Stable
+**Status:** Implemented
 
 ## Purpose
 

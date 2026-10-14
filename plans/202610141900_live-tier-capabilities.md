@@ -1,6 +1,6 @@
 # Live tier on capabilities
 
-**Status:** In progress
+**Status:** Done
 
 Implements [testing_support.md](../specs/testing_support.md) and the updated live-tier sections of [testing.md](../specs/testing.md), [ci.md](../specs/ci.md) and [project.md](../specs/project.md). It delivers the shipped harness `naoqi_bridge.testing`:
 - capabilities, probed or declared;
@@ -67,3 +67,14 @@ It moves the bridge's own live tier onto that harness, with live tests for the a
   - Only the dance, body action, app, touch and viewer tests skip, each naming its capability.
 - `NAOQI_E2E_PROFILE=nao` on a sim fails the run, naming the missing capabilities (`touch_sensors`, `body_actions`).
 - Then mark this plan `Done`, and move [testing_support.md](../specs/testing_support.md), [testing.md](../specs/testing.md), [ci.md](../specs/ci.md) and [project.md](../specs/project.md) to `Implemented`.
+
+## Outcome
+
+- Fast tier: 259 passed, 28 of them `tests/test_testing.py`; lint, format and pyright clean; CI's fast tier green on Linux, macOS and Windows.
+- Live tier, verified on CI's `e2e-sim` (PR #8). A local run was blocked: the machine's one sim slot was busy with naoqi-sim's own live run.
+  - Both 2.1 and 2.8: 22 passed, 9 skipped.
+  - The probe read `audio_in, audio_inject, camera, sim` and the NAOqi version (`2.1.4.13`, `2.8.7.4`), so the `sim` profile was met.
+  - The skips are the dance (3), body action (2), app (2), touch and viewer tests, each naming its missing capability.
+- Locally checked: an unnamed target with outdated images skips every test with naoqi-sim's message, and `NAOQI_E2E_TARGET=sim` with a sim already running fails every test at setup naming it.
+- Not checked: `NAOQI_E2E_PROFILE=nao` on a sim, run live. The expected check is covered by the fast tier.
+
