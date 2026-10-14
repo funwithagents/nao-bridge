@@ -15,7 +15,7 @@ tests:
 
 # The `sim` backend
 
-**Status:** Updated
+**Status:** Implemented
 
 ## Purpose
 

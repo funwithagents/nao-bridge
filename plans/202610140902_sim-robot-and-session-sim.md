@@ -1,6 +1,6 @@
 # The sim robot and the session's sim
 
-**Status:** In progress
+**Status:** Done
 
 Implements the changes to [robot.md](../specs/robot.md), [sim.md](../specs/sim.md) and [testing.md](../specs/testing.md) that give the `sim` backend a robot class of its own and the live tier one sim per session that tests can drive. It delivers three things:
 
@@ -37,3 +37,7 @@ The bridge's default stays `spawn: "auto"`; only the live tier uses `always`. No
 - Both `e2e-sim` entries green on PR #6, the tone test passing on both.
 
 Mark this plan `Done` here and in [_index.md](_index.md), and the three specs `Implemented`, once all pass.
+
+## Outcome (Oct 14, 2026)
+
+Done as written. Verified on PR #6's CI and, once the machine's sim was free, on local headless sims: 2.1 and 2.8 both 22 passed and the six expected skips, the tone test passing, no stop warning, no container left running after the session. Cancel `say` 70 ms on both versions (the `_stopAll` fix), `stand_up` 2.4 s.

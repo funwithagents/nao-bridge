@@ -66,7 +66,7 @@ Dependencies point one way: servers → bridge → seam → backends. `events.py
 
 ## Status
 
-The sim robot and the live tier's session sim are being built: robot.md, sim.md and testing.md are `Updated`, and their plan in [plans/_index.md](../plans/_index.md) is `In progress`. Every other spec is `Implemented`.
+Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index.md) is `Done`.
 
 | Concept | State |
 | --- | --- |
