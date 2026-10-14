@@ -1,11 +1,13 @@
 ---
 code:
   - src/naoqi_bridge/robot.py
-  - src/naoqi_bridge/naoqi_robot.py
+  - src/naoqi_bridge/real_robot.py
+  - src/naoqi_bridge/sim_robot.py
   - src/naoqi_bridge/fake_robot.py
 tests:
   - tests/test_robot.py
-  - tests/test_naoqi_robot.py
+  - tests/test_real_robot.py
+  - tests/test_sim_robot.py
   - tests/test_fake_robot.py
   - tests-e2e/test_live_robot.py
 ---
@@ -21,7 +23,7 @@ The seam between naoqi-bridge and a Naoqi robot. It lets the layer above ([bridg
 The seam delivers two things:
 
 1. **Testability.** A real robot needs hardware, a network and the `qi` wheel. The fast `tests/` tier ([testing.md](testing.md)) runs the whole stack — bridge, MCP server, WebSocket server — against `FakeNaoqiRobot`, with none of the three.
-2. **A pinned slice.** The `AnyNaoqiRobot` Protocol lists exactly the Naoqi capabilities the bridge consumes. pyright checks both implementations against it, so the fake can't drift from what the bridge calls.
+2. **A pinned slice.** The `NaoqiRobot` Protocol lists exactly the Naoqi capabilities the bridge consumes. pyright checks both implementations against it, so the fake can't drift from what the bridge calls.
 
 ## Core concepts / Decided
 
@@ -29,22 +31,24 @@ The seam delivers two things:
 
 A seam can be a type union over an SDK's robot class and a fake, checked by pyright. That doesn't work for Naoqi: it has no single robot class. `qi.Session` is an untyped RPC session handing out services by name (`session.service("ALMotion")`). Also, `qi` isn't on PyPI, so pyright and CI can't see it.
 
-So the seam is a **first-party `AnyNaoqiRobot` Protocol**, with two implementations:
+So the seam is a **first-party `NaoqiRobot` Protocol**, with one class per backend, each named after it:
 
 | Backend | Class | What it is |
 |---|---|---|
-| `real` | `NaoqiRobot(ip, port=9559, *, connect_timeout_s=5.0)` | Translates each Protocol method into the Naoqi service call(s) |
+| `real` | `RealNaoqiRobot(ip, port=9559, *, connect_timeout_s=5.0)` | Translates each Protocol method into the Naoqi service call(s) |
+| `sim` | `SimNaoqiRobot(*, connect_timeout_s=5.0, sit_through_crouch=False)`, a `RealNaoqiRobot` | The same calls, to naoqi-sim at `127.0.0.1:9559`; sits through Crouch on NAOqi 2.8 (below) |
 | `fake` (default) | `FakeNaoqiRobot()` | Records every command, serves a fixed package list, simulates behavior runs and sensor events |
 
-Each lives in its own module: `robot.py` holds what they share (the Protocol, the callback types, `TOUCH_KEYS` / `AUDIO_SAMPLE_RATE` / `AUDIO_CHANNEL_CODES`, `RobotConnectionError`) and `build_robot`; `naoqi_robot.py` holds `NaoqiRobot`; `fake_robot.py` holds `FakeNaoqiRobot` and its package list. `build_robot` imports the two lazily, since both import `robot.py`.
+Each lives in its own module: `robot.py` holds what they share (the Protocol, the callback types, `TOUCH_KEYS` / `AUDIO_SAMPLE_RATE` / `AUDIO_CHANNEL_CODES`, `RobotConnectionError`) and `build_robot`; `real_robot.py` holds `RealNaoqiRobot`; `sim_robot.py` holds `SimNaoqiRobot`; `fake_robot.py` holds `FakeNaoqiRobot` and its package list. `build_robot` imports them lazily, since they import `robot.py`. A sim is a Naoqi like any other, so `SimNaoqiRobot` is a `RealNaoqiRobot` and anything that asks for one (`isinstance`) accepts it; it knows nothing of starting or stopping the sim, which is the bridge's ([sim.md](sim.md)).
 
 The Protocol is the contract; each implementation translates it to its backend. Units and names at this layer are Naoqi's. Intent-level semantics (catalog, reactions, tracking what's running) belong to [bridge.md](bridge.md).
 
-### `build_robot(config: NaoqiBridgeConfig) -> AnyNaoqiRobot`
+### `build_robot(config: NaoqiBridgeConfig) -> NaoqiRobot`
 
 The one way in, used by `NaoqiBridge.start()`, driven by the [config](config.md):
 - `backend: "fake"` → `FakeNaoqiRobot()`; the `robot` block is ignored.
-- `backend: "real"` → `NaoqiRobot(robot.ip, robot.port, connect_timeout_s=robot.connect_timeout_s)`.
+- `backend: "real"` → `RealNaoqiRobot(robot.ip, robot.port, connect_timeout_s=robot.connect_timeout_s)`.
+- `backend: "sim"` → `SimNaoqiRobot(connect_timeout_s=robot.connect_timeout_s, sit_through_crouch=<the sim is NAOqi 2.8>)`, at naoqi-sim's fixed address. The version is `sim.config.naoqi.version`, which a borrowed sim must match. Starting or borrowing the sim is the bridge's, before it connects ([sim.md](sim.md)).
 
 The config has already rejected unknown backends and a `real` backend without an IP. Building does not connect.
 
@@ -52,15 +56,15 @@ The config has already rejected unknown backends and a `real` backend without an
 
 Every method is **blocking** (the bridge calls them via `asyncio.to_thread`) and **raises** on failure; the bridge re-raises failures as its `CommandFailedError` ([bridge.md](bridge.md) "Errors").
 
-| Method | `NaoqiRobot` → Naoqi |
+| Method | `RealNaoqiRobot` → Naoqi |
 |---|---|
 | `connect(cancel=None)` / `close()` | open / close `tcp://<ip>:<port>` |
 | `set_language(language)` | `ALTextToSpeech.setLanguage` |
 | `say(text)` | `ALAnimatedSpeech.say` (returns when spoken) |
-| `stop_speech()` | `ALTextToSpeech.stopAll` (makes a `say` in flight return) |
+| `stop_speech()` | `ALAnimatedSpeech._stopAll(False)` then `ALTextToSpeech.stopAll` (makes a `say` in flight return, at once: with the TTS stop alone, 2.8's `say` waits for its current gesture, up to 2.5 s; `_stopAll` is a hidden method of both 2.1 and 2.8). The `say` it ends returns normally, although `_stopAll` makes Naoqi's call raise ("Future canceled") |
 | `wake_up()` / `rest()` | `ALMotion.wakeUp` / `rest` |
 | `is_awake() -> bool` | `ALMotion.robotIsWakeUp` (motors stiff; asked each time, since the robot can go to rest on its own: fall manager, chest button, another client) |
-| `go_to_posture(posture, speed, max_tries) -> bool` | `ALRobotPosture.setMaxTryNumber` + `goToPosture` (returns when the move ends) |
+| `go_to_posture(posture, speed, max_tries) -> bool` | `ALRobotPosture.setMaxTryNumber` + `goToPosture` (returns when the move ends); `SimNaoqiRobot` with `sit_through_crouch`: Sit through Crouch, judged by `getPosture()` (below) |
 | `stop_posture()` | `ALRobotPosture.stopMove` (the bridge's stop for a cancelled `stand_up` / `sit_down`) |
 | `set_breathing(chain_name, enabled)` | `ALMotion.setBreathEnabled` |
 | `fade_eyes(color)` | `ALLeds.fadeRGB("FaceLeds", color, 0)` |
@@ -74,7 +78,7 @@ Every method is **blocking** (the bridge calls them via `asyncio.to_thread`) and
 
 Sensor callbacks are invoked **on Naoqi's threads**; marshalling onto an event loop is the bridge's job.
 
-### `NaoqiRobot`
+### `RealNaoqiRobot`
 
 - **`qi` is imported lazily in `connect()`** (via `importlib`), so importing `naoqi_bridge` never needs it. `qi` is a dependency on the platforms with a wheel and absent elsewhere ([project.md](project.md)). If it's missing, `connect()` raises `RobotConnectionError`: the message names the platforms that ship `qi` (macOS arm64, Linux x86_64, Windows x64, CPython 3.12 / 3.13), says to run `uv sync` there, and says the platform otherwise runs the `fake` backend only. **There is no silent fallback to fake** — that was the old behavior, and it let an agent believe a real robot was moving. Ask for the fake explicitly.
 - `connect()` with an empty IP or a non-positive port raises `RobotConnectionError` before trying.
@@ -86,7 +90,13 @@ Sensor callbacks are invoked **on Naoqi's threads**; marshalling onto an event l
   A wrong IP therefore fails within `connect_timeout_s`. Waiting for a robot that is still booting is the caller's: call `start()` again.
 - **`connect(cancel)` gives up when `cancel` is set.** `cancel` is an optional `threading.Event`, checked before the attempt and at every slice of the wait. Once set, the future is cancelled, the session closed, and `RobotConnectionError("connection to … cancelled")` raised; one already set makes no attempt. One TCP attempt can take seconds (a refused port takes about 2 s on Windows, where Linux and macOS refuse at once; a silent host takes the whole timeout), so this is what lets a cancelled `start()` return promptly ([bridge.md](bridge.md), Lifecycle). `FakeNaoqiRobot.connect(cancel)` raises the same error when `cancel` is already set, and connects at once otherwise.
 - Services are acquired lazily on first use and cached for the session; `close()` drops them, along with the touch links and the audio sink registration. Any call that needs the session while not connected — the audio subscription included — raises `RobotConnectionError`.
-- Naoqi requires the audio sink to expose a method named exactly `processRemote`. That lives on a small private sink object, so `NaoqiRobot`'s own surface stays the Protocol.
+- Naoqi requires the audio sink to expose a method named exactly `processRemote`. That lives on a small private sink object, so `RealNaoqiRobot`'s own surface stays the Protocol.
+
+### `SimNaoqiRobot`
+
+`RealNaoqiRobot` at `127.0.0.1:9559`, naoqi-sim's fixed address, with one difference in behavior:
+
+- **`sit_through_crouch`** (off by default; on only for a 2.8 sim, [sim.md](sim.md)): `go_to_posture("Sit", …)` first goes to Crouch unless the robot is already there, then to Sit, and returns whether `getPosture()` then says `Sit`, whatever `goToPosture` returned. The 2.8 desktop suite's robot has no inertial sensor, so its posture manager won't sit from Stand and misreports Sit from Crouch. It is still one robot call: `stop_posture()` during the Crouch leg ends the whole move (the Sit leg doesn't start). Other postures are asked for directly.
 
 ### `FakeNaoqiRobot`
 
@@ -108,5 +118,4 @@ What the fake does is set by what the tests exercise:
 
 ## Open questions
 
-1. **Simulated Naoqi.** A Choregraphe virtual robot is already reachable as `real` at `127.0.0.1:<port>`. A dedicated `sim` backend name only becomes useful if something needs to tell it apart (e.g. skipping hardware-only calls).
-2. **Newer Naoqi / robots.** The slice is only verified on Naoqi 2.1.4.13 / Nao v5. Nao v6 or Pepper may need service calls adjusted inside `NaoqiRobot`; the Protocol shouldn't change.
+1. **Newer Naoqi / robots.** The slice is only verified on Naoqi 2.1.4.13 / Nao v5. Nao v6 or Pepper may need service calls adjusted inside `RealNaoqiRobot`; the Protocol shouldn't change. The live tier on a NAOqi 2.8 sim ([ci.md](ci.md)) is where the first 2.8 gaps show.

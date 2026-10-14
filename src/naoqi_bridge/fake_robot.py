@@ -1,4 +1,4 @@
-"""The ``fake`` backend: an offline ``AnyNaoqiRobot`` that records every command.
+"""The ``fake`` backend: an offline ``NaoqiRobot`` that records every command.
 
 Specified by [specs/robot.md](../../specs/robot.md). It serves a fixed ``packages2``-shaped
 package list, simulates behavior runs, speech and posture moves that take time, and
@@ -192,7 +192,7 @@ REST_POSTURE = "Crouch"
 
 
 class FakeNaoqiRobot:
-    """Offline ``AnyNaoqiRobot``: records commands, serves a fixed package list.
+    """Offline ``NaoqiRobot``: records commands, serves a fixed package list.
 
     Tests reach it through ``bridge.robot`` to assert on ``commands``, tune
     ``behavior_duration_s`` / ``speech_duration_s`` / ``posture_duration_s`` /

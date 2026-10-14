@@ -4,22 +4,44 @@ A live test needs real credentials. Rather than fail when they're absent, a test
 calls `require_env(...)` up front so it *skips* cleanly — you only exercise the
 services you hold keys for, and a contributor (or CI) with none is never broken.
 
-Here the service is a real Nao, and the tier has three levels of risk
-(specs/testing.md "Live tier: levels of risk"): safe (`NAOQI_E2E_IP`), motion
-(`NAOQI_E2E_ALLOW_MOTION=1`) and interactive (`NAOQI_E2E_INTERACTIVE=1`).
+Here the service is a Naoqi: a simulated Nao by default, or a real one
+(specs/testing.md "Live tier: the target"), picked by `NAOQI_E2E_TARGET` (`sim` when
+unset, `real`). On `sim`, one naoqi-sim serves the whole session
+(`NAOQI_E2E_SIM_VERSION`, `NAOQI_E2E_SIM_VIEWER`): the `live_sim` fixture
+(tests-e2e/conftest.py) starts it at session start and stops it at session end, and
+each test's own bridge borrows it (`spawn: "never"`). The tier has three levels of
+risk (specs/testing.md "Live tier: levels of risk"): safe (the target), motion
+(`NAOQI_E2E_ALLOW_MOTION=1`, always on a sim) and interactive
+(`NAOQI_E2E_INTERACTIVE=1`, skipped on a sim).
 """
+
+from __future__ import annotations
 
 import asyncio
 import contextlib
 import logging
 import os
+import threading
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import pytest
 
-from naoqi_bridge import NaoqiBridge, NaoqiBridgeConfig, RobotSettings, StreamSettings
-from naoqi_bridge.naoqi_robot import NaoqiRobot
+from naoqi_bridge import (
+    NaoqiBridge,
+    NaoqiBridgeConfig,
+    RobotConnectionError,
+    RobotSettings,
+    SimSettings,
+    StreamSettings,
+)
+from naoqi_bridge.config import SIM_EXTRA, sim_installed
+from naoqi_bridge.real_robot import RealNaoqiRobot
+from naoqi_bridge.sim import acquire_sim
+
+if TYPE_CHECKING:
+    from naoqi_sim import NaoqiSim
 
 logger = logging.getLogger("live")
 
@@ -27,12 +49,164 @@ logger = logging.getLogger("live")
 # printed in the run's terminal summary.
 MEASUREMENTS: list[tuple[str, str]] = []
 
-# What a cancel may take on the robot before a test calls it slow: one stop call and
-# the robot call's return, well inside the bridge's 4 × 0.5 s give-up bound.
-CANCEL_BOUND_S = 2.0
+# What a cancel may take on the robot before a test calls it slow: NAOqi's own end of
+# the stopped command (about 2.4 s for a posture move, measured on a simulated Nao) and one retry interval, inside the bridge's 8 × 0.5 s
+# give-up bound.
+CANCEL_BOUND_S = 3.5
 
 # What the bridge logs when a cancelled verb's stop didn't go as planned.
 STOP_WARNINGS = ("did not confirm the stop", "stopping it failed")
+
+
+# region The target
+
+TARGETS = ("sim", "real")
+SIM_VERSIONS = ("2.1", "2.8")
+
+# Set by name: then a sim that can't run fails the run instead of skipping it.
+TARGET_REQUIRED = bool(os.environ.get("NAOQI_E2E_TARGET"))
+TARGET = os.environ.get("NAOQI_E2E_TARGET") or "sim"
+SIM_VERSION = os.environ.get("NAOQI_E2E_SIM_VERSION") or "2.1"
+
+
+def _flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
+
+
+SIM_VIEWER = _flag("NAOQI_E2E_SIM_VIEWER")
+
+
+def check_target_settings() -> None:
+    """Fail the session at once on a target or version the tier doesn't know."""
+    if TARGET not in TARGETS:
+        raise pytest.UsageError(
+            f"NAOQI_E2E_TARGET={TARGET!r}: choose from {', '.join(TARGETS)}"
+        )
+    if SIM_VERSION not in SIM_VERSIONS:
+        raise pytest.UsageError(
+            f"NAOQI_E2E_SIM_VERSION={SIM_VERSION!r}: choose from {', '.join(SIM_VERSIONS)}"
+        )
+
+
+def sim_config() -> dict[str, Any]:
+    """The run's sim, as a naoqi-sim config file holds it: headless with the render
+    camera, the placeholder model, a silent loudspeaker and the fake microphone; or
+    the window, with `NAOQI_E2E_SIM_VIEWER=1`."""
+    viewer: dict[str, Any] = (
+        {"headless": False}
+        if SIM_VIEWER
+        else {"headless": True, "variant": "placeholder"}
+    )
+    return {
+        "naoqi": {"version": SIM_VERSION},
+        "viewer": viewer,
+        "video_input": {"source": "render"},
+        "audio_output": {"mode": "silent"},
+        "audio_input": {"source": "fake"},
+    }
+
+
+class _LoopThread:
+    """An event loop running in its own thread, for the session's sim: its start and
+    its stop run on the same loop, which every test's `asyncio.run` would not be."""
+
+    def __init__(self) -> None:
+        self.loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(
+            target=self.loop.run_forever, name="live-sim", daemon=True
+        )
+        self._thread.start()
+
+    def run[T](self, coro: Awaitable[T]) -> T:
+        async def wrapped() -> T:
+            return await coro
+
+        return asyncio.run_coroutine_threadsafe(wrapped(), self.loop).result()
+
+    def close(self) -> None:
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self._thread.join()
+        self.loop.close()
+
+
+@contextlib.contextmanager
+def session_sim() -> Iterator[NaoqiSim | None]:
+    """The session's sim, for the `live_sim` fixture: started with `spawn: "always"`,
+    so the run owns it and holds its `NaoqiSim` (naoqi-sim's own API, which only the
+    process that started the sim has), and stopped when the session ends. On the
+    `real` target, `None`. A sim that can't start (no `[sim]` extra, no Docker, no
+    images, one already running) skips the run, or fails it when NAOQI_E2E_TARGET is
+    set."""
+    if TARGET != "sim":
+        yield None
+        return
+    if not sim_installed():
+        _unavailable(f"install {SIM_EXTRA}")
+    from naoqi_sim import NaoqiSimConfig
+
+    settings = SimSettings(
+        spawn="always", config=NaoqiSimConfig.from_dict(sim_config())
+    )
+    # The sim's lifecycle stays on one event loop, which outlives every test's own.
+    loop = _LoopThread()
+    try:
+        lease = loop.run(acquire_sim(settings))
+    except RobotConnectionError as e:
+        loop.close()
+        _unavailable(str(e))
+    logger.warning(
+        "Live tier on a naoqi-sim, NAOqi %s (%s)",
+        SIM_VERSION,
+        "the window" if SIM_VIEWER else "headless",
+    )
+    try:
+        yield lease.sim
+    finally:
+        try:
+            loop.run(lease.release())
+        finally:
+            loop.close()
+
+
+def _unavailable(reason: str) -> NoReturn:
+    message = f"no naoqi-sim for the live tier: {reason}"
+    if TARGET_REQUIRED:
+        pytest.fail(message)
+    pytest.skip(message + " (set NAOQI_E2E_TARGET=sim to make it a failure)")
+
+
+def live_bridge_dict(streams: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The target's bridge config as JSON, for a server run in a subprocess: on sim,
+    the run's sim (`spawn: "never"`), on real the robot at `NAOQI_E2E_IP`."""
+    data: dict[str, Any]
+    if TARGET == "sim":
+        data = {
+            "backend": "sim",
+            "sim": {"spawn": "never", "config": {"naoqi": {"version": SIM_VERSION}}},
+        }
+    else:
+        ip = require_env("NAOQI_E2E_IP")
+        port = int(os.environ.get("NAOQI_E2E_PORT", "9559"))
+        data = {"backend": "real", "robot": {"ip": ip, "port": port}}
+    if streams is not None:
+        data["streams"] = streams
+    return data
+
+
+def require_motion() -> None:
+    """The motion level: on a robot, someone cleared the floor; a sim moves safely."""
+    if TARGET == "real":
+        require_flag("NAOQI_E2E_ALLOW_MOTION")
+
+
+def require_interactive() -> None:
+    """The interactive level: a person at the robot. A sim has no touch input yet."""
+    if TARGET == "sim":
+        pytest.skip("naoqi-sim has no touch input yet (specs/sim.md)")
+    require_flag("NAOQI_E2E_INTERACTIVE")
+
+
+# endregion
 
 
 def require_env(name: str) -> str:
@@ -45,12 +219,22 @@ def require_env(name: str) -> str:
 
 def require_flag(name: str) -> None:
     """Skip the calling test unless env var `name` is `1`, `true` or `yes`."""
-    if os.environ.get(name, "").strip().lower() not in {"1", "true", "yes"}:
+    if not _flag(name):
         pytest.skip(f"{name} not set to 1; skipping live test")
 
 
 def live_config(streams: StreamSettings | None = None) -> NaoqiBridgeConfig:
-    """A `real` bridge config for the robot at `NAOQI_E2E_IP` (skips when it's unset)."""
+    """The target's bridge config with `streams`: the run's sim (`spawn: "never"`, so
+    a test never starts a second one), or the robot at `NAOQI_E2E_IP` (skips when
+    it's unset)."""
+    if TARGET == "sim":
+        return NaoqiBridgeConfig(
+            backend="sim",
+            streams=streams or StreamSettings(),
+            sim=SimSettings.from_dict(
+                {"spawn": "never", "config": {"naoqi": {"version": SIM_VERSION}}}
+            ),
+        )
     ip = require_env("NAOQI_E2E_IP")
     port = int(os.environ.get("NAOQI_E2E_PORT", "9559"))
     return NaoqiBridgeConfig(
@@ -67,7 +251,7 @@ async def live_session(
     """A running bridge on the robot, left as it was found: eyes white and, at the
     motion level (motors woken on entry), at rest."""
     if motion:
-        require_flag("NAOQI_E2E_ALLOW_MOTION")
+        require_motion()
     async with NaoqiBridge(config) as bridge:
         try:
             if motion:
@@ -115,7 +299,7 @@ def body_action_behavior(bridge: NaoqiBridge, action_id: str) -> str:
 def naoqi(bridge: NaoqiBridge, service: str) -> object:
     """A Naoqi service, for a test that wants the robot's own view of its state."""
     robot = bridge.robot
-    assert isinstance(robot, NaoqiRobot)
+    assert isinstance(robot, RealNaoqiRobot)
     return robot._service(service)  # pyright: ignore[reportPrivateUsage]
 
 

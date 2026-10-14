@@ -1,28 +1,23 @@
-"""Live checks against a real Nao: skipped unless NAOQI_E2E_IP is set and `qi` is installed.
+"""Live checks against the target (a sim by default, or the robot at NAOQI_E2E_IP).
 
-Run explicitly: `NAOQI_E2E_IP=192.168.1.42 uv run pytest tests-e2e`. Nothing here moves the
-robot's limbs; it connects, reads the catalog, and blinks the eyes.
+Run explicitly: `uv run pytest tests-e2e`. Nothing here moves the robot's limbs; it
+connects, reads the catalog, and blinks the eyes.
 """
 
 import asyncio
-import os
 
 import pytest
-from support import require_env
+from support import TARGET, live_config
 
-from naoqi_bridge import NaoqiBridge, NaoqiBridgeConfig, RobotSettings
+from naoqi_bridge import NaoqiBridge
 
 pytest.importorskip("qi")
 
 
 def test_connects_and_reads_a_catalog():
-    ip = require_env("NAOQI_E2E_IP")
-    port = int(os.environ.get("NAOQI_E2E_PORT", "9559"))
+    config = live_config()
 
     async def run() -> int:
-        config = NaoqiBridgeConfig(
-            backend="real", robot=RobotSettings(ip=ip, port=port)
-        )
         async with NaoqiBridge(config) as bridge:
             # A verb the robot fails raises CommandFailedError, failing the test.
             await bridge.change_eyes_color("blue")
@@ -30,5 +25,7 @@ def test_connects_and_reads_a_catalog():
             return len(bridge.get_body_action_behaviors())
 
     body_actions = asyncio.run(run())
-    # Any stock Nao ships at least the dialog_move_arms actions.
-    assert body_actions > 0
+    if TARGET == "real":
+        # Any stock Nao ships at least the dialog_move_arms actions; a sim has the
+        # animations package only (specs/sim.md).
+        assert body_actions > 0

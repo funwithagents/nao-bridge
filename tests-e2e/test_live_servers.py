@@ -1,9 +1,9 @@
-"""Live: both servers over their real transports, on a real Nao.
+"""Live: both servers over their real transports, on the target.
 
-Safe level (NAOQI_E2E_IP): the MCP server as a subprocess over stdio, driven by the `mcp`
-client the way Claude Desktop drives it, so a stray libqi line on stdout would break
-the session. Motion level (NAOQI_E2E_ALLOW_MOTION=1): the WebSocket server, whose connect
-ritual wakes the robot and starts breathing, with every stream on.
+Safe level: the MCP server as a subprocess over stdio, driven by the `mcp` client the
+way Claude Desktop drives it, so a stray libqi line on stdout would break the session;
+on a sim, it connects to the run's sim. Motion level: the WebSocket server, whose
+connect ritual wakes the robot and starts breathing, with every stream on.
 """
 
 import asyncio
@@ -17,7 +17,7 @@ import websockets
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
-from support import live_config, require_flag
+from support import live_bridge_dict, live_config, require_motion
 
 from naoqi_bridge import AudioStream, JointsStream, StreamSettings, TouchStream
 from naoqi_bridge.naoqi_websocket_server import (
@@ -36,18 +36,8 @@ def text_of(result: Any) -> str:
 
 
 def test_the_mcp_server_drives_the_robot_over_stdio(tmp_path: Path):
-    robot = live_config().robot
-    path = tmp_path / "mcp-real.json"
-    path.write_text(
-        json.dumps(
-            {
-                "bridge": {
-                    "backend": "real",
-                    "robot": {"ip": robot.ip, "port": robot.port},
-                }
-            }
-        )
-    )
+    path = tmp_path / "mcp.json"
+    path.write_text(json.dumps({"bridge": live_bridge_dict()}))
     server = StdioServerParameters(
         command=sys.executable,
         args=["-m", "naoqi_bridge.naoqi_mcp_server", "--config", str(path)],
@@ -72,7 +62,7 @@ def test_the_mcp_server_drives_the_robot_over_stdio(tmp_path: Path):
 
 
 def test_the_websocket_server_streams_the_robot_to_its_client():
-    require_flag("NAOQI_E2E_ALLOW_MOTION")
+    require_motion()
     config = NaoqiWebsocketServerConfig(
         bridge=live_config(
             StreamSettings(

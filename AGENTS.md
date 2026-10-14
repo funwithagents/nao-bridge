@@ -25,13 +25,15 @@ Where things live. This is a coarse, module-level map — for the full file inve
 | Module | Role | Spec |
 |---|---|---|
 | [`src/naoqi_bridge/__init__.py`](src/naoqi_bridge/__init__.py) | Front door: re-exports what a caller needs — `NaoqiBridge`, the config classes, the stream values (`TouchEvent`, `JointsState`, `MicChunk`), `Event` / `Observable`, the errors | [bridge.md](specs/bridge.md) |
-| [`src/naoqi_bridge/config.py`](src/naoqi_bridge/config.py) | `NaoqiBridgeConfig` (backend, robot, streams), the `from_dict` / `from_json` / `from_json_file` loaders, `ConfigError`, field readers reused by server configs | [config.md](specs/config.md) |
+| [`src/naoqi_bridge/config.py`](src/naoqi_bridge/config.py) | `NaoqiBridgeConfig` (backend, robot, streams, sim), the `from_dict` / `from_json` / `from_json_file` loaders, `ConfigError`, field readers reused by server configs | [config.md](specs/config.md) |
 | [`src/naoqi_bridge/errors.py`](src/naoqi_bridge/errors.py) | `BridgeError`, shared by the bridge's modules | [bridge.md](specs/bridge.md) |
 | [`src/naoqi_bridge/events.py`](src/naoqi_bridge/events.py) | `Event[T]`: synchronous pub/sub primitive (`bridge.on_touch`) | [events.md](specs/events.md) |
 | [`src/naoqi_bridge/observable.py`](src/naoqi_bridge/observable.py) | `Observable[T]`: readable, subscribable state (`bridge.joints`) | [observable.md](specs/observable.md) |
 | [`src/naoqi_bridge/microphone.py`](src/naoqi_bridge/microphone.py) | `MicFeed` / `MicChunk`: the one subscription to Naoqi's pushed audio, a ring, any number of `audio_input()` subscribers | [microphone.md](specs/microphone.md) |
-| [`src/naoqi_bridge/robot.py`](src/naoqi_bridge/robot.py) | Connection seam: the `AnyNaoqiRobot` Protocol, the types/constants both backends share, `RobotConnectionError`, `build_robot(config)` | [robot.md](specs/robot.md) |
-| [`src/naoqi_bridge/naoqi_robot.py`](src/naoqi_bridge/naoqi_robot.py) | `NaoqiRobot`: the `real` backend, over a `qi` session (lazy import) | [robot.md](specs/robot.md) |
+| [`src/naoqi_bridge/robot.py`](src/naoqi_bridge/robot.py) | Connection seam: the `NaoqiRobot` Protocol, the types/constants both backends share, `RobotConnectionError`, `build_robot(config)` | [robot.md](specs/robot.md) |
+| [`src/naoqi_bridge/real_robot.py`](src/naoqi_bridge/real_robot.py) | `RealNaoqiRobot`: the `real` backend, over a `qi` session (lazy import) | [robot.md](specs/robot.md) |
+| [`src/naoqi_bridge/sim.py`](src/naoqi_bridge/sim.py) | The `sim` backend's lease: `acquire_sim` starts a naoqi-sim and owns it, or borrows the one running (`sim.spawn`); the one module that starts naoqi-sim (lazy import, `[sim]` extra) | [sim.md](specs/sim.md) |
+| [`src/naoqi_bridge/sim_robot.py`](src/naoqi_bridge/sim_robot.py) | `SimNaoqiRobot`: the `sim` backend's robot — `RealNaoqiRobot` at naoqi-sim's address, sitting through Crouch on NAOqi 2.8 | [robot.md](specs/robot.md), [sim.md](specs/sim.md) |
 | [`src/naoqi_bridge/fake_robot.py`](src/naoqi_bridge/fake_robot.py) | `FakeNaoqiRobot`: the `fake` backend — records commands, fixed package list, simulated behavior runs and sensor events | [robot.md](specs/robot.md) |
 | [`src/naoqi_bridge/bridge.py`](src/naoqi_bridge/bridge.py) | `NaoqiBridge`: built from a `NaoqiBridgeConfig`; `start()`/`stop()` lifecycle, intent-level verbs, behavior catalog, stream APIs (`on_touch`, `joints`, `mic` / `audio_input()`) over the robot seam | [bridge.md](specs/bridge.md) |
 | [`src/naoqi_bridge/naoqi_mcp_server.py`](src/naoqi_bridge/naoqi_mcp_server.py) | `NaoqiMcpServer` + `NaoqiMcpServerConfig`: exposes `NaoqiBridge` actions as MCP tools for LLM agents (`--config`) | [naoqi-mcp-server.md](specs/naoqi-mcp-server.md) |
@@ -80,7 +82,7 @@ The mapping is **many-to-many**: a file can be governed by several specs, so the
 
 Some tests call real external services over the network. They live in `tests-e2e/`, a directory separate from `tests/`, so the default `uv run pytest` never runs them — no network access or credentials are needed for the normal dev loop. Run them explicitly, and only when you actually want to verify against a live service. Tests that lack their required credentials should **skip**, not fail, so the tier is safe to run with only the keys you happen to have.
 
-Here the "live service" is a **real Nao robot**: e2e tests read its address with `require_env("NAOQI_E2E_IP")` (and need the `qi` wheel installed — see the README), and skip when it's unset. The fast tier runs on the `fake` backend (`FakeNaoqiRobot`, reached through `bridge.robot`) or a stub `qi` module — never a real robot.
+Here the "live service" is a **Naoqi**: a headless naoqi-sim by default (`NAOQI_E2E_TARGET` unset or `sim`; one sim per run; it needs Docker and `uv run naoqi-sim fetch-and-build-images` once, and the tier skips without them unless `NAOQI_E2E_TARGET=sim` is set), or a **real Nao robot** (`NAOQI_E2E_TARGET=real`, address in `NAOQI_E2E_IP`) — see [testing.md](specs/testing.md) "Live tier: the target". The fast tier runs on the `fake` backend (`FakeNaoqiRobot`, reached through `bridge.robot`), a stub `qi` module or a stubbed naoqi-sim — never a real robot or a real sim.
 
 ## Implementation plans
 

@@ -627,11 +627,11 @@ def test_a_stop_the_robot_never_confirms_gives_up_in_bounded_time(
             return elapsed, stops, bridge.current_dances
 
     elapsed, stops, tracked = asyncio.run(run())
-    assert elapsed < 0.5  # 4 attempts of 20 ms, not the dance's 5 s
-    assert stops == 4
+    assert elapsed < 0.5  # 8 attempts of 20 ms, not the dance's 5 s
+    assert stops == 8
     assert tracked == ()
     assert (
-        "run_behavior: the robot did not confirm the stop after 4 attempts"
+        "run_behavior: the robot did not confirm the stop after 8 attempts"
         in caplog.messages
     )
 

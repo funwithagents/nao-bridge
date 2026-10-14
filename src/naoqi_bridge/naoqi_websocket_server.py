@@ -429,7 +429,7 @@ class NaoqiWebsocketServer:
         try:
             await self.naoqi_bridge.start()
         except RobotConnectionError as e:
-            logger.error("Could not connect to Nao: %s", e)
+            logger.error("Could not connect to the robot: %s", e)
             return False
         settings = self.config.server
         host = settings.host or _lan_ip()
@@ -472,7 +472,7 @@ class NaoqiWebsocketServer:
 async def _main(config: NaoqiWebsocketServerConfig) -> None:
     server = NaoqiWebsocketServer(config)
     if not await server.start_connection():
-        logger.error("failed to connect to Nao, exiting")
+        logger.error("failed to connect to the robot, exiting")
         raise SystemExit(1)
     await asyncio.to_thread(input, "Press Enter to end...\n")
     logger.info("Ending received")

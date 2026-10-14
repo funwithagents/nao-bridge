@@ -17,18 +17,18 @@ tests:
 
 ## Purpose
 
-`NaoqiBridge` is the object a caller holds to drive Nao: intent-level async verbs (say, stand up, dance, react, run an installed app) plus the robot's touch, joint and audio streams. It is built from a [config](config.md) and sits on top of the [robot.md](robot.md) seam, so it runs unchanged on a real robot or the fake. Every client — the [MCP server](naoqi-mcp-server.md), the [WebSocket server](naoqi-websocket-server.md), or a Python caller — shares this one implementation. It replaces the earlier `NaoAPI` class.
+`NaoqiBridge` is the object a caller holds to drive Nao: intent-level async verbs (say, stand up, dance, react, run an installed app) plus the robot's touch, joint and audio streams. It is built from a [config](config.md) and sits on top of the [robot.md](robot.md) seam, so it runs unchanged on a real robot, a simulated one ([sim.md](sim.md)) or the fake. Every client — the [MCP server](naoqi-mcp-server.md), the [WebSocket server](naoqi-websocket-server.md), or a Python caller — shares this one implementation. It replaces the earlier `NaoAPI` class.
 
 ## Core concepts / Decided
 
 ### Construction and lifecycle
 
 - `NaoqiBridge(config: NaoqiBridgeConfig | Backend | None = None)` ([config.md](config.md)). With no argument it uses `NaoqiBridgeConfig()`, the offline fake. A bare backend string is shorthand for `NaoqiBridgeConfig(backend=...)`. `NaoqiBridge.from_dict` / `from_json` / `from_json_file` load the config, then build the bridge. Constructing the bridge does nothing else: no connection, no task.
-- **`await start()`** builds the robot with `build_robot(config)` ([robot.md](robot.md)) and connects it off the event loop. It subscribes the streams the config enables (touch; audio through the mic feed, [microphone.md](microphone.md)), loads the behavior catalog, and starts the joints task when joints are enabled. If any step fails, what already started is torn down (the robot closed) and the error propagates (`RobotConnectionError` for an unreachable robot). Calling `start()` on a running bridge raises `BridgeError`.
-- **`await stop()`** cancels the joints task and publishes `None` on `joints`. It then stops the mic feed (which ends every `audio_input()` subscriber), unsubscribes touch, closes the robot, and clears the running-item tracking. It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it. Cancelling `start()` or `stop()` follows "Cancellation" below: neither leaves anything half up.
+- **`await start()`** on the `sim` backend first acquires the sim: it starts one or borrows the one running, as `sim.spawn` says ([sim.md](sim.md)). Then, on every backend, it builds the robot with `build_robot(config)` ([robot.md](robot.md)) and connects it off the event loop. It subscribes the streams the config enables (touch; audio through the mic feed, [microphone.md](microphone.md)), loads the behavior catalog, and starts the joints task when joints are enabled. If any step fails, what already started is torn down (the robot closed, the sim released) and the error propagates (`RobotConnectionError` for an unreachable robot or an unavailable sim). Calling `start()` on a running bridge raises `BridgeError`.
+- **`await stop()`** cancels the joints task and publishes `None` on `joints`. It then stops the mic feed (which ends every `audio_input()` subscriber), unsubscribes touch, closes the robot, clears the running-item tracking and, last, releases the sim (stopping it when the bridge started it). It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it. Cancelling `start()` or `stop()` follows "Cancellation" below: neither leaves anything half up.
 - **`async with NaoqiBridge(...) as bridge:`** is shorthand for the pair, and runs `stop()` on every way out.
 - `running: bool`. `config` and `backend` (read-only).
-- **Escape hatch:** `bridge.robot` is the `AnyNaoqiRobot` — the `FakeNaoqiRobot` on `fake`, which tests use to assert on recorded commands. It raises `NotRunningError` when the bridge isn't running.
+- **Escape hatch:** `bridge.robot` is the `NaoqiRobot` — the `FakeNaoqiRobot` on `fake`, which tests use to assert on recorded commands. It raises `NotRunningError` when the bridge isn't running.
 
 ### Action verb contract
 
@@ -76,7 +76,7 @@ The classifier doesn't mutate the parsed behaviors, and tolerates packages or be
 Cancelling the task that awaits a verb is the one way to interrupt it, whether the cancel comes from `task.cancel()`, an `asyncio.timeout`, a `TaskGroup` unwinding, or a server dropping a client's request. Every verb honors it. **A cancelled verb guarantees three things:**
 
 1. **The effect stops with the verb.** What the verb started on the robot has stopped *before* the `CancelledError` reaches the caller: the robot is silent, the posture move has stopped, the behavior has ended. The verb stops only what it started.
-2. **The cancel returns in bounded time.** The `CancelledError` propagates once the stop is confirmed, which is normally one short Naoqi call. The bound is `STOP_ATTEMPTS × STOP_RETRY_S` (4 × 0.5 s); see "How a spanning verb stops" below.
+2. **The cancel returns in bounded time.** The `CancelledError` propagates once the stop is confirmed, which is normally one short Naoqi call. The bound is `STOP_ATTEMPTS × STOP_RETRY_S` (8 × 0.5 s, 4 s); see "How a spanning verb stops" below.
 3. **The robot and the session stay usable.** The cancel undoes only that verb's own effect. The motor state, the eyes, breathing and basic awareness stay as they were, the streams keep running, and the next verb works at once: a cancelled `dance` can be followed by another `dance` straight away.
 
 It does **not** mean rewind. What already happened stays done: the words already spoken were heard, and a posture move or a dance stops where the cancel caught it. The robot doesn't go back to where it started.
@@ -102,13 +102,13 @@ The streams have their own cancellation contracts: an `audio_input()` subscriber
 
 - **Cancelled before the command is sent**, for example during the motors check: nothing reached the robot, so there's nothing to stop, and the `CancelledError` propagates at once.
 - **Cancelled while the robot call runs:** the call is already running in its thread (`asyncio.to_thread`) and can't be interrupted, so the bridge sends the verb's stop call off the event loop, then waits for the spanned call to return. The behavior has ended and the speech is silent once that call returns. Only then is the item's tracking cleared and the `CancelledError` re-raised.
-- **Stop re-sent:** a cancel (or a catalog stop verb, above) can land before Naoqi has started the command, so the first stop finds nothing to stop and the command then runs anyway. So if the spanned call hasn't returned `STOP_RETRY_S` (0.5 s) after a stop, the stop is sent again, up to `STOP_ATTEMPTS` (4) stops in all. If the call still hasn't returned, the bridge logs a warning naming the verb, stops waiting (the thread is left to finish on its own), clears the tracking and re-raises.
+- **Stop re-sent:** a cancel (or a catalog stop verb, above) can land before Naoqi has started the command, so the first stop finds nothing to stop and the command then runs anyway. So if the spanned call hasn't returned `STOP_RETRY_S` (0.5 s) after a stop, the stop is sent again, up to `STOP_ATTEMPTS` (8) stops in all, so the bridge waits up to 4 s for the robot to confirm. NAOqi itself can take more than 2 s to end a stopped command: measured on a simulated Nao (NAOqi's own `ALRobotPosture`), `goToPosture` returns about 2.4 s after `stopMove` on 2.1 and 2.8; the bound leaves room for it. (Speech stops at once, through `ALAnimatedSpeech`'s own stop: [robot.md](robot.md).) If the call still hasn't returned, the bridge logs a warning naming the verb, stops waiting (the thread is left to finish on its own), clears the tracking and re-raises.
 - **The stop is owned:** a second cancel arriving while the bridge stops the verb doesn't cut the stop short. It is absorbed until the stop is done, then the `CancelledError` propagates.
 - **What the stop sees is not the caller's business:** a stop call that raises is logged as a warning and ends the wait. Whatever the spanned call returns or raises after the stop (a posture reported not reached, a Naoqi "behavior stopped" error) is dropped. The caller always gets the `CancelledError` and never a `CommandFailedError`.
 
 #### Lifecycle
 
-- **A cancel during `start()` is handled like a failure.** A connection in flight gives up: `start()` passes the robot's `connect()` a `threading.Event` and sets it on the cancel, so the attempt ends within one 50 ms poll ([robot.md](robot.md)). Any other step in flight finishes in its thread, since it can't be interrupted. Then everything started so far is torn down, the robot is closed if it connected, and the `CancelledError` propagates. Nothing is leaked; the cancel takes as long as the step in flight, which is short once the connection is up.
+- **A cancel during `start()` is handled like a failure.** A connection in flight gives up: `start()` passes the robot's `connect()` a `threading.Event` and sets it on the cancel, so the attempt ends within one 50 ms poll ([robot.md](robot.md)). Any other step in flight finishes in its thread, since it can't be interrupted. Then everything started so far is torn down, the robot is closed if it connected, and the `CancelledError` propagates. Nothing is leaked; the cancel takes as long as the step in flight, which is short once the connection is up. Acquiring a sim is cancel-safe on its own ([sim.md](sim.md), "`sim.py`: the lease"): a sim being started is stopped before the cancel propagates, which takes the seconds a `compose up` in flight needs to finish.
 - **`stop()` is owned once begun.** A cancel arriving while it runs is absorbed until every teardown step has run, then propagates. The bridge reads as not running from the moment `stop()` begins.
 
 ### Streams
@@ -140,7 +140,7 @@ So `except (BridgeError, ValueError)` catches every expected verb failure, and t
 
 `from naoqi_bridge import NaoqiBridge` re-exports what a caller needs:
 - `NaoqiBridge`;
-- the config classes (`NaoqiBridgeConfig`, `RobotSettings`, `StreamSettings`, `TouchStream`, `JointsStream`, `AudioStream`, `Backend`);
+- the config classes (`NaoqiBridgeConfig`, `RobotSettings`, `StreamSettings`, `TouchStream`, `JointsStream`, `AudioStream`, `SimSettings`, `Backend`, `SimSpawn`);
 - the stream values (`TouchEvent`, `TouchPart`, `JointsState`, `MicChunk`) and the `Event` / `Observable` types;
 - `BehaviorInfos`, `LocalizedString`;
 - the errors (`BridgeError`, `NotRunningError`, `NotPlayingError`, `MotorsOffError`, `CommandFailedError`, `ConfigError`, `RobotConnectionError`). Library modules only use `logging.getLogger(__name__)`; `logging.basicConfig` belongs to the CLIs.

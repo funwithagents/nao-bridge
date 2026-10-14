@@ -11,6 +11,11 @@ dependencies = [
     "qi>=3.1.8,<4; (sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
 ]
 
+[project.optional-dependencies]
+# The sim backend (specs/sim.md): naoqi-sim, with its window and render camera. It needs
+# qi, so it exists where qi does.
+sim = ["naoqi-sim[viewer]; (sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'win32' and platform_machine == 'AMD64')"]
+
 [project.scripts]
 naoqi-mcp-server = "naoqi_bridge.naoqi_mcp_server:main"
 naoqi-websocket-server = "naoqi_bridge.naoqi_websocket_server:main"
@@ -38,6 +43,8 @@ explicit = true  # only the packages pinned to it below come from it
 
 [tool.uv.sources]
 qi = { index = "libqi" }
+# naoqi-sim is not on PyPI: its repository, pinned to a commit moved on purpose (specs/project.md).
+naoqi-sim = { git = "https://github.com/funwithagents/naoqi-sim", rev = "e0750eab5820f5256bf95ca41b4725578fe0319e" }
 
 [tool.ruff]
 target-version = "py312"  # keep in sync with requires-python
@@ -73,6 +80,7 @@ typeCheckingMode = "standard"
 
 [dependency-groups]
 dev = [
+    "naoqi-bridge[sim]",  # the sim code type-checks against naoqi-sim, and the live tier runs a sim
     "pyright>=1.1.414",
     "pytest>=9.1.1",
     "ruff>=0.16.10",

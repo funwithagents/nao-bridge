@@ -1,11 +1,11 @@
 # Continuous integration — specs/ci.md.
 #
-# Two jobs side by side on GitHub's hosted runners, on every pull request and push to main:
-# `check` (lint, format, types, on Linux) and `fast-tier` (tests/, on the fake backend and a
-# stub qi, on Linux, macOS and Windows). Neither waits on the other, nor do the matrix entries.
-# No system package and no secret is needed; each platform's qi wheel installs with the sync,
-# so the qi-gated fast-tier tests run on all three. The live tier (tests-e2e/) needs a Nao and
-# is not run (specs/ci.md).
+# Three jobs side by side on GitHub's hosted runners, on every pull request and push to
+# main: `check` (lint, format, types, on Linux), `fast-tier` (tests/, on the fake backend
+# and a stub qi, on Linux, macOS and Windows) and `e2e-sim` (tests-e2e/, the live tier
+# against a headless naoqi-sim the runner builds itself, once per NAOqi version, on
+# Linux). None waits on another, nor do the matrix entries. No secret is needed. A real
+# robot is never run here (specs/ci.md).
 
 name: CI
 
@@ -58,3 +58,94 @@ jobs:
         run: uv sync --locked
       - name: Fast tier
         run: uv run pytest -rs
+
+  e2e-sim:
+    name: live tier, NAOqi ${{ matrix.version }} sim
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      # One sim per machine (it publishes 9559): one runner per version.
+      fail-fast: false
+      matrix:
+        version: ["2.1", "2.8"]
+    steps:
+      # The 2.8 image and its `docker save` archive take about 13 GB: drop the
+      # toolchains the project never uses. Both entries, so they stay alike.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync (against the lock; the dev group brings naoqi-sim)
+        run: uv sync --locked
+      # naoqi-sim's image data and its record of the verified images, at a path the
+      # cache below knows.
+      - name: Image data folder
+        run: echo "NAOQI_SIM_IMAGE_DATA=$RUNNER_TEMP/image-data" >> "$GITHUB_ENV"
+      # What naoqi-sim compares to the image labels (its version, the digest of its
+      # container recipes), and its suite pins, which the labels do not see: the key
+      # changes exactly when a start would find the images outdated.
+      - name: Image cache key
+        id: key
+        run: |
+          stamp=$(uv run python -c "import hashlib, pathlib; from naoqi_sim import docker_images as d, suite; print(f'{d.naoqi_sim_version()}-{d.recipes_digest()}-{hashlib.sha256(pathlib.Path(suite.__file__).read_bytes()).hexdigest()[:16]}')")
+          echo "key=naoqi-${{ matrix.version }}-$stamp" >> "$GITHUB_OUTPUT"
+      # The version's NAOqi image and the tts image (`docker save`), and the record of
+      # their verified IDs. The images contain Aldebaran's software: this repository's
+      # cache only, never a registry or an artifact. The downloads are never cached.
+      - name: Images (restore)
+        id: images
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ runner.temp }}/images.tar
+            ${{ runner.temp }}/image-data/images.json
+          key: ${{ steps.key.outputs.key }}
+      - name: Load the cached images
+        if: steps.images.outputs.cache-hit == 'true'
+        run: |
+          docker load -i "$RUNNER_TEMP/images.tar"
+          rm "$RUNNER_TEMP/images.tar"
+      - name: Fetch, build and verify the images (naoqi-sim fetch-and-build-images)
+        if: steps.images.outputs.cache-hit != 'true'
+        run: |
+          uv run naoqi-sim fetch-and-build-images ${{ matrix.version }}
+          image=$(uv run python -c "from naoqi_sim.docker_images import IMAGES; print(IMAGES['${{ matrix.version }}'].image)")
+          docker save -o "$RUNNER_TEMP/images.tar" "$image" naoqi-sim/tts:dev
+          rm -rf "$NAOQI_SIM_IMAGE_DATA/${{ matrix.version }}"
+      # Saved right after the build, so a failing live tier doesn't build again next run.
+      - name: Images (save)
+        if: steps.images.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ runner.temp }}/images.tar
+            ${{ runner.temp }}/image-data/images.json
+          key: ${{ steps.key.outputs.key }}
+      - name: Drop the saved archive
+        if: steps.images.outputs.cache-hit != 'true'
+        run: rm -f "$RUNNER_TEMP/images.tar"
+      # Mesa's display-less GL, which the headless viewer renders the sim's camera through.
+      - name: System packages (Mesa EGL)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends -o Acquire::http::Timeout=30 -o Acquire::Retries=3 libegl1 libgl1-mesa-dri
+      - name: Live tier
+        env:
+          # Asked for by name: a sim that can't run fails instead of skipping.
+          NAOQI_E2E_TARGET: sim
+          NAOQI_E2E_SIM_VERSION: ${{ matrix.version }}
+        run: uv run pytest tests-e2e -rs -o log_cli=true --log-cli-level=WARNING
+      - name: Container logs
+        if: failure()
+        run: |
+          for c in $(docker ps -a --filter name=naoqi-sim- --format '{{.Names}}'); do
+            echo "::group::$c"
+            docker logs --tail 300 "$c" 2>&1
+            echo "::endgroup::"
+          done

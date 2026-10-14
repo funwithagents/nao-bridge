@@ -1,4 +1,4 @@
-"""The ``real`` backend: ``AnyNaoqiRobot`` over a ``qi`` session to a Nao.
+"""The ``real`` backend: ``NaoqiRobot`` over a ``qi`` session to a Nao.
 
 Specified by [specs/robot.md](../../specs/robot.md). ``qi`` is imported lazily on
 ``connect()``, so this module (and ``naoqi_bridge``) imports where ``qi`` isn't installed.
@@ -23,7 +23,7 @@ from .robot import (
     TouchCallback,
 )
 
-__all__ = ["NaoqiRobot"]
+__all__ = ["RealNaoqiRobot"]
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +50,8 @@ class _AudioSink:
         self._callback(nbOfChannels, nbOfSamplesByChannel, bytes(inputBuffer))
 
 
-class NaoqiRobot:
-    """``AnyNaoqiRobot`` over a ``qi`` session to a real (or Choregraphe-simulated) robot."""
+class RealNaoqiRobot:
+    """``NaoqiRobot`` over a ``qi`` session to a real (or Choregraphe-simulated) robot."""
 
     AUDIO_SERVICE_NAME = "NaoqiBridgeAudio"
 
@@ -65,6 +65,7 @@ class NaoqiRobot:
         self.ip = ip
         self.port = port
         self.connect_timeout_s = connect_timeout_s
+        self._speech_stopped = threading.Event()
         self._session: Any = None
         self._services: dict[str, Any] = {}
         self._touch_links: list[tuple[Any, Any]] = []
@@ -141,9 +142,20 @@ class NaoqiRobot:
         self._service("ALTextToSpeech").setLanguage(language)
 
     def say(self, text: str) -> None:
-        self._service("ALAnimatedSpeech").say(text)
+        self._speech_stopped.clear()
+        try:
+            self._service("ALAnimatedSpeech").say(text)
+        except RuntimeError:
+            # ALAnimatedSpeech._stopAll ends a say with an error ("Future canceled"):
+            # stopped is how a say ends, not how it fails.
+            if not self._speech_stopped.is_set():
+                raise
 
     def stop_speech(self) -> None:
+        self._speech_stopped.set()
+        # ALAnimatedSpeech's own stop ends a say at once; without it, NAOqi 2.8's say
+        # waits for its current gesture, up to 2.5 s after ALTextToSpeech.stopAll.
+        self._service("ALAnimatedSpeech")._stopAll(False)
         self._service("ALTextToSpeech").stopAll()
 
     def wake_up(self) -> None:
