@@ -2,25 +2,39 @@
 
 Specified by [specs/robot.md](../../specs/robot.md). It serves a fixed ``packages2``-shaped
 package list, simulates behavior runs, speech and posture moves that take time, and
-sensor events, reports the joints of the posture it's in, and pushes silent audio.
+sensor events, reports the joints of the posture it's in, pushes silent audio and
+serves paced, deterministic camera frames.
 """
 
 from __future__ import annotations
 
 import copy
 import threading
-from typing import Any
+import time
+from dataclasses import dataclass
+from typing import Any, Literal
 
-from .config import AudioChannel
+from .config import AudioChannel, CameraResolution
 from .robot import (
     AUDIO_SAMPLE_RATE,
     AudioCallback,
+    Camera,
+    CameraRead,
     RobotConnectionError,
     TouchCallback,
     TouchPart,
 )
 
-__all__ = ["JOINT_NAMES", "POSTURE_ANGLES", "REST_POSTURE", "FakeNaoqiRobot"]
+__all__ = [
+    "CAMERA_SIZES",
+    "FAKE_CAMERA_FOV",
+    "FAKE_CAMERA_TRANSFORMS",
+    "JOINT_NAMES",
+    "POSTURE_ANGLES",
+    "REST_POSTURE",
+    "FakeNaoqiRobot",
+    "fake_camera_pixels",
+]
 
 
 def _root_package(
@@ -190,6 +204,54 @@ POSTURE_ANGLES: dict[str, tuple[float, ...]] = {
 # Where a robot is when it starts and after rest(): Naoqi's rest posture on a Nao.
 REST_POSTURE = "Crouch"
 
+# (width, height) per resolution, as ALVideoDevice serves them.
+CAMERA_SIZES: dict[CameraResolution, tuple[int, int]] = {
+    "qqvga": (160, 120),
+    "qvga": (320, 240),
+    "vga": (640, 480),
+    "4vga": (1280, 960),
+}
+# A Nao v5 camera's (horizontal, vertical) field of view, radians.
+FAKE_CAMERA_FOV = (1.063, 0.831)
+# Each camera's pose in FRAME_ROBOT (row-major 4x4), measured on a simulated Nao
+# (naoqi-sim 2.1) at Crouch, as for the joint angles above.
+FAKE_CAMERA_TRANSFORMS: dict[Camera, tuple[float, ...]] = {
+    "top": (
+        0.9975, -0.0001, 0.0711, 0.0621,
+        0.0019, 0.9997, -0.0254, -0.0106,
+        -0.0711, 0.0255, 0.9971, 0.4143,
+        0.0, 0.0, 0.0, 1.0,
+    ),
+    "bottom": (
+        0.7363, -0.0001, 0.6766, 0.0518,
+        0.0173, 0.9997, -0.0187, -0.0094,
+        -0.6764, 0.0255, 0.7361, 0.3689,
+        0.0, 0.0, 0.0, 1.0,
+    ),
+}  # fmt: skip
+
+
+def fake_camera_pixels(width: int, height: int, index: int) -> bytes:
+    """The fake's BGR image for frame ``index``: a horizontal ramp on blue, the frame
+    index modulo 256 on green, no red."""
+    green = index % 256
+    row = bytes(
+        b for x in range(width) for b in (x * 255 // max(width - 1, 1), green, 0)
+    )
+    return row * height
+
+
+@dataclass
+class _FakeCamera:
+    """A subscribed camera: the frame it serves until its period is up."""
+
+    width: int
+    height: int
+    fps: int
+    frame: CameraRead
+    index: int
+    served_at: float  # time.monotonic() when ``frame`` became current
+
 
 class FakeNaoqiRobot:
     """Offline ``NaoqiRobot``: records commands, serves a fixed package list.
@@ -202,6 +264,9 @@ class FakeNaoqiRobot:
     ``go_to_posture`` moves; ``wake_up()`` keeps it, as on a Nao. While audio is subscribed, a thread pushes a silent
     mono chunk every ``audio_chunk_s`` seconds, as Naoqi pushes its buffers; setting
     ``audio_chunk_s`` to ``None`` pauses it, so a test pushes only what it emits.
+    A subscribed camera serves a new frame every ``camera_period_s`` seconds (the
+    subscribed ``1 / fps`` while it is ``"fps"``) and the same one in between, as
+    Naoqi does; ``None`` freezes every camera on its current frame.
     """
 
     # How long a behavior runs unless stopped: long enough to be seen running and
@@ -229,6 +294,8 @@ class FakeNaoqiRobot:
         self.audio_chunk_s: float | None = 0.085
         self._audio_stop = threading.Event()
         self._audio_thread: threading.Thread | None = None
+        self.camera_period_s: float | None | Literal["fps"] = "fps"
+        self._cameras: dict[Camera, _FakeCamera] = {}
 
     def _record(self, method: str, **args: Any) -> None:
         self.commands.append((method, args))
@@ -280,6 +347,8 @@ class FakeNaoqiRobot:
         self._record("close")
         self.connected = False
         self._stop_audio_push()
+        with self._lock:
+            self._cameras.clear()
         with self._lock:  # over once this returns, as on the robot
             for stop in self._running.values():
                 stop.set()
@@ -402,6 +471,62 @@ class FakeNaoqiRobot:
             callback = self._audio_callback
             if callback is not None:
                 callback(1, samples, bytes(2 * samples))
+
+    def subscribe_camera(
+        self, camera: Camera, resolution: CameraResolution, fps: int
+    ) -> None:
+        self._record("subscribe_camera", camera=camera, resolution=resolution, fps=fps)
+        width, height = CAMERA_SIZES[resolution]
+        with self._lock:
+            self._cameras[camera] = _FakeCamera(
+                width,
+                height,
+                fps,
+                self._camera_frame(camera, width, height, 0, 0.0),
+                0,
+                time.monotonic(),
+            )
+
+    def read_camera(self, camera: Camera) -> CameraRead | None:
+        if not self.connected:
+            raise RobotConnectionError("not connected")
+        with self._lock:
+            state = self._cameras.get(camera)
+            if state is None:
+                raise RuntimeError(f"the {camera} camera is not subscribed")
+            period = self.camera_period_s
+            if period == "fps":
+                period = 1.0 / state.fps
+            now = time.monotonic()
+            if period is not None and now - state.served_at >= period:
+                state.index += 1
+                state.served_at = now
+                state.frame = self._camera_frame(
+                    camera,
+                    state.width,
+                    state.height,
+                    state.index,
+                    state.frame.naoqi_ts + period,
+                )
+            return state.frame
+
+    def unsubscribe_camera(self, camera: Camera) -> None:
+        self._record("unsubscribe_camera", camera=camera)
+        with self._lock:
+            self._cameras.pop(camera, None)
+
+    @staticmethod
+    def _camera_frame(
+        camera: Camera, width: int, height: int, index: int, naoqi_ts: float
+    ) -> CameraRead:
+        return CameraRead(
+            width=width,
+            height=height,
+            data=fake_camera_pixels(width, height, index),
+            naoqi_ts=naoqi_ts,
+            fov=FAKE_CAMERA_FOV,
+            transform=FAKE_CAMERA_TRANSFORMS[camera],
+        )
 
     def touch(self, key: TouchPart, value: float) -> None:
         """Simulate a tactile sensor event, as Naoqi would fire it."""

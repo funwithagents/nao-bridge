@@ -12,7 +12,7 @@ tests:
 
 ## Purpose
 
-Gives non-MCP clients (a game engine, a web app, a custom agent loop) network access to [NaoqiBridge](bridge.md) over a JSON WebSocket protocol — commands in, results and live robot events (touch, joints, audio, logs) out. Like the MCP server, it is an adapter with no robot logic of its own.
+Gives non-MCP clients (a game engine, a web app, a custom agent loop) network access to [NaoqiBridge](bridge.md) over a JSON WebSocket protocol — commands in, results and live robot events (touch, joints, audio, camera frames, logs) out. Like the MCP server, it is an adapter with no robot logic of its own.
 
 ## Core concepts / Decided
 
@@ -37,8 +37,9 @@ Exactly one client at a time. A new connection ends the previous session (its st
 - **A session closed while opening streams nothing.** `close()` can run while the connect ritual is still going (the server stopping, for one). The session then subscribes no stream once the ritual ends, and `close()` releases only what was subscribed. Found on Windows, where the ritual's steps take longer.
 - **Joints:** a task follows `bridge.joints.changes()` and sends a `Joints` message per published sample. It is latest-wins, so a slow connection skips poses rather than lagging.
 - **Audio:** a task drains one `bridge.audio_input()` subscriber and sends an `Audio` message per chunk, base64-encoding it here, where the JSON transport needs it ([microphone.md](microphone.md)).
+- **Frames:** for each enabled camera, a task follows `bridge.cameras[camera].frames()` and sends a `Frame` message per frame it gets, JPEG-encoded with Pillow off the event loop (`asyncio.to_thread`, quality 80) and base64-encoded here ([camera.md](camera.md)). `frames()` is latest-wins, so a slow connection or encode skips frames rather than lagging.
 
-The joints and audio tasks are cancelled and the touch handler unsubscribed when the client leaves, so nothing is sent after it.
+The joints, audio and frame tasks are cancelled and the touch handler unsubscribed when the client leaves, so nothing is sent after it.
 
 **Bad input doesn't end the session.** A message that isn't JSON, isn't the envelope, or has an unknown `id` is answered with a `Log` message at `ERROR` level naming the problem, and the session keeps reading. Only the connection closing (by the client or by the server) ends a session.
 
@@ -57,6 +58,7 @@ Every message, both directions, is `{"id": <string>, "data": <object>}`.
 | `Touch` | `{part, touched: bool}` |
 | `Joints` | `{jointsNames, jointsAngles}` (every `streams.joints.period_s`) |
 | `Audio` | `{rate, channels, nbSamplesPerChannel, data: base64 PCM16LE}`, one per mic chunk |
+| `Frame` | `{camera: "top" \| "bottom", frameId, width, height, format: "jpeg", data: base64 JPEG, cameraTransform: [16 floats, row-major 4×4, camera → FRAME_ROBOT], fov: [horizontal, vertical] radians}`, one per published frame of each enabled camera ([camera.md](camera.md)) |
 | `Log` | `{log, logLevel}` — the session's own log lines (connection, each command's start and result, bad input) mirrored to the client; the listener's and the library's logs aren't |
 
 ### Commands (`commandId` → `commandData` → `NaoqiBridge` verb)
@@ -93,3 +95,4 @@ A verb that returns maps to `Success`, one that raises to `Error`; payloads use 
 
 1. **JSON Schema.** The protocol has no machine-readable schema; the tables above are the reference. Deferred until a second client implementation (e.g. Unity/C#) needs one.
 2. **No auth.** Anyone on the LAN can drive the robot; acceptable for a local tool, revisit if exposed further.
+3. **Which streams the server sends.** Today the server streams every stream the bridge config enables, so a client that doesn't want the frames (or the audio) needs a bridge config without them. A `server.streams` list naming what this server sends to its client, independent of what the bridge subscribes, would let one bridge config serve different clients. Deferred until a second client wants a different set.

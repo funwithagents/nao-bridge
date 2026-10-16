@@ -1,6 +1,6 @@
 # naoqi-bridge — Overview
 
-naoqi-bridge connects AI agents and applications to Aldebaran's Nao robot, and in principle to any robot running Naoqi. One async Python object, `NaoqiBridge`, hides the Naoqi `qi` session and its services behind intent-level verbs (speak, stand up, dance, react, run an installed app) and streams the robot's touch, joint and microphone data back out. Two thin adapters expose that one object without duplicating its logic: an MCP server for LLM agents and a JSON WebSocket server for custom applications. Under the bridge, a robot seam has two implementations, a Naoqi over `qi` and an offline fake, behind three backends: a real Nao, a simulated one the bridge can start itself (naoqi-sim, in Docker), and the fake, so the whole stack runs and is tested with no hardware, and the fast tests with no `qi` wheel.
+naoqi-bridge connects AI agents and applications to Aldebaran's Nao robot, and in principle to any robot running Naoqi. One async Python object, `NaoqiBridge`, hides the Naoqi `qi` session and its services behind intent-level verbs (speak, stand up, dance, react, run an installed app) and streams the robot's touch, joint, microphone and camera data back out. Two thin adapters expose that one object without duplicating its logic: an MCP server for LLM agents and a JSON WebSocket server for custom applications. Under the bridge, a robot seam has two implementations, a Naoqi over `qi` and an offline fake, behind three backends: a real Nao, a simulated one the bridge can start itself (naoqi-sim, in Docker), and the fake, so the whole stack runs and is tested with no hardware, and the fast tests with no `qi` wheel.
 
 This overview is the map of the project: what it is for, how the parts fit, the rules that cut across them, and where each part stands. Each concept has its own spec (see [_index.md](_index.md)), which is the authority on its details; the sections here summarize and link. It is reference material without a status.
 
@@ -18,7 +18,7 @@ This overview is the map of the project: what it is for, how the parts fit, the 
 | --- | --- |
 | Intent-level verbs over Naoqi: speech, motors and postures, eyes, breathing, basic awareness, installed behaviors | Exposing Naoqi's full API; a raw service escape hatch beyond `bridge.robot` |
 | A catalog of what's installed (dances, expressive reactions, body actions, apps), classified from the robot's package list | Installing or managing packages on the robot |
-| Robot streams: touch events, joint angles, microphone audio | Camera images, perception, speech recognition (open questions below) |
+| Robot streams: touch events, joint angles, microphone audio, camera frames with the camera's pose | Perception (faces, people), speech recognition, gaze from a pixel (open questions below) |
 | An MCP server and a WebSocket server over the bridge | Authentication, multi-client arbitration (the WebSocket server takes one client at a time) |
 | `real` (Naoqi over `qi`), `sim` (naoqi-sim, started or borrowed) and `fake` (offline) backends | Simulating Naoqi itself: naoqi-sim does, the bridge only starts, borrows and stops it |
 | Naoqi 2.1.4.13 on Nao v5, the only verified target | Nao v6, Pepper and newer Naoqi: expected to need adjustments inside `RealNaoqiRobot` only ([robot.md](robot.md)) |
@@ -34,7 +34,7 @@ This overview is the map of the project: what it is for, how the parts fit, the 
   └───────┬────────┘             └─────────┬────────────┘                     │
           └──────────────────┬─────────────┴──────────────────────────────────┘
                      ┌───────▼────────┐   built from NaoqiBridgeConfig
-                     │  NaoqiBridge   │   verbs · catalog · on_touch · joints · mic
+                     │  NaoqiBridge   │   verbs · catalog · on_touch · joints · mic · cameras
                      └──┬─────────┬───┘
      sim backend:       │         │ NaoqiRobot Protocol (blocking calls, run off the loop)
      start or borrow ┌──▼──────┐  └───────┬──────────────────┬──────────────────┐
@@ -58,12 +58,13 @@ This overview is the map of the project: what it is for, how the parts fit, the 
 | Event | `events.py` | `Event[T]`: synchronous pub/sub, for occurrences (`bridge.on_touch`) | [events.md](events.md) |
 | Observable | `observable.py` | `Observable[T]`: readable and subscribable latest-wins state (`bridge.joints`) | [observable.md](observable.md) |
 | Mic feed | `microphone.py` | `MicFeed`: one subscription to Naoqi's pushed audio, a 200-chunk ring, any number of `audio_input()` subscribers | [microphone.md](microphone.md) |
+| Camera feeds | `camera.py` | `CameraFeed` per camera (top, bottom): one `ALVideoDevice` subscription pulled at `fps`, the newest `CameraFrame` (BGR, the camera's pose in FRAME_ROBOT) on an `Observable`; `latest()`, `frames()` | [camera.md](camera.md) |
 | MCP server | `naoqi_mcp_server.py` | `NaoqiMcpServer`: verbs as MCP tools returning status strings; behaviors return once started; stdout reserved for JSON-RPC | [naoqi-mcp-server.md](naoqi-mcp-server.md) |
 | Viewer | `viewer.py` | A naoqi-viewer mirror window on the robot the bridge drives, opened with the session; the one module that launches naoqi-viewer | [viewer.md](viewer.md) |
 | WebSocket server | `naoqi_websocket_server.py` | `NaoqiWebsocketServer` (bridge + listener, one client at a time) and `ClientSession` (the JSON protocol: commands in, touch / joints / audio / log events out) | [naoqi-websocket-server.md](naoqi-websocket-server.md) |
 | Front door | `__init__.py` | Re-exports what a caller needs: `NaoqiBridge`, the config classes, the stream values, `Event` / `Observable`, the errors | [bridge.md](bridge.md) |
 
-Dependencies point one way: servers → bridge → seam → backends. `events.py` and `observable.py` import nothing from the project; `config.py` imports neither `qi`, `mcp` nor `websockets`; only `real_robot.py` touches `qi`, and only when it connects; only `sim.py` starts naoqi-sim and only `viewer.py` launches naoqi-viewer, and `config.py` reads their config classes, all lazily.
+Dependencies point one way: servers → bridge → seam → backends. `events.py` and `observable.py` import nothing from the project; `config.py` imports neither `qi`, `mcp` nor `websockets`; only `real_robot.py` touches `qi`, and only when it connects; only `sim.py` starts naoqi-sim and only `viewer.py` launches naoqi-viewer, and `config.py` reads their config classes, all lazily; `camera.py` and the WebSocket server import `numpy` and `Pillow` only when a frame's array or a JPEG is asked for ([camera.md](camera.md)).
 
 ## Status
 
@@ -75,6 +76,7 @@ Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index
 | Robot seam, `real` and `fake` backends | Built and tested; `real` verified live on Naoqi 2.1.4.13 / Nao v5 only ([robot.md](robot.md)) |
 | `NaoqiBridge`: verbs, catalog, errors, streams, cancellation | Built and tested ([bridge.md](bridge.md)) |
 | `Event`, `Observable`, mic feed | Built and tested ([events.md](events.md), [observable.md](observable.md), [microphone.md](microphone.md)) |
+| Camera feeds (`bridge.cameras`, the `Frame` message) | Built and tested, live on a 2.1 sim at 10 fps ([camera.md](camera.md)) |
 | MCP server | Built and tested ([naoqi-mcp-server.md](naoqi-mcp-server.md)) |
 | WebSocket server, protocol version 1 | Built and tested ([naoqi-websocket-server.md](naoqi-websocket-server.md)) |
 | Viewer (naoqi-viewer mirror window, `[viewer]` extra) | Built and tested; the live check (`NAOQI_E2E_VIEWER=1`) passes locally on a 2.1 sim, as `real` and as a borrowed `sim`; not in CI, which has no display ([viewer.md](viewer.md)) |
@@ -86,11 +88,11 @@ Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index
 
 - **Verbs.** Every verb is `async`. The bridge checks it's running (`NotRunningError`), resolves catalog ids (`ValueError` naming the known ones), asks the robot whether the motors are on when the verb moves the body (`MotorsOffError`), then runs the blocking robot call in `asyncio.to_thread`. A Naoqi exception comes back as `CommandFailedError`, chained. Success returns `None`. Cancelling the awaiting task interrupts any verb. A spanning verb (`say`, the postures, behaviors and the catalog verbs) sends its stop and waits for the robot call to return before re-raising, so the robot has stopped by the time the caller sees the `CancelledError` ([bridge.md](bridge.md) "Cancellation"). So `except (BridgeError, ValueError)` catches every expected failure, and both servers turn exactly those into a readable reason for their client ([bridge.md](bridge.md) "Errors").
 - **Long-running behaviors.** On the bridge, `dance`, `expressive_reaction`, `body_action`, `run_app` and `run_behavior` await the behavior's end, and the item shows in `current_*` while it runs; the stop verbs are called concurrently. The servers don't hold their client for minutes: the WebSocket server runs each command as its own task, and the MCP tools return once the item is seen playing ([naoqi-mcp-server.md](naoqi-mcp-server.md)).
-- **Streams.** Naoqi calls back on its own threads. The bridge marshals touch onto its event loop and re-emits it on `on_touch`; a bridge task samples joints every `period_s` into `joints`; the mic feed writes each pushed buffer into its ring under a lock and wakes its subscribers through `call_soon_threadsafe`. Consumers only ever see the event loop.
+- **Streams.** Naoqi calls back on its own threads. The bridge marshals touch onto its event loop and re-emits it on `on_touch`; a bridge task samples joints every `period_s` into `joints`; the mic feed writes each pushed buffer into its ring under a lock and wakes its subscribers through `call_soon_threadsafe`; a bridge task per enabled camera pulls `ALVideoDevice` every `1 / fps` and publishes each new frame, with the camera's pose, on an `Observable`. Consumers only ever see the event loop.
 
 ## Cross-cutting rules
 
-- **Three stream shapes, chosen by what the data is.** An occurrence where every one matters and nothing replays is an `Event` (touch). A state where only the latest matters is an `Observable` (joints). A continuous signal every consumer needs whole, at its own pace, is a ring with cursors (audio). Each shape has any number of consumers; none is a callback.
+- **Three stream shapes, chosen by what the data is.** An occurrence where every one matters and nothing replays is an `Event` (touch). A state where only the latest matters is an `Observable` (joints, camera frames). A continuous signal every consumer needs whole, at its own pace, is a ring with cursors (audio). Each shape has any number of consumers; none is a callback.
 - **The config switches streams; the bridge's APIs consume them.** A stream is subscribed on the robot at `start()` only when the config enables it, and using a disabled stream's API raises `BridgeError` ([config.md](config.md)).
 - **Every verb is cancellable.** Cancelling the task is the one way to interrupt a verb: the effect it started stops, the cancel returns in bounded time, and the session stays usable. There's no rewind ([bridge.md](bridge.md) "Cancellation").
 - **Raise why, not whether.** No verb returns `bool`; each failure has a type and a message an agent can act on.
@@ -101,11 +103,11 @@ Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index
 
 ## Configuration
 
-One JSON shape, `NaoqiBridgeConfig`: `backend` (`fake` by default, `real` or `sim`), `robot` (`ip`, `port`, `connect_timeout_s`), `streams` (`touch`, `joints`, `audio`, all off by default) and `sim` (`spawn`: `auto` by default, `never` or `always`; `config`: a naoqi-sim config as it is) and `viewer` (`enabled`; `config`: a naoqi-viewer config, minus what the bridge sets). Unknown keys, bad types and a `real` backend without an IP fail at load with a `ConfigError` naming the key path. Each server wraps it as `{"bridge": …, "server": …}`, and its CLI takes `--config FILE` only (exit 2 on a bad config, 1 on an unreachable robot or an unavailable sim). Ready-made files live in `examples/configs/`. Details: [config.md](config.md).
+One JSON shape, `NaoqiBridgeConfig`: `backend` (`fake` by default, `real` or `sim`), `robot` (`ip`, `port`, `connect_timeout_s`), `streams` (`touch`, `joints`, `audio`, `cameras.top` / `cameras.bottom`, all off by default) and `sim` (`spawn`: `auto` by default, `never` or `always`; `config`: a naoqi-sim config as it is) and `viewer` (`enabled`; `config`: a naoqi-viewer config, minus what the bridge sets). Unknown keys, bad types and a `real` backend without an IP fail at load with a `ConfigError` naming the key path. Each server wraps it as `{"bridge": …, "server": …}`, and its CLI takes `--config FILE` only (exit 2 on a bad config, 1 on an unreachable robot or an unavailable sim). Ready-made files live in `examples/configs/`. Details: [config.md](config.md).
 
 ## Packaging and platforms
 
-- Python 3.12–3.13, packaged with uv, `src/` layout; runtime dependencies `mcp<2`, `websockets` and, where a wheel exists, `qi>=3.1.8,<4` ([project.md](project.md)).
+- Python 3.12–3.13, packaged with uv, `src/` layout; runtime dependencies `mcp<2`, `websockets`, `numpy`, `Pillow` and, where a wheel exists, `qi>=3.1.8,<4` ([project.md](project.md)).
 - `qi` comes from the package index of the [funwithagents/libqi-python](https://github.com/funwithagents/libqi-python) fork on GitHub Pages, `https://funwithagents.github.io/libqi-python/simple/`; PyPI only has the older 3.1.5. uv reads it from `pyproject.toml`; pip needs `--extra-index-url` with that URL.
 
   | Platform | `qi` | Backends |
@@ -137,4 +139,5 @@ Collected from the concept specs, which own them.
 - **Publishing on PyPI** ([project.md](project.md)): naoqi-bridge installs from its repository; a published wheel would resolve `qi` through the libqi index. Undecided.
 - **Live-tier capabilities** ([testing_support.md](testing_support.md)): `touch_inject`, `inertial` and the robot model join the vocabulary with the first test that needs them (`inertial` could also replace the 2.8 sim's Sit-through-Crouch rule); consumer-defined profiles and a `fake` target for consumers' smoke runs are deferred.
 - **CI coverage** ([ci.md](ci.md)): a Python 3.13 entry, deferred until a regression shows the need.
-- **Not yet designed:** camera images, perception (faces, people), speech recognition, and how they'd reach agents. None has a spec.
+- **Camera feeds** ([camera.md](camera.md)): the camera's transform at capture time rather than at the pull; a `look_at` verb from a pixel; the bottom camera on a sim (naoqi-sim feeds the top one only); YUV422 to spare the robot's CPU; which streams a server sends; whether and how the cameras reach MCP agents.
+- **Not yet designed:** perception (faces, people), speech recognition, and how they'd reach agents. None has a spec.

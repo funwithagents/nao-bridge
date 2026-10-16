@@ -62,7 +62,7 @@ A capability is a name in a closed vocabulary. It comes from one of two sources,
 - **Probed**: a fact about the target, read from it at session start. Nobody can declare it.
 - **Declared**: a fact about the room or the host that no probe can see, such as whether the robot has space to move or whether someone stands next to it. It comes from `NAOQI_E2E_DECLARED_CAPS`, or, for each of today's three, from the flag that stands for it (`NAOQI_E2E_ALLOW_MOTION`, `NAOQI_E2E_INTERACTIVE`, `NAOQI_E2E_VIEWER`). The flags keep the commands people already run; `NAOQI_E2E_DECLARED_CAPS` is there for a declared capability added later, which then gets a flag only if it is common enough to deserve one. Declaring a probed name is a `UsageError`.
 
-**A name joins the vocabulary when a test needs it, the bridge's or a consumer's, and a profile pins it.** A probe that neither a test nor a profile uses is code nobody checks. `camera` gates no bridge test yet (the bridge has no camera API), but consumers can gate on it, and the `sim` profile checks its probe against a live sim on every CI run. The candidates waiting for a need are listed under Open questions.
+**A name joins the vocabulary when a test needs it, the bridge's or a consumer's, and a profile pins it.** A probe that neither a test nor a profile uses is code nobody checks. `camera` gates the bridge's live camera test ([camera.md](camera.md)), consumers can gate on it, and the `sim` profile pins it, so its probe is checked against a live sim on every CI run. The candidates waiting for a need are listed under Open questions.
 
 **Probed:**
 

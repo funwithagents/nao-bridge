@@ -45,7 +45,7 @@ class MicChunk:
 - **`seq`** increases by one per published chunk and keeps counting across sessions of the same bridge object. `published_count` is the next `seq`.
 - **`ts`** is the arrival time on the monotonic clock. Naoqi's own `timestamp` argument is not used: it's on the robot's clock, and arrival time is what pre-roll needs.
 - **`data`** is Naoqi's buffer copied once into `bytes`. It's shared by reference with every subscriber, and `bytes` is immutable, so no subscriber can alter what another reads.
-- **No conversion:** Naoqi already delivers 16-bit little-endian PCM, which is the stream's contract. No numpy dependency.
+- **No conversion:** Naoqi already delivers 16-bit little-endian PCM, which is the stream's contract. No numpy in the mic's path: the chunk stays `bytes` (numpy is a dependency for the camera feeds' `image` view, [camera.md](camera.md), imported lazily there).
 
 ### The feed
 

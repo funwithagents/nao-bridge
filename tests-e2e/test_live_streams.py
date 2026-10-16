@@ -1,5 +1,6 @@
 """Live: the robot's streams, on the target. Joints on any target, audio where Naoqi
-pushes it (`audio_in`), a tone played into the sim's microphone (`audio_inject`), and
+pushes it (`audio_in`), a tone played into the sim's microphone (`audio_inject`), the
+top camera's frames and pose (`camera`), and
 a head touch where a person can press the sensors (`touch_sensors`, `person_present`:
 NAOQI_E2E_INTERACTIVE=1, with `-s` to see the prompt).
 """
@@ -16,6 +17,9 @@ from support import MEASUREMENTS
 
 from naoqi_bridge import (
     AudioStream,
+    CameraFrame,
+    CameraStream,
+    CameraStreams,
     JointsState,
     JointsStream,
     StreamSettings,
@@ -112,6 +116,40 @@ def test_a_sound_played_into_the_sims_microphone_reaches_audio_input(
     spectrum = np.abs(np.fft.rfft(samples * np.hanning(len(samples))))
     peak = float(np.fft.rfftfreq(len(samples), 1 / rate)[np.argmax(spectrum)])
     assert abs(peak - 440) < 20
+
+
+@pytest.mark.requires("camera")
+def test_the_top_camera_streams_frames_with_its_pose():
+    config = live_config(
+        StreamSettings(
+            cameras=CameraStreams(
+                top=CameraStream(enabled=True, resolution="qvga", fps=10)
+            )
+        )
+    )
+
+    async def run() -> tuple[CameraFrame, int, float]:
+        async with live_session(config) as bridge:
+            feed = bridge.cameras["top"]
+            async with asyncio.timeout(3.0):
+                frame = await feed.wait_for(lambda _: True)
+            first = feed.published_count
+            started = time.monotonic()
+            await asyncio.sleep(1.0)
+            return frame, feed.published_count - first, time.monotonic() - started
+
+    frame, frames, elapsed = asyncio.run(run())
+    # Recorded for specs/camera.md: the rate the top feed achieves at 10 fps asked.
+    MEASUREMENTS.append(("top camera at 10 fps", f"{frames / elapsed:.1f} fps"))
+    assert (frame.width, frame.height) == (320, 240)
+    assert len(frame.data) == 320 * 240 * 3
+    assert frame.image.shape == (240, 320, 3)
+    transform = frame.camera_transform
+    assert len(transform) == 16
+    assert transform[12:] == pytest.approx((0.0, 0.0, 0.0, 1.0))
+    assert 0.3 < transform[11] < 0.6  # the camera's height: sitting or standing
+    assert all(0.5 < angle < 1.5 for angle in frame.fov)
+    assert frames >= 5
 
 
 @pytest.mark.requires("touch_sensors", "person_present")

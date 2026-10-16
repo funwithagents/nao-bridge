@@ -31,10 +31,14 @@ if TYPE_CHECKING:
 __all__ = [
     "AUDIO_CHANNELS",
     "BACKENDS",
+    "CAMERA_RESOLUTIONS",
     "SIM_SPAWNS",
     "AudioChannel",
     "AudioStream",
     "Backend",
+    "CameraResolution",
+    "CameraStream",
+    "CameraStreams",
     "ConfigError",
     "JointsStream",
     "JsonConfig",
@@ -58,9 +62,13 @@ __all__ = [
 type Backend = Literal["real", "fake", "sim"]
 type AudioChannel = Literal["front", "rear", "left", "right"]
 type SimSpawn = Literal["never", "auto", "always"]
+type CameraResolution = Literal["qqvga", "qvga", "vga", "4vga"]
 BACKENDS: tuple[Backend, ...] = ("real", "fake", "sim")
 AUDIO_CHANNELS: tuple[AudioChannel, ...] = ("front", "rear", "left", "right")
 SIM_SPAWNS: tuple[SimSpawn, ...] = ("never", "auto", "always")
+CAMERA_RESOLUTIONS: tuple[CameraResolution, ...] = ("qqvga", "qvga", "vga", "4vga")
+# The frame rates a camera stream may ask of Naoqi, inclusive.
+CAMERA_FPS_RANGE = (1, 30)
 
 # What to install for the sim backend.
 SIM_EXTRA = "naoqi-bridge[sim]"
@@ -275,12 +283,64 @@ class AudioStream(JsonConfig):
 
 
 @dataclass(frozen=True)
+class CameraStream(JsonConfig):
+    """One camera's feed (specs/camera.md "Config"): the resolution and rate asked of
+    Naoqi, which are also the feed's pull rate."""
+
+    enabled: bool = False
+    resolution: CameraResolution = "qvga"
+    fps: int = 10
+
+    def __post_init__(self) -> None:
+        _require(
+            self.resolution in CAMERA_RESOLUTIONS,
+            "resolution",
+            f"must be one of {', '.join(map(repr, CAMERA_RESOLUTIONS))}, "
+            f"got {self.resolution!r}",
+        )
+        low, high = CAMERA_FPS_RANGE
+        _require(
+            not isinstance(self.fps, bool)
+            and isinstance(self.fps, int)
+            and low <= self.fps <= high,
+            "fps",
+            f"must be an integer from {low} to {high}, got {self.fps!r}",
+        )
+
+    @classmethod
+    def parse(cls, data: Any, path: str) -> Self:
+        return parse_block(
+            cls,
+            data,
+            path,
+            enabled=as_bool,
+            resolution=as_choice(CAMERA_RESOLUTIONS),
+            fps=as_int,
+        )
+
+
+@dataclass(frozen=True)
+class CameraStreams(JsonConfig):
+    """The robot's two cameras, each with its own block."""
+
+    top: CameraStream = field(default_factory=CameraStream)
+    bottom: CameraStream = field(default_factory=CameraStream)
+
+    @classmethod
+    def parse(cls, data: Any, path: str) -> Self:
+        return parse_block(
+            cls, data, path, top=CameraStream.parse, bottom=CameraStream.parse
+        )
+
+
+@dataclass(frozen=True)
 class StreamSettings(JsonConfig):
     """Which robot streams the bridge subscribes to at ``start()``."""
 
     touch: TouchStream = field(default_factory=TouchStream)
     joints: JointsStream = field(default_factory=JointsStream)
     audio: AudioStream = field(default_factory=AudioStream)
+    cameras: CameraStreams = field(default_factory=CameraStreams)
 
     @classmethod
     def parse(cls, data: Any, path: str) -> Self:
@@ -291,6 +351,7 @@ class StreamSettings(JsonConfig):
             touch=TouchStream.parse,
             joints=JointsStream.parse,
             audio=AudioStream.parse,
+            cameras=CameraStreams.parse,
         )
 
 

@@ -37,6 +37,7 @@ Implementation plans for naoqi-bridge — each plan turns a settled part of a sp
 | [202610140902_sim-robot-and-session-sim.md](202610140902_sim-robot-and-session-sim.md) | One robot class per backend (`NaoqiRobot` Protocol, `RealNaoqiRobot`, `SimNaoqiRobot` with the 2.8 Sit workaround, `FakeNaoqiRobot`); `SimLease.sim`; the live tier owns one sim per session (`live_sim`, `spawn: "always"`) and a test plays into its microphone | Done |
 | [202610141500_viewer.md](202610141500_viewer.md) | The viewer: a naoqi-viewer mirror window on the robot the bridge drives (`viewer` block, `viewer.py`, `ViewerError`, the `[viewer]` extra pinned with naoqi-sim), opened last at `start()` and closed first at `stop()` | Done |
 | [202610141900_live-tier-capabilities.md](202610141900_live-tier-capabilities.md) | The live tier on capabilities: the shipped harness `naoqi_bridge.testing` (`[test]` extra), probed and declared capabilities, the `requires` marker, profiles (`sim` by default on a sim, `nao`), `live_session`; the bridge's live tests regated, app tests added | Done |
+| [202610161138_camera-feeds.md](202610161138_camera-feeds.md) | Camera feeds ([camera.md](../specs/camera.md)): `streams.cameras`, the seam over `ALVideoDevice` + `ALMotion.getTransform`, `camera.py` (`CameraFeed`, `CameraFrame`), `bridge.cameras`, the fake's paced frames, the WebSocket `Frame` message, numpy + Pillow, the live camera test | Done |
 
 ## Status legend
 

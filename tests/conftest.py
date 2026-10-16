@@ -38,5 +38,6 @@ def stub_qi(monkeypatch: pytest.MonkeyPatch) -> type[StubSession]:
     StubSession.closed = 0
     StubSession.futures = []
     StubSession.calls = []
+    StubSession.returns = {}
     monkeypatch.setitem(sys.modules, "qi", types.SimpleNamespace(Session=StubSession))
     return StubSession

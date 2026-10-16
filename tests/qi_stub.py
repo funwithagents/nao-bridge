@@ -27,6 +27,9 @@ class _StubSubscriber:
 
 
 class _StubService:
+    """Records every call; answers what ``StubSession.returns`` holds for it (a
+    callable is called with the arguments), else ``True``."""
+
     def __init__(
         self, calls: list[tuple[str, str, tuple[Any, ...]]], name: str
     ) -> None:
@@ -39,7 +42,8 @@ class _StubService:
 
         def call(*args: Any) -> Any:
             self._calls.append((self._name, method, args))
-            return True
+            answer = StubSession.returns.get((self._name, method), True)
+            return answer(*args) if callable(answer) else answer
 
         return call
 
@@ -81,6 +85,7 @@ class StubSession:
     closed: ClassVar[int] = 0
     futures: ClassVar[list[_StubFuture]] = []
     calls: ClassVar[list[tuple[str, str, tuple[Any, ...]]]] = []
+    returns: ClassVar[dict[tuple[str, str], Any]] = {}
 
     def connect(self, url: str, _async: bool = False) -> _StubFuture:
         assert _async, "connect must be asynchronous so a silent host can time out"

@@ -73,6 +73,7 @@ A live test says what it needs with `@pytest.mark.requires(...)`, never which ta
 |---|---|
 | `test_live_robot.py`, `test_live_verbs.py`, the MCP server test, cancelling a `say`, cancelling a `start()`, the joints stream | nothing: any target |
 | The audio stream at 16 kHz mono | `audio_in` |
+| The top camera feed: a 320×240 frame with the camera's pose, at least 5 frames a second ([camera.md](camera.md)) | `camera` |
 | A 440 Hz tone played into the sim's microphone reaches `audio_input()` | `audio_inject` |
 | A head touch reaches `on_touch` | `touch_sensors`, `person_present` |
 | Motors, postures and breathing; cancelling a reaction or a `stand_up` | `room_to_move` |
@@ -91,7 +92,7 @@ A test that moves the robot is marked `room_to_move`, and `live_session(..., mot
 - Add `NAOQI_E2E_ALLOW_MOTION=1` once the robot has room to move and someone is watching, and `NAOQI_E2E_INTERACTIVE=1`, with `-s` to see the prompts, when someone is at the robot.
 - `NAOQI_E2E_VIEWER=1` runs the viewer test on either target, locally.
 
-Live tests also **measure**. Each cancellation test records how long its cancel took to return, and the audio test records the chunk size Naoqi really pushes ([microphone.md](microphone.md) open question). `tests-e2e/conftest.py` prints these measurements in the run's terminal summary, after the harness's `live target` section, so the stop retry interval ([bridge.md](bridge.md) "How a spanning verb stops") can be tuned on real numbers.
+Live tests also **measure**. Each cancellation test records how long its cancel took to return, the audio test records the chunk size Naoqi really pushes ([microphone.md](microphone.md) open question), and the camera test the frame rate the top feed achieves ([camera.md](camera.md)). `tests-e2e/conftest.py` prints these measurements in the run's terminal summary, after the harness's `live target` section, so the stop retry interval ([bridge.md](bridge.md) "How a spanning verb stops") can be tuned on real numbers.
 
 ## Tooling
 

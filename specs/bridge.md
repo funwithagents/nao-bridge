@@ -17,15 +17,15 @@ tests:
 
 ## Purpose
 
-`NaoqiBridge` is the object a caller holds to drive Nao: intent-level async verbs (say, stand up, dance, react, run an installed app) plus the robot's touch, joint and audio streams. It is built from a [config](config.md) and sits on top of the [robot.md](robot.md) seam, so it runs unchanged on a real robot, a simulated one ([sim.md](sim.md)) or the fake. Every client — the [MCP server](naoqi-mcp-server.md), the [WebSocket server](naoqi-websocket-server.md), or a Python caller — shares this one implementation. It replaces the earlier `NaoAPI` class.
+`NaoqiBridge` is the object a caller holds to drive Nao: intent-level async verbs (say, stand up, dance, react, run an installed app) plus the robot's touch, joint, audio and camera streams. It is built from a [config](config.md) and sits on top of the [robot.md](robot.md) seam, so it runs unchanged on a real robot, a simulated one ([sim.md](sim.md)) or the fake. Every client — the [MCP server](naoqi-mcp-server.md), the [WebSocket server](naoqi-websocket-server.md), or a Python caller — shares this one implementation. It replaces the earlier `NaoAPI` class.
 
 ## Core concepts / Decided
 
 ### Construction and lifecycle
 
 - `NaoqiBridge(config: NaoqiBridgeConfig | Backend | None = None)` ([config.md](config.md)). With no argument it uses `NaoqiBridgeConfig()`, the offline fake. A bare backend string is shorthand for `NaoqiBridgeConfig(backend=...)`. `NaoqiBridge.from_dict` / `from_json` / `from_json_file` load the config, then build the bridge. Constructing the bridge does nothing else: no connection, no task.
-- **`await start()`** on the `sim` backend first acquires the sim: it starts one or borrows the one running, as `sim.spawn` says ([sim.md](sim.md)). Then, on every backend, it builds the robot with `build_robot(config)` ([robot.md](robot.md)) and connects it off the event loop. It subscribes the streams the config enables (touch; audio through the mic feed, [microphone.md](microphone.md)), loads the behavior catalog, and starts the joints task when joints are enabled. Last, with `viewer.enabled`, it opens the viewer on the robot it connected to, or logs why not ([viewer.md](viewer.md)). If any step fails, what already started is torn down (the robot closed, the sim released) and the error propagates (`RobotConnectionError` for an unreachable robot or an unavailable sim, `ViewerError` for a viewer that can't launch). Calling `start()` on a running bridge raises `BridgeError`.
-- **`await stop()`** closes the viewer if one is open, then cancels the joints task and publishes `None` on `joints`. It then stops the mic feed (which ends every `audio_input()` subscriber), unsubscribes touch, closes the robot, clears the running-item tracking and, last, releases the sim (stopping it when the bridge started it). It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it. Cancelling `start()` or `stop()` follows "Cancellation" below: neither leaves anything half up.
+- **`await start()`** on the `sim` backend first acquires the sim: it starts one or borrows the one running, as `sim.spawn` says ([sim.md](sim.md)). Then, on every backend, it builds the robot with `build_robot(config)` ([robot.md](robot.md)) and connects it off the event loop. It subscribes the streams the config enables (touch; audio through the mic feed, [microphone.md](microphone.md); each enabled camera through its feed, [camera.md](camera.md)), loads the behavior catalog, and starts the joints task when joints are enabled. Last, with `viewer.enabled`, it opens the viewer on the robot it connected to, or logs why not ([viewer.md](viewer.md)). If any step fails, what already started is torn down (the robot closed, the sim released) and the error propagates (`RobotConnectionError` for an unreachable robot or an unavailable sim, `ViewerError` for a viewer that can't launch). Calling `start()` on a running bridge raises `BridgeError`.
+- **`await stop()`** closes the viewer if one is open, then cancels the joints task and publishes `None` on `joints`. It then stops the camera feeds (ending every `frames()` subscriber, [camera.md](camera.md)) and the mic feed (which ends every `audio_input()` subscriber), unsubscribes touch, closes the robot, clears the running-item tracking and, last, releases the sim (stopping it when the bridge started it). It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it. Cancelling `start()` or `stop()` follows "Cancellation" below: neither leaves anything half up.
 - **`async with NaoqiBridge(...) as bridge:`** is shorthand for the pair, and runs `stop()` on every way out.
 - `running: bool`. `config` and `backend` (read-only).
 - **Escape hatch:** `bridge.robot` is the `NaoqiRobot` — the `FakeNaoqiRobot` on `fake`, which tests use to assert on recorded commands. It raises `NotRunningError` when the bridge isn't running.
@@ -96,7 +96,7 @@ It does **not** mean rewind. What already happened stays done: the words already
 
 Each verb belongs to exactly one class, so no verb leaves an effect running that neither a cancel nor a counterpart verb can stop.
 
-The streams have their own cancellation contracts: an `audio_input()` subscriber ([microphone.md](microphone.md)) and an `Observable.changes()` iteration ([observable.md](observable.md)) each end when their task is cancelled.
+The streams have their own cancellation contracts: an `audio_input()` subscriber ([microphone.md](microphone.md)), a camera feed's `frames()` ([camera.md](camera.md)) and an `Observable.changes()` iteration ([observable.md](observable.md)) each end when their task is cancelled.
 
 #### How a spanning verb stops
 
@@ -120,6 +120,7 @@ The config's `streams` block decides what `start()` subscribes to on the robot (
 | touch | `bridge.on_touch: Event[TouchEvent]` ([events.md](events.md)) | `TouchEvent(part: TouchPart, touched: bool)`; `TouchPart` is the `Literal` of `FrontTactilTouched` / `MiddleTactilTouched` / `RearTactilTouched`, so a handler can match on it under pyright. Naoqi fires on its own thread, and the bridge re-emits on its event loop (`call_soon_threadsafe`), so handlers run on the loop. Disabled: it simply never emits. |
 | joints | `bridge.joints: Observable[JointsState \| None]` ([observable.md](observable.md)) | `JointsState(names, angles, ts)`, angles in radians, `ts` on the monotonic clock, `set` every `streams.joints.period_s` by a bridge task. `None` outside a session. A failing read is logged and the loop continues. Disabled: reading `joints` raises `BridgeError`. |
 | audio | `bridge.audio_input(preroll_s=0.0)`, `bridge.mic` ([microphone.md](microphone.md)) | Each call is a subscriber yielding int16 LE mono `bytes` at `mic.sample_rate` (16000). `mic.latest()` and `published_count` are for samplers. Disabled: `audio_input()` raises `BridgeError` at the call; bridge not running: `NotRunningError`. |
+| cameras | `bridge.cameras["top"]`, `bridge.cameras["bottom"]`: `CameraFeed` ([camera.md](camera.md)) | `latest()` is the newest `CameraFrame` (BGR `data`, a numpy `image` view, `camera_transform` camera → FRAME_ROBOT, `fov`) or `None`; `frames()` is a latest-wins iterator ending with the session; `published_count` for samplers. Both feeds exist from construction. Disabled: `frames()` / `wait_for` raise `BridgeError` at the call, `latest()` is `None`; bridge not running: `NotRunningError`. |
 
 ### Errors
 
@@ -128,7 +129,7 @@ Defined in `errors.py`, so the bridge's modules share them; `bridge.py` doesn't 
 | Error | Raised for |
 |---|---|
 | `BridgeError(RuntimeError)` | The base of the bridge's own errors. Raised as such for lifecycle and stream misuse: a double `start()`, a disabled stream's API. |
-| `NotRunningError(BridgeError)` | A verb, `robot` or `audio_input()` on a bridge that isn't running. |
+| `NotRunningError(BridgeError)` | A verb, `robot`, `audio_input()` or a camera feed's `frames()` on a bridge that isn't running. |
 | `NotPlayingError(BridgeError)` | A catalog stop verb for an item that isn't playing. |
 | `MotorsOffError(BridgeError)` | A verb that moves the body while the motors are off (see "Action verb contract"). |
 | `CommandFailedError(BridgeError)` | The robot failed a verb: a Naoqi exception (chained), or a posture not reached. |
@@ -141,8 +142,8 @@ So `except (BridgeError, ValueError)` catches every expected verb failure, and t
 
 `from naoqi_bridge import NaoqiBridge` re-exports what a caller needs:
 - `NaoqiBridge`;
-- the config classes (`NaoqiBridgeConfig`, `RobotSettings`, `StreamSettings`, `TouchStream`, `JointsStream`, `AudioStream`, `SimSettings`, `ViewerSettings`, `Backend`, `SimSpawn`);
-- the stream values (`TouchEvent`, `TouchPart`, `JointsState`, `MicChunk`) and the `Event` / `Observable` types;
+- the config classes (`NaoqiBridgeConfig`, `RobotSettings`, `StreamSettings`, `TouchStream`, `JointsStream`, `AudioStream`, `CameraStreams`, `CameraStream`, `CameraResolution`, `SimSettings`, `ViewerSettings`, `Backend`, `SimSpawn`);
+- the stream values (`TouchEvent`, `TouchPart`, `JointsState`, `MicChunk`, `CameraFrame`, `Camera`) and the `Event` / `Observable` types;
 - `BehaviorInfos`, `LocalizedString`;
 - the errors (`BridgeError`, `NotRunningError`, `NotPlayingError`, `MotorsOffError`, `CommandFailedError`, `ViewerError`, `ConfigError`, `RobotConnectionError`). Library modules only use `logging.getLogger(__name__)`; `logging.basicConfig` belongs to the CLIs.
 

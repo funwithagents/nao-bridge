@@ -2,7 +2,8 @@
 
 Specified by [specs/naoqi-websocket-server.md](../../specs/naoqi-websocket-server.md).
 Two objects: ``ClientSession`` is the protocol over one connection-like object
-(commands in, results and the robot's touch / joints / audio / log events out), and
+(commands in, results and the robot's touch / joints / audio / camera frame / log
+events out), and
 ``NaoqiWebsocketServer`` owns the bridge and the listener, serving one session at a
 time, built from a ``NaoqiWebsocketServerConfig``.
 """
@@ -12,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import io
 import json
 import logging
 import socket
@@ -23,6 +25,7 @@ import websockets
 from websockets.asyncio.server import Server, ServerConnection
 
 from .bridge import BehaviorInfos, NaoqiBridge, TouchEvent
+from .camera import CameraFrame
 from .config import (
     ConfigError,
     JsonConfig,
@@ -32,7 +35,7 @@ from .config import (
     parse_block,
 )
 from .errors import BridgeError, ViewerError
-from .robot import RobotConnectionError
+from .robot import CAMERAS, Camera, RobotConnectionError
 
 __all__ = [
     "PROTOCOL_VERSION",
@@ -48,6 +51,9 @@ logger = logging.getLogger(__name__)
 # Sent on NaoqiState; bumped on incompatible protocol changes only (specs/
 # naoqi-websocket-server.md "Protocol version").
 PROTOCOL_VERSION = 2
+
+# The quality the frames are JPEG-encoded at (specs/camera.md "Consumers").
+JPEG_QUALITY = 80
 
 # A command's ``commandData`` object.
 type CommandData = dict[str, Any]
@@ -104,6 +110,18 @@ class Connection(Protocol):
     def __aiter__(self) -> AsyncIterator[str | bytes]: ...
     async def send(self, message: str) -> None: ...
     async def close(self) -> None: ...
+
+
+def encode_jpeg(frame: CameraFrame) -> bytes:
+    """``frame`` as a JPEG. Blocking: run it off the event loop."""
+    from PIL import Image  # here: a bridge without cameras never imports Pillow
+
+    image = Image.frombuffer(
+        "RGB", (frame.width, frame.height), frame.data, "raw", "BGR", 0, 1
+    )
+    out = io.BytesIO()
+    image.save(out, "JPEG", quality=JPEG_QUALITY)
+    return out.getvalue()
 
 
 def _behavior_payload(behavior: BehaviorInfos) -> dict[str, Any]:
@@ -243,6 +261,9 @@ class ClientSession:
             self._spawn(self._stream_joints(), self._stream_tasks)
         if streams.audio.enabled:
             self._spawn(self._stream_audio(), self._stream_tasks)
+        for camera in CAMERAS:
+            if getattr(streams.cameras, camera).enabled:
+                self._spawn(self._stream_frames(camera), self._stream_tasks)
 
     async def _ritual_step(self, step: Awaitable[None]) -> None:
         """One step of the connect / disconnect ritual: a failure is a warning, and
@@ -320,6 +341,24 @@ class ClientSession:
                     "channels": mic.channels,
                     "nbSamplesPerChannel": len(chunk) // (2 * mic.channels),
                     "data": base64.b64encode(chunk).decode("ascii"),
+                },
+            )
+
+    async def _stream_frames(self, camera: Camera) -> None:
+        # Latest-wins: a slow encode or connection skips frames, never lags.
+        async for frame in self._bridge.cameras[camera].frames():
+            jpeg = await asyncio.to_thread(encode_jpeg, frame)
+            await self._send(
+                "Frame",
+                {
+                    "camera": camera,
+                    "frameId": frame.frame_id,
+                    "width": frame.width,
+                    "height": frame.height,
+                    "format": "jpeg",
+                    "data": base64.b64encode(jpeg).decode("ascii"),
+                    "cameraTransform": list(frame.camera_transform),
+                    "fov": list(frame.fov),
                 },
             )
 

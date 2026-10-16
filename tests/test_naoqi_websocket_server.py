@@ -7,6 +7,7 @@ No robot or external network needed. Async runs via ``asyncio.run``.
 
 import asyncio
 import base64
+import io
 import json
 import logging
 import socket as socket_module
@@ -17,17 +18,25 @@ from typing import Any, Self
 
 import pytest
 import websockets
+from PIL import Image
 
 from naoqi_bridge import naoqi_websocket_server
 from naoqi_bridge.bridge import NaoqiBridge
 from naoqi_bridge.config import (
     AudioStream,
+    CameraStream,
+    CameraStreams,
     JointsStream,
     NaoqiBridgeConfig,
     StreamSettings,
     TouchStream,
 )
-from naoqi_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoqiRobot
+from naoqi_bridge.fake_robot import (
+    FAKE_CAMERA_TRANSFORMS,
+    JOINT_NAMES,
+    POSTURE_ANGLES,
+    FakeNaoqiRobot,
+)
 from naoqi_bridge.naoqi_websocket_server import (
     ClientSession,
     NaoqiWebsocketServer,
@@ -349,6 +358,46 @@ def test_joints_and_audio_stream_to_the_client_during_its_session():
 def test_disabled_streams_send_nothing():
     socket, _ = session([command("c1", "WakeUp")], answers=1)
     assert socket.of("Joints") == [] and socket.of("Audio") == []
+    assert socket.of("Frame") == []
+
+
+def test_frames_of_the_enabled_camera_stream_as_jpeg_during_the_session():
+    config = NaoqiWebsocketServerConfig(
+        bridge=NaoqiBridgeConfig(
+            streams=StreamSettings(
+                cameras=CameraStreams(
+                    top=CameraStream(enabled=True, resolution="qvga", fps=30)
+                )
+            )
+        ),
+        server=LOOPBACK,
+    )
+
+    async def run() -> tuple[MemorySocket, int, int]:
+        async with NaoqiBridge(config.bridge) as bridge:
+            socket = MemorySocket([], until=lambda s: len(s.of("Frame")) >= 3)
+            await ClientSession(bridge, config, socket).serve()
+            sent_at_close = len(socket.sent)
+            await asyncio.sleep(0.1)  # the client is gone: its frames must stop
+            late = len(socket.sent) - sent_at_close
+            published = bridge.cameras["top"].published_count
+        return socket, late, published
+
+    socket, late, published = asyncio.run(run())
+    assert late == 0
+    frames = socket.of("Frame")
+    assert {f["camera"] for f in frames} == {"top"}  # the bottom camera is off
+    ids = [f["frameId"] for f in frames]
+    assert ids == sorted(set(ids)) and ids[-1] <= published  # each frame once
+    frame = frames[-1]
+    assert (frame["width"], frame["height"], frame["format"]) == (320, 240, "jpeg")
+    image = Image.open(io.BytesIO(base64.b64decode(frame["data"])))
+    assert (image.format, image.size) == ("JPEG", (320, 240))
+    # The fake's blue ramp survives the BGR -> JPEG trip: blue on the right edge.
+    red, _, blue = image.convert("RGB").getpixel((315, 120))  # type: ignore[misc]
+    assert blue > 200 and red < 50
+    assert frame["cameraTransform"] == list(FAKE_CAMERA_TRANSFORMS["top"])
+    assert len(frame["fov"]) == 2
 
 
 # --- the server: listener and single-client policy ----------------------------
