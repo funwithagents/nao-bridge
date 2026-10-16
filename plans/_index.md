@@ -39,6 +39,7 @@ Implementation plans for naoqi-bridge — each plan turns a settled part of a sp
 | [202610141900_live-tier-capabilities.md](202610141900_live-tier-capabilities.md) | The live tier on capabilities: the shipped harness `naoqi_bridge.testing` (`[test]` extra), probed and declared capabilities, the `requires` marker, profiles (`sim` by default on a sim, `nao`), `live_session`; the bridge's live tests regated, app tests added | Done |
 | [202610161138_camera-feeds.md](202610161138_camera-feeds.md) | Camera feeds ([camera.md](../specs/camera.md)): `streams.cameras`, the seam over `ALVideoDevice` + `ALMotion.getTransform`, `camera.py` (`CameraFeed`, `CameraFrame`), `bridge.cameras`, the fake's paced frames, the WebSocket `Frame` message, numpy + Pillow, the live camera test | Done |
 | [202610161530_touch-always-on.md](202610161530_touch-always-on.md) | Touch always on: `streams.touch` and `TouchStream` removed, `start()` always subscribes the tactile keys (a failure logged, not fatal), the WebSocket session always streams `Touch`; examples and README updated | Done |
+| [202610161751_posture-observable.md](202610161751_posture-observable.md) | Posture observable ([bridge.md](../specs/bridge.md) "Posture"): `bridge.posture` from Naoqi's posture reads and events, `moving_to` around the bridge's own moves, the seam's `get_posture` / `subscribe_posture`, the fake's posture events, live tests | Done |
 
 ## Status legend
 

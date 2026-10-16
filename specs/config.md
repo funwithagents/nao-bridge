@@ -110,15 +110,17 @@ Specified in [viewer.md](viewer.md) ("Config: the `viewer` block"). In short: `e
 
 ### Streams: config switches, bridge APIs
 
-The callbacks (`on_touch`, `on_joints`, `on_audio`) are **removed**. The config decides which of the streams that cost something the bridge subscribes to on the robot, **eagerly** at `start()`; touch costs nothing and is always on. Each stream is then consumed through a bridge API that any number of consumers can use:
+The callbacks (`on_touch`, `on_joints`, `on_audio`) are **removed**. The config decides which of the streams that cost something the bridge subscribes to on the robot, **eagerly** at `start()`; touch and posture cost nothing and are always on. Each stream is then consumed through a bridge API that any number of consumers can use:
 
 | Stream | Config | Bridge API | Model |
 |---|---|---|---|
 | touch | none: always on | `bridge.on_touch: Event[TouchEvent]`, with `TouchEvent(part, touched)` | `Event[T]` (`events.py`, specified in `events.md`): synchronous handlers, any number, emitted on the bridge's event loop |
+| posture | none: always on | `bridge.posture: Observable[PostureState | None]`, with `PostureState(posture, family, moving, moving_to, ts)` | `Observable[T]`, fed by Naoqi's posture events and the bridge's own moves ([bridge.md](bridge.md), "Posture") |
 | joints | `streams.joints.enabled`, `period_s` | `bridge.joints: Observable[JointsState | None]`, with `JointsState(names, angles, ts)` | `Observable[T]` (`observable.py`, specified in `observable.md`): `value`, `changes()` latest-wins, `wait_for` |
 | audio | `streams.audio.enabled`, `channel` | `bridge.audio_input(preroll_s=0.0)` and `bridge.mic` | [microphone.md](microphone.md): one feed, a ring, any number of subscribers |
 | cameras | `streams.cameras.top` / `.bottom`: `enabled`, `resolution`, `fps` | `bridge.cameras["top"]` / `["bottom"]`: `latest()`, `frames()`, `wait_for` | [camera.md](camera.md): one feed per camera, pulled at `fps`, the newest frame with the camera's pose on an `Observable` |
 
+- **Posture has no switch either**, for the same reason: two `ALMemory` subscribers on Naoqi's posture events and a read at `start()` ([bridge.md](bridge.md), "Posture").
 - **Touch has no switch.** It is three `ALMemory` subscribers that fire only when a sensor changes: no task, no bandwidth, nothing to save by leaving it off. `start()` subscribes it on every backend, so `on_touch` emits without configuration, and a handler that never fires means the sensor wasn't pressed, not a forgotten flag. `streams.touch` is an unknown key, so a config from before this rule fails at load, naming it.
 - **Using a disabled stream's API raises `BridgeError`** at the call: joints, audio, cameras.
 - Because nothing is a callback any more, a server's config can't contradict its code. The MCP server just leaves streams disabled.

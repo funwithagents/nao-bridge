@@ -20,6 +20,8 @@ from .robot import (
     AudioCallback,
     Camera,
     CameraRead,
+    PostureCallback,
+    PostureKey,
     RobotConnectionError,
     TouchCallback,
     TouchPart,
@@ -31,6 +33,7 @@ __all__ = [
     "FAKE_CAMERA_TRANSFORMS",
     "JOINT_NAMES",
     "POSTURE_ANGLES",
+    "POSTURE_FAMILIES",
     "REST_POSTURE",
     "FakeNaoqiRobot",
     "fake_camera_pixels",
@@ -203,6 +206,13 @@ POSTURE_ANGLES: dict[str, tuple[float, ...]] = {
 }
 # Where a robot is when it starts and after rest(): Naoqi's rest posture on a Nao.
 REST_POSTURE = "Crouch"
+# Each posture's family, as ALRobotPosture.getPostureFamily() reports it on a Nao
+# with NAOqi 2.1 (2.8 calls Crouch's family "Crouching").
+POSTURE_FAMILIES: dict[str, str] = {
+    "Crouch": "Standing",
+    "Stand": "Standing",
+    "Sit": "Sitting",
+}
 
 # (width, height) per resolution, as ALVideoDevice serves them.
 CAMERA_SIZES: dict[CameraResolution, tuple[int, int]] = {
@@ -259,7 +269,9 @@ class FakeNaoqiRobot:
     Tests reach it through ``bridge.robot`` to assert on ``commands``, tune
     ``behavior_duration_s`` / ``speech_duration_s`` / ``posture_duration_s`` /
     ``posture_succeeds`` / ``awake`` / ``posture``, and fire sensor events with
-    ``touch`` / ``emit_audio``. ``get_joints()`` reports the angles of ``posture``,
+    ``touch`` / ``posture_event`` / ``emit_audio``. A subscribed posture callback hears
+    every change of ``posture`` made by ``rest()`` or a completed move, as Naoqi's
+    posture events. ``get_joints()`` reports the angles of ``posture``,
     which starts at ``REST_POSTURE`` and follows ``rest()`` and completed
     ``go_to_posture`` moves; ``wake_up()`` keeps it, as on a Nao. While audio is subscribed, a thread pushes a silent
     mono chunk every ``audio_chunk_s`` seconds, as Naoqi pushes its buffers; setting
@@ -290,6 +302,7 @@ class FakeNaoqiRobot:
         self._posture_moves: set[threading.Event] = set()
         self._lock = threading.Lock()
         self._touch_callback: TouchCallback | None = None
+        self._posture_callback: PostureCallback | None = None
         self._audio_callback: AudioCallback | None = None
         self.audio_chunk_s: float | None = 0.085
         self._audio_stop = threading.Event()
@@ -374,7 +387,7 @@ class FakeNaoqiRobot:
     def rest(self) -> None:
         self._record("rest")
         self.awake = False
-        self.posture = REST_POSTURE
+        self._settle_in(REST_POSTURE)
 
     def is_awake(self) -> bool:
         return self.awake
@@ -383,12 +396,34 @@ class FakeNaoqiRobot:
         self._record("go_to_posture", posture=posture, speed=speed, max_tries=max_tries)
         stopped = self._wait_unless_ended(self._posture_moves, self.posture_duration_s)
         if self.posture_succeeds and not stopped and posture in POSTURE_ANGLES:
-            self.posture = posture
+            self._settle_in(posture)
         return self.posture_succeeds
 
     def stop_posture(self) -> None:
         self._record("stop_posture")
         self._end_all(self._posture_moves)
+
+    def _settle_in(self, posture: str) -> None:
+        """Be in ``posture``, and report the change the way Naoqi's events do."""
+        before = self.posture
+        self.posture = posture
+        if posture == before:
+            return
+        self.posture_event("PostureChanged", posture)
+        family = POSTURE_FAMILIES[posture]
+        if family != POSTURE_FAMILIES[before]:
+            self.posture_event("PostureFamilyChanged", family)
+
+    def get_posture(self) -> tuple[str, str]:
+        return self.posture, POSTURE_FAMILIES[self.posture]
+
+    def subscribe_posture(self, callback: PostureCallback) -> None:
+        self._record("subscribe_posture")
+        self._posture_callback = callback
+
+    def unsubscribe_posture(self) -> None:
+        self._record("unsubscribe_posture")
+        self._posture_callback = None
 
     def set_breathing(self, chain_name: str, enabled: bool) -> None:
         self._record("set_breathing", chain_name=chain_name, enabled=enabled)
@@ -532,6 +567,12 @@ class FakeNaoqiRobot:
         """Simulate a tactile sensor event, as Naoqi would fire it."""
         if self._touch_callback is not None:
             self._touch_callback(key, value)
+
+    def posture_event(self, key: PostureKey, value: str) -> None:
+        """Simulate a posture event, as Naoqi would fire it (a fall, a push); leaves
+        ``posture`` as it is."""
+        if self._posture_callback is not None:
+            self._posture_callback(key, value)
 
     def emit_audio(
         self, channels: int, samples_per_channel: int, buffer: bytes

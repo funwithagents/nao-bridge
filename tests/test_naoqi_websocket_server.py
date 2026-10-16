@@ -155,11 +155,12 @@ def test_a_client_session_readies_then_rests_the_robot():
         "wake_up",
         "set_breathing",
     ]
-    assert robot_calls[-5:] == [
+    assert robot_calls[-6:] == [
         "fade_eyes",
         "set_breathing",
         "rest",
         "unsubscribe_touch",
+        "unsubscribe_posture",
         "close",
     ]
     assert socket.closed
@@ -204,7 +205,12 @@ def test_a_failed_ritual_step_is_a_warning_and_the_session_goes_on(
         "logLevel": "WARNING",
     } in socket.of("Log")
     assert robot_calls.count("set_breathing") == 1
-    assert robot_calls[-3:] == ["rest", "unsubscribe_touch", "close"]
+    assert robot_calls[-4:] == [
+        "rest",
+        "unsubscribe_touch",
+        "unsubscribe_posture",
+        "close",
+    ]
 
 
 def test_every_command_result_carries_the_four_keys():

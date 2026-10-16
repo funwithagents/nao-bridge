@@ -53,6 +53,41 @@ def test_postures_and_breathing():
     asyncio.run(run())
 
 
+type Seen = tuple[set[tuple[bool, str | None]], tuple[str, str, bool, str | None]]
+
+
+def test_the_posture_follows_the_posture_verbs():
+    async def run() -> list[Seen]:
+        async with live_session(live_config(), motion=True) as bridge:
+            seen: list[Seen] = []
+            for verb in (bridge.stand_up, bridge.sit_down, bridge.rest):
+                moves: set[tuple[bool, str | None]] = set()
+
+                async def follow(into: set[tuple[bool, str | None]] = moves) -> None:
+                    async for state in bridge.posture.changes():
+                        if state is not None:
+                            into.add((state.moving, state.moving_to))
+
+                follower = asyncio.create_task(follow())
+                await asyncio.sleep(0)  # subscribed before the move starts
+                await verb()
+                follower.cancel()
+                s = bridge.posture.value
+                assert s is not None
+                seen.append((moves, (s.posture, s.family, s.moving, s.moving_to)))
+            await bridge.wake_up()  # live_session rests the robot again at the end
+            return seen
+
+    stand, sit, rest = asyncio.run(run())
+    # Families are Naoqi's and vary by version (Crouch is "Standing" on 2.1,
+    # "Crouching" on 2.8): postures, `moving` and the targets are the bridge's promise.
+    assert (True, "Stand") in stand[0] and stand[1][0::2] == ("Stand", False)
+    assert (True, "Sit") in sit[0] and sit[1][0::2] == ("Sit", False)
+    # A rest has no target: a Nao rests seated from Sit, a sim crouches.
+    assert (True, None) in rest[0] and rest[1][2:] == (False, None)
+    assert rest[1][0] in ("Sit", "Crouch")
+
+
 @pytest.mark.requires("body_actions")
 def test_a_body_action_and_a_reaction_run_to_their_end():
     async def run() -> tuple[tuple[str, ...], dict[str, str]]:

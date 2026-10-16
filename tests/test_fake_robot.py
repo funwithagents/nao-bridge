@@ -167,6 +167,50 @@ def test_fake_sensor_events_reach_only_a_subscribed_callback():
     assert touches == [("RearTactilTouched", 1.0)]
 
 
+def test_fake_reports_its_posture_and_family():
+    robot = FakeNaoqiRobot()
+    reports = [robot.get_posture()]
+    robot.wake_up()
+    robot.go_to_posture("Stand", 0.8, 3)
+    reports.append(robot.get_posture())
+    robot.go_to_posture("Sit", 0.8, 3)
+    reports.append(robot.get_posture())
+    assert reports == [
+        ("Crouch", "Standing"),
+        ("Stand", "Standing"),
+        ("Sit", "Sitting"),
+    ]
+
+
+def test_fake_posture_changes_fire_naoqis_events_the_family_only_when_it_changes():
+    robot = FakeNaoqiRobot()
+    events: list[tuple[str, str]] = []
+    robot.go_to_posture("Stand", 0.8, 3)  # nobody subscribed yet: dropped
+    robot.subscribe_posture(lambda key, value: events.append((key, value)))
+    robot.go_to_posture("Stand", 0.8, 3)  # already there: no change, no event
+    robot.go_to_posture("Sit", 0.8, 3)
+    robot.rest()
+    robot.posture_succeeds = False
+    robot.go_to_posture("Stand", 0.8, 3)  # not reached: no event
+    robot.unsubscribe_posture()
+    robot.go_to_posture("Sit", 0.8, 3)
+    assert events == [
+        ("PostureChanged", "Sit"),
+        ("PostureFamilyChanged", "Sitting"),
+        ("PostureChanged", "Crouch"),
+        ("PostureFamilyChanged", "Standing"),
+    ]
+
+
+def test_fake_posture_event_reaches_the_callback_and_leaves_the_posture():
+    robot = FakeNaoqiRobot()
+    events: list[tuple[str, str]] = []
+    robot.subscribe_posture(lambda key, value: events.append((key, value)))
+    robot.posture_event("PostureChanged", "LyingBack")  # a fall, say
+    assert events == [("PostureChanged", "LyingBack")]
+    assert robot.get_posture() == ("Crouch", "Standing")
+
+
 def test_fake_package_list_is_a_fresh_copy():
     robot = FakeNaoqiRobot()
     robot.list_packages()[0]["uuid"] = "tampered"
