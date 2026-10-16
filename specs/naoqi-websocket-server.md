@@ -8,7 +8,7 @@ tests:
 
 # Naoqi WebSocket server
 
-**Status:** Updated
+**Status:** Implemented
 
 ## Purpose
 

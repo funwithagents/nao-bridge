@@ -1,6 +1,6 @@
 # Touch always on
 
-**Status:** Todo
+**Status:** Done
 
 Implements the settled behavior in `specs/config.md` ("Streams: config switches, bridge APIs"), `specs/bridge.md` ("Streams") and `specs/naoqi-websocket-server.md` ("Streams per client session"): the touch stream loses its config switch and is subscribed on every `start()`, since three `ALMemory` subscribers that fire only when a sensor changes cost nothing to keep. A touch subscription that fails is logged as a warning rather than failing `start()`. The other streams keep their switches; nothing else in the config changes.
 

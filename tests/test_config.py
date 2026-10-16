@@ -20,7 +20,6 @@ from naoqi_bridge.config import (
     RobotSettings,
     SimSettings,
     StreamSettings,
-    TouchStream,
     ViewerSettings,
 )
 from naoqi_bridge.naoqi_mcp_server import McpServerSettings, NaoqiMcpServerConfig
@@ -36,8 +35,7 @@ def test_the_default_config_is_the_offline_fake_with_no_streams():
     config = NaoqiBridgeConfig()
     assert config.backend == "fake"
     assert not (
-        config.streams.touch.enabled
-        or config.streams.joints.enabled
+        config.streams.joints.enabled
         or config.streams.audio.enabled
         or config.streams.cameras.top.enabled
         or config.streams.cameras.bottom.enabled
@@ -53,7 +51,6 @@ def test_the_default_config_is_the_offline_fake_with_no_streams():
     "block",
     [
         RobotSettings,
-        TouchStream,
         JointsStream,
         AudioStream,
         CameraStream,
@@ -78,7 +75,6 @@ def test_a_full_config_loads_every_field():
             "backend": "real",
             "robot": {"ip": "192.168.1.42", "port": 9600, "connect_timeout_s": 2.5},
             "streams": {
-                "touch": {"enabled": True},
                 "joints": {"enabled": True, "period_s": 0.5},
                 "audio": {"enabled": True, "channel": "rear"},
                 "cameras": {
@@ -93,7 +89,6 @@ def test_a_full_config_loads_every_field():
     )
     assert config.streams.joints == JointsStream(enabled=True, period_s=0.5)
     assert config.streams.audio == AudioStream(enabled=True, channel="rear")
-    assert config.streams.touch.enabled
     assert config.streams.cameras == CameraStreams(
         top=CameraStream(enabled=True, resolution="vga", fps=15),
         bottom=CameraStream(enabled=True, resolution="4vga", fps=1),
@@ -139,9 +134,9 @@ def test_a_full_config_loads_every_field():
             {"streams": {"audio": {"channel": "all"}}},
             "streams.audio.channel must be one of",
         ),
-        (
-            {"streams": {"touch": {"enabled": "yes"}}},
-            "streams.touch.enabled must be a boolean",
+        (  # touch has no switch: a config from before that rule says so at load
+            {"streams": {"touch": {"enabled": True}}},
+            "unknown key 'streams.touch'",
         ),
         ({"streams": {"video": {}}}, "unknown key 'streams.video'"),
         (
@@ -228,11 +223,11 @@ def test_json_loaders(tmp_path: Path):
 
 def test_server_configs_nest_the_bridge_and_their_own_settings():
     config = NaoqiWebsocketServerConfig.from_dict(
-        {"bridge": {"streams": {"touch": {"enabled": True}}}, "server": {"port": 9000}}
+        {"bridge": {"streams": {"joints": {"enabled": True}}}, "server": {"port": 9000}}
     )
     assert config.server.port == 9000
     assert config.server.host == ""  # the default: the LAN IP, found at start
-    assert config.bridge.streams.touch.enabled
+    assert config.bridge.streams.joints.enabled
     local = NaoqiWebsocketServerConfig.from_dict(
         {"server": {"host": "127.0.0.1", "port": 0}}
     )
@@ -418,6 +413,6 @@ def test_websocket_examples_load_with_every_stream(name: str):
     streams = NaoqiWebsocketServerConfig.from_json_file(
         EXAMPLES / f"{name}.json"
     ).bridge.streams
-    assert streams.touch.enabled and streams.joints.enabled and streams.audio.enabled
+    assert streams.joints.enabled and streams.audio.enabled
     assert streams.cameras.top == CameraStream(enabled=True, resolution="qvga", fps=10)
     assert not streams.cameras.bottom.enabled

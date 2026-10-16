@@ -367,8 +367,12 @@ class NaoqiBridge:
         await asyncio.to_thread(robot.connect, cancel_connect)
         self._loop = asyncio.get_running_loop()
         try:
-            if streams.touch.enabled:
+            try:
                 await asyncio.to_thread(robot.subscribe_touch, self._forward_touch)
+            except Exception:
+                logger.warning(
+                    "Touch subscription failed; on_touch will not emit", exc_info=True
+                )
             if streams.audio.enabled:
                 await self._mic.start(robot, streams.audio.channel)
             for camera, feed in self._cameras.items():
@@ -436,11 +440,7 @@ class NaoqiBridge:
         for feed in self._cameras.values():
             await feed.stop()
         await self._mic.stop()
-        steps: list[Callable[[], None]] = []
-        if self._config.streams.touch.enabled:
-            steps.append(robot.unsubscribe_touch)
-        steps.append(robot.close)
-        for step in steps:
+        for step in (robot.unsubscribe_touch, robot.close):
             try:
                 await asyncio.to_thread(step)
             except Exception:

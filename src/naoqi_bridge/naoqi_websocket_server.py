@@ -254,9 +254,8 @@ class ClientSession:
         if self._closing:  # closed while opening: nothing left to stream to
             return
         streams = self._config.bridge.streams
-        if streams.touch.enabled:
-            self._bridge.on_touch.subscribe(self._on_touch)
-            self._touch_subscribed = True
+        self._bridge.on_touch.subscribe(self._on_touch)  # always on, as on the bridge
+        self._touch_subscribed = True
         if streams.joints.enabled:
             self._spawn(self._stream_joints(), self._stream_tasks)
         if streams.audio.enabled:
