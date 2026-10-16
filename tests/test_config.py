@@ -11,6 +11,8 @@ from naoqi_viewer import NaoqiViewerConfig
 
 from naoqi_bridge.config import (
     AudioStream,
+    CameraStream,
+    CameraStreams,
     ConfigError,
     JointsStream,
     JsonConfig,
@@ -37,6 +39,12 @@ def test_the_default_config_is_the_offline_fake_with_no_streams():
         config.streams.touch.enabled
         or config.streams.joints.enabled
         or config.streams.audio.enabled
+        or config.streams.cameras.top.enabled
+        or config.streams.cameras.bottom.enabled
+    )
+    # A camera, once enabled, asks for QVGA at 10 fps unless told otherwise.
+    assert config.streams.cameras.top == CameraStream(
+        enabled=False, resolution="qvga", fps=10
     )
     assert NaoqiBridgeConfig.from_dict({}) == config
 
@@ -48,6 +56,8 @@ def test_the_default_config_is_the_offline_fake_with_no_streams():
         TouchStream,
         JointsStream,
         AudioStream,
+        CameraStream,
+        CameraStreams,
         StreamSettings,
         SimSettings,
         NaoqiBridgeConfig,
@@ -71,6 +81,10 @@ def test_a_full_config_loads_every_field():
                 "touch": {"enabled": True},
                 "joints": {"enabled": True, "period_s": 0.5},
                 "audio": {"enabled": True, "channel": "rear"},
+                "cameras": {
+                    "top": {"enabled": True, "resolution": "vga", "fps": 15},
+                    "bottom": {"enabled": True, "resolution": "4vga", "fps": 1},
+                },
             },
         }
     )
@@ -80,6 +94,10 @@ def test_a_full_config_loads_every_field():
     assert config.streams.joints == JointsStream(enabled=True, period_s=0.5)
     assert config.streams.audio == AudioStream(enabled=True, channel="rear")
     assert config.streams.touch.enabled
+    assert config.streams.cameras == CameraStreams(
+        top=CameraStream(enabled=True, resolution="vga", fps=15),
+        bottom=CameraStream(enabled=True, resolution="4vga", fps=1),
+    )
 
 
 @pytest.mark.parametrize(
@@ -126,6 +144,34 @@ def test_a_full_config_loads_every_field():
             "streams.touch.enabled must be a boolean",
         ),
         ({"streams": {"video": {}}}, "unknown key 'streams.video'"),
+        (
+            {"streams": {"cameras": {"top": {"resolution": "hd"}}}},
+            "streams.cameras.top.resolution must be one of 'qqvga', 'qvga'",
+        ),
+        (
+            {"streams": {"cameras": {"bottom": {"fps": 0}}}},
+            "streams.cameras.bottom.fps must be an integer from 1 to 30",
+        ),
+        (
+            {"streams": {"cameras": {"bottom": {"fps": 31}}}},
+            "streams.cameras.bottom.fps must be an integer from 1 to 30",
+        ),
+        (
+            {"streams": {"cameras": {"bottom": {"fps": 2.5}}}},
+            "streams.cameras.bottom.fps must be an integer",
+        ),
+        (
+            {"streams": {"cameras": {"bottom": {"fps": "10"}}}},
+            "streams.cameras.bottom.fps must be an integer",
+        ),
+        (
+            {"streams": {"cameras": {"top": {"colorspace": "rgb"}}}},
+            "unknown key 'streams.cameras.top.colorspace'",
+        ),
+        (
+            {"streams": {"cameras": {"front": {}}}},
+            "unknown key 'streams.cameras.front'",
+        ),
         ({"streams": []}, "streams must be an object"),
         ([], "config must be an object"),
     ],
@@ -150,6 +196,8 @@ def test_direct_construction_validates_too():
         NaoqiBridgeConfig(backend="real")
     with pytest.raises(ConfigError, match="period_s"):
         JointsStream(period_s=0)
+    with pytest.raises(ConfigError, match="fps"):
+        CameraStream(fps=60)
 
 
 def test_a_robot_block_on_fake_is_validated_but_unused():
@@ -371,3 +419,5 @@ def test_websocket_examples_load_with_every_stream(name: str):
         EXAMPLES / f"{name}.json"
     ).bridge.streams
     assert streams.touch.enabled and streams.joints.enabled and streams.audio.enabled
+    assert streams.cameras.top == CameraStream(enabled=True, resolution="qvga", fps=10)
+    assert not streams.cameras.bottom.enabled

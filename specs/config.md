@@ -32,7 +32,11 @@ It covers the **backend**, the **robot connection**, the **sim** a `sim` backend
   "streams": {
     "touch": { "enabled": true },
     "joints": { "enabled": false, "period_s": 0.2 },
-    "audio": { "enabled": false, "channel": "front" }
+    "audio": { "enabled": false, "channel": "front" },
+    "cameras": {
+      "top": { "enabled": false, "resolution": "qvga", "fps": 10 },
+      "bottom": { "enabled": false, "resolution": "qvga", "fps": 10 }
+    }
   },
   "sim": {
     "spawn": "auto",
@@ -67,6 +71,7 @@ class StreamSettings:
     touch: TouchStream = field(default_factory=TouchStream)     # enabled: bool = False
     joints: JointsStream = field(default_factory=JointsStream)  # enabled: bool = False, period_s: float = 0.2
     audio: AudioStream = field(default_factory=AudioStream)     # enabled: bool = False, channel: "front" | "rear" | "left" | "right" = "front"
+    cameras: CameraStreams = field(default_factory=CameraStreams)  # top / bottom: CameraStream(enabled=False, resolution="qvga", fps=10) — camera.md
 
 @dataclass
 class SimSettings:
@@ -99,7 +104,7 @@ Specified in [viewer.md](viewer.md) ("Config: the `viewer` block"). In short: `e
 - Every config class has the same three constructors: `from_dict(data)`, `from_json(text)` (parses, then calls `from_dict`), and `from_json_file(path)` (reads, then calls `from_json`; an invalid-JSON error names the path). All three share one validation path.
 - Errors raise `ConfigError(ValueError)`, with a message that names the offending key path (e.g. `streams.joints.period_s`). A block's own checks raise `ConfigError(message, key=<field>)`, and each enclosing loader prefixes `key` with its own path; the message is never parsed to find the key.
 - **Unknown keys are errors**, so a typo fails when the config loads.
-- **Type and range checks:** `backend` ∈ `{"real", "fake", "sim"}`; `sim.spawn` ∈ `{"never", "auto", "always"}`; `robot.port` is a positive integer; `connect_timeout_s` and `period_s` are positive, finite numbers; `channel` is one of the four values.
+- **Type and range checks:** `backend` ∈ `{"real", "fake", "sim"}`; `sim.spawn` ∈ `{"never", "auto", "always"}`; `robot.port` is a positive integer; `connect_timeout_s` and `period_s` are positive, finite numbers; `channel` is one of the four values; a camera's `resolution` is one of `qqvga` / `qvga` / `vga` / `4vga` and its `fps` an integer from 1 to 30 ([camera.md](camera.md)).
 - **`robot.connect_tries` is gone.** The connection makes one attempt since libqi 3.1.8 ([robot.md](robot.md)), so a config that still sets it fails as an unknown key.
 - **`real` needs `robot.ip`.** An empty IP is a `ConfigError` when the config loads.
 - **On `fake`, `robot` is validated but not applied.** A config written for the robot runs offline by changing `backend` alone.
@@ -114,6 +119,7 @@ The callbacks (`on_touch`, `on_joints`, `on_audio`) are **removed**. The config 
 | touch | `streams.touch.enabled` | `bridge.on_touch: Event[TouchEvent]`, with `TouchEvent(part, touched)` | `Event[T]` (`events.py`, specified in `events.md`): synchronous handlers, any number, emitted on the bridge's event loop |
 | joints | `streams.joints.enabled`, `period_s` | `bridge.joints: Observable[JointsState | None]`, with `JointsState(names, angles, ts)` | `Observable[T]` (`observable.py`, specified in `observable.md`): `value`, `changes()` latest-wins, `wait_for` |
 | audio | `streams.audio.enabled`, `channel` | `bridge.audio_input(preroll_s=0.0)` and `bridge.mic` | [microphone.md](microphone.md): one feed, a ring, any number of subscribers |
+| cameras | `streams.cameras.top` / `.bottom`: `enabled`, `resolution`, `fps` | `bridge.cameras["top"]` / `["bottom"]`: `latest()`, `frames()`, `wait_for` | [camera.md](camera.md): one feed per camera, pulled at `fps`, the newest frame with the camera's pose on an `Observable` |
 
 - **Using a disabled stream's API raises `BridgeError`.** For joints and audio that's at the call. For touch, `on_touch` always exists and simply never emits.
 - Because nothing is a callback any more, a server's config can't contradict its code. The MCP server just leaves streams disabled.
@@ -162,7 +168,7 @@ Each server has its own config object, wrapping a `NaoqiBridgeConfig` under `bri
 
 `examples/configs/` holds ready-to-use files kept in sync with this spec:
 - `mcp-fake.json` and `mcp-real.json`
-- `websocket-fake.json` and `websocket-real.json` (all three streams on)
+- `websocket-fake.json` and `websocket-real.json` (every stream on, the top camera at `qvga` 10 fps; the bottom camera present and off)
 - `mcp-sim.json` and `websocket-sim.json` ([sim.md](sim.md), "Example files")
 - `mcp-real.json` and `websocket-real.json` carry a disabled `viewer` block with the ghost on ([viewer.md](viewer.md), "Example files")
 

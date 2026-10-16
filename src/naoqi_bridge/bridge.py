@@ -4,7 +4,8 @@ Specified by [specs/bridge.md](../../specs/bridge.md). ``NaoqiBridge`` owns the
 ``start()`` / ``stop()`` lifecycle (``async with`` over it) and exposes intent-level
 async verbs that raise why they failed (``errors.py``), the behavior catalog, and the robot's streams — touch
 as an ``Event``, joints as an ``Observable``, the microphone as ``audio_input()``
-subscribers over the mic feed — over the robot seam in [robot.py](robot.py), a real
+subscribers over the mic feed, each camera as a ``CameraFeed`` in ``cameras`` — over
+the robot seam in [robot.py](robot.py), a real
 Nao or the fake, as the ``NaoqiBridgeConfig`` says.
 """
 
@@ -22,6 +23,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Self
 
+from .camera import CameraFeed
 from .config import Backend, NaoqiBridgeConfig
 from .errors import (
     BridgeError,
@@ -33,7 +35,7 @@ from .errors import (
 from .events import Event
 from .microphone import MicFeed
 from .observable import Observable
-from .robot import TOUCH_KEYS, NaoqiRobot, TouchPart, build_robot
+from .robot import CAMERAS, TOUCH_KEYS, Camera, NaoqiRobot, TouchPart, build_robot
 from .sim import SimLease, acquire_sim
 from .viewer import close_viewer, open_viewer, viewer_target
 
@@ -278,6 +280,11 @@ class NaoqiBridge:
         self.on_touch: Event[TouchEvent] = Event()
         self._joints: Observable[JointsState | None] = Observable(None)
         self._mic = MicFeed()
+        cameras = config.streams.cameras
+        self._cameras: dict[Camera, CameraFeed] = {
+            camera: CameraFeed(camera, enabled=getattr(cameras, camera).enabled)
+            for camera in CAMERAS
+        }
 
         # What's playing: (kind, id) -> the behavior running for it.
         self._running: dict[tuple[str, str], str] = {}
@@ -364,6 +371,10 @@ class NaoqiBridge:
                 await asyncio.to_thread(robot.subscribe_touch, self._forward_touch)
             if streams.audio.enabled:
                 await self._mic.start(robot, streams.audio.channel)
+            for camera, feed in self._cameras.items():
+                settings = getattr(streams.cameras, camera)
+                if settings.enabled:
+                    await feed.start(robot, settings)
             self._catalog = build_catalog(await asyncio.to_thread(robot.list_packages))
             url = viewer_target(self._config, sim)
             if url is not None:
@@ -422,6 +433,8 @@ class NaoqiBridge:
 
     async def _teardown(self, robot: NaoqiRobot) -> None:
         await self._close_viewer()
+        for feed in self._cameras.values():
+            await feed.stop()
         await self._mic.stop()
         steps: list[Callable[[], None]] = []
         if self._config.streams.touch.enabled:
@@ -456,6 +469,12 @@ class NaoqiBridge:
     def mic(self) -> MicFeed:
         """The mic feed: ``latest()`` and ``published_count`` for samplers."""
         return self._mic
+
+    @property
+    def cameras(self) -> Mapping[Camera, CameraFeed]:
+        """Both camera feeds, enabled or not, from construction: ``latest()`` /
+        ``frames()`` / ``wait_for`` per camera (specs/camera.md)."""
+        return MappingProxyType(self._cameras)
 
     def audio_input(self, *, preroll_s: float = 0.0) -> AsyncIterator[bytes]:
         """A new subscriber to the microphone: int16 LE mono ``bytes`` per chunk at

@@ -120,14 +120,18 @@ The bridge is built from a `NaoqiBridgeConfig`, in code or from JSON (`NaoqiBrid
   "streams": {
     "touch": { "enabled": true },
     "joints": { "enabled": true, "period_s": 0.2 },
-    "audio": { "enabled": true, "channel": "front" }
+    "audio": { "enabled": true, "channel": "front" },
+    "cameras": {
+      "top": { "enabled": true, "resolution": "qvga", "fps": 10 },
+      "bottom": { "enabled": false, "resolution": "qvga", "fps": 10 }
+    }
   }
 }
 ```
 
 - **`backend`**: `"fake"` (default, offline stand-in), `"real"` (needs `qi` and `robot.ip`) or `"sim"` (a simulated Nao, see [above](#simulated-nao-the-sim-backend))
 - **`robot`**: the robot's address, and how long to wait for it: one connection attempt of at most `connect_timeout_s`, so a wrong address fails within 5 s by default. Validated but ignored on `fake`, so switching backend is a one-word change
-- **`streams`**: which robot streams the bridge subscribes to; `channel` picks the microphone (`front`, `rear`, `left`, `right`)
+- **`streams`**: which robot streams the bridge subscribes to; `channel` picks the microphone (`front`, `rear`, `left`, `right`); each camera (`top`, `bottom`) has its own `resolution` (`qqvga`, `qvga`, `vga`, `4vga`) and `fps` (1 to 30)
 - **`sim`**: on `sim`, whether to start the sim or use the running one (`spawn`) and the naoqi-sim config (`config`). Validated but ignored on the other backends
 - **`viewer`**: a window mirroring the robot (`enabled`) and its naoqi-viewer config (`config`), see [above](#watching-the-robot-the-viewer)
 
@@ -144,6 +148,7 @@ streams = {
     "touch": {"enabled": True},
     "joints": {"enabled": True},
     "audio": {"enabled": True},
+    "cameras": {"top": {"enabled": True}},
 }
 async with NaoqiBridge.from_dict({"streams": streams}) as bridge:
     # touch events
@@ -153,6 +158,10 @@ async with NaoqiBridge.from_dict({"streams": streams}) as bridge:
     pose = await bridge.joints.wait_for(lambda s: s is not None)
     print(dict(zip(pose.names, pose.angles)))
 
+    # the newest camera frame: BGR bytes, a numpy view, the camera's pose
+    frame = await bridge.cameras["top"].wait_for(lambda f: True)
+    print(frame.frame_id, frame.image.shape, frame.camera_transform)
+
     # the microphone: int16 LE mono at 16 kHz, every chunk in order
     async for chunk in bridge.audio_input():
         ...  # feed your ASR
@@ -161,6 +170,7 @@ async with NaoqiBridge.from_dict({"streams": streams}) as bridge:
 - **Touch**: `bridge.on_touch` is an event; handlers receive a `TouchEvent(part, touched)` on the event loop
 - **Joints**: `bridge.joints` holds the latest `JointsState(names, angles, ts)` (radians): read `.value`, iterate `.changes()` (a slow reader skips to the latest), or `await .wait_for(predicate)`
 - **Audio**: every `bridge.audio_input()` call is its own subscriber receiving every chunk; `preroll_s=` starts it in the past, as far as the ring of the last 200 chunks reaches (e.g. to hear the sentence that woke a wake-word detector); `bridge.mic.latest()` gives the newest chunk for level meters
+- **Cameras**: `bridge.cameras["top"]` / `["bottom"]` pull their camera at the configured `fps` and hold the newest `CameraFrame`: `frame_id`, `width` × `height` BGR `data` (`frame.image` is a `(height, width, 3)` numpy view), Naoqi's `naoqi_ts`, `camera_transform` (a row-major 4×4, camera → `FRAME_ROBOT`, read with the frame) and `fov` (radians). `.latest()` is a picture now (`None` outside a session or for a disabled camera); `async for frame in .frames()` follows each new one, latest-wins, so a slow consumer skips frames rather than lagging. A sim renders the top camera only
 
 ### APIs
 
@@ -348,7 +358,7 @@ It provides access to all NaoqiBridge features through websocket messages in JSO
 
 - run the server on the fake backend
   - if you don't have a Nao robot or if your current setup is not compatible with the available qi packages, you can run the server on the fake ⇒ all communication with the server will work but will just do nothing real
-  - `uv run naoqi-websocket-server --config examples/configs/websocket-fake.json` (every stream on, the fake streams silent audio, and joints for all 26 joints at the angles of its posture: `Crouch` at rest, `Stand` / `Sit` after `StandUp` / `SitDown`. The angles were measured on a simulated Nao)
+  - `uv run naoqi-websocket-server --config examples/configs/websocket-fake.json` (every stream on, the fake streams silent audio, camera frames of a test pattern, and joints for all 26 joints at the angles of its posture: `Crouch` at rest, `Stand` / `Sit` after `StandUp` / `SitDown`. The angles were measured on a simulated Nao)
 
 The `server` block sets the WebSocket `host` (the address to bind; empty, the default, means the machine's LAN IP, or `127.0.0.1` when offline; `"0.0.0.0"` every interface) and `port` (default 8002; `0` lets the OS pick).
 
@@ -356,3 +366,5 @@ The `server` block sets the WebSocket `host` (the address to bind; empty, the de
 
 > [!NOTE]
 > The full protocol (envelope, commands and their data, streamed events) is described in [specs/naoqi-websocket-server.md](specs/naoqi-websocket-server.md). The first message of every session, `NaoqiState`, carries `protocolVersion` (currently `2`: version 2 renamed `NaoState` to `NaoqiState`), bumped only on incompatible changes.
+
+For each camera enabled in `bridge.streams.cameras`, the server sends a `Frame` message per new frame: `{camera, frameId, width, height, format: "jpeg", data: <base64 JPEG>, cameraTransform: [16 floats], fov: [h, v]}`. A slow connection skips frames rather than lagging.

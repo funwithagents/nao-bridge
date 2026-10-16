@@ -11,15 +11,25 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from .config import AudioChannel, NaoqiBridgeConfig
+from .config import AudioChannel, CameraResolution, NaoqiBridgeConfig
 
 __all__ = [
     "AUDIO_CHANNEL_CODES",
     "AUDIO_SAMPLE_RATE",
+    "CAMERAS",
+    "CAMERA_COLORSPACE_BGR",
+    "CAMERA_INDEXES",
+    "CAMERA_NAMES",
+    "CAMERA_RESOLUTION_CODES",
+    "CAMERA_SUBSCRIBER_NAMES",
+    "FRAME_ROBOT",
     "TOUCH_KEYS",
     "AudioCallback",
+    "Camera",
+    "CameraRead",
     "NaoqiRobot",
     "RobotConnectionError",
     "TouchCallback",
@@ -49,6 +59,41 @@ AUDIO_CHANNEL_CODES: dict[AudioChannel, int] = {
     "front": 3,
     "rear": 4,
 }
+
+# The robot's cameras (specs/camera.md "The cameras"): the bridge says "top" /
+# "bottom", Naoqi has its own names and indexes.
+type Camera = Literal["top", "bottom"]
+CAMERAS: tuple[Camera, ...] = ("top", "bottom")
+CAMERA_INDEXES: dict[Camera, int] = {"top": 0, "bottom": 1}
+# ALMotion's names for the cameras' frames, for getTransform.
+CAMERA_NAMES: dict[Camera, str] = {"top": "CameraTop", "bottom": "CameraBottom"}
+# ALVideoDevice.subscribeCamera's resolution codes.
+CAMERA_RESOLUTION_CODES: dict[CameraResolution, int] = {
+    "qqvga": 0,
+    "qvga": 1,
+    "vga": 2,
+    "4vga": 3,
+}
+# The subscriber name per camera; Naoqi allows seven handles per name (_0 … _6).
+CAMERA_SUBSCRIBER_NAMES: dict[Camera, str] = {
+    "top": "NaoqiBridgeCameraTop",
+    "bottom": "NaoqiBridgeCameraBottom",
+}
+CAMERA_HANDLES_PER_NAME = 7
+CAMERA_COLORSPACE_BGR = 13  # kBGRColorSpace
+FRAME_ROBOT = 2  # ALMotion's frame on the ground between the feet
+
+
+@dataclass(frozen=True)
+class CameraRead:
+    """What one camera pull returns, in Naoqi's terms (specs/camera.md "The seam")."""
+
+    width: int
+    height: int
+    data: bytes  # BGR, 3 bytes per pixel, row-major
+    naoqi_ts: float  # Naoqi's capture timestamp, seconds on the robot's clock
+    fov: tuple[float, float]  # (left - right, top - bottom) angles, radians
+    transform: tuple[float, ...]  # camera -> FRAME_ROBOT, a row-major 4x4
 
 
 class RobotConnectionError(RuntimeError):
@@ -83,6 +128,11 @@ class NaoqiRobot(Protocol):
         self, callback: AudioCallback, channel: AudioChannel
     ) -> None: ...
     def unsubscribe_audio(self) -> None: ...
+    def subscribe_camera(
+        self, camera: Camera, resolution: CameraResolution, fps: int
+    ) -> None: ...
+    def read_camera(self, camera: Camera) -> CameraRead | None: ...
+    def unsubscribe_camera(self, camera: Camera) -> None: ...
 
 
 def build_robot(config: NaoqiBridgeConfig) -> NaoqiRobot:

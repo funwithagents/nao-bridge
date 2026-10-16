@@ -207,3 +207,107 @@ def test_a_say_naoqi_fails_without_a_stop_still_raises(stub_qi: type[StubSession
     robot.stop_speech()  # a stop before this say does not excuse its failure
     with pytest.raises(RuntimeError, match="no voice"):
         robot.say("hello")
+
+
+# --- Cameras (specs/camera.md "The seam") ---
+
+TRANSFORM = [float(i) for i in range(16)]
+
+
+def _image(ts_s: int = 12, ts_us: int = 500000) -> list[Any]:
+    """An ALVideoDevice image: width, height, layers, colorspace, ts_s, ts_us, buffer,
+    camera id, left, top, right, bottom angles."""
+    return [2, 1, 3, 13, ts_s, ts_us, bytearray(range(6)), 0, 0.5, 0.4, -0.5, -0.4]
+
+
+def _camera_robot(stub_qi: type[StubSession]) -> RealNaoqiRobot:
+    stub_qi.returns[("ALVideoDevice", "unsubscribe")] = False  # no stale handle
+    stub_qi.returns[("ALVideoDevice", "subscribeCamera")] = "NaoqiBridgeCameraTop_0"
+    stub_qi.returns[("ALVideoDevice", "getImageRemote")] = _image()
+    stub_qi.returns[("ALMotion", "getTransform")] = TRANSFORM
+    robot = RealNaoqiRobot("10.0.0.5")
+    robot.connect()
+    return robot
+
+
+def test_subscribing_a_camera_clears_stale_handles_then_asks_for_bgr(
+    stub_qi: type[StubSession],
+):
+    robot = _camera_robot(stub_qi)
+    robot.subscribe_camera("bottom", "vga", 15)
+    assert stub_qi.calls == [
+        *(
+            ("ALVideoDevice", "unsubscribe", (f"NaoqiBridgeCameraBottom_{n}",))
+            for n in range(7)
+        ),
+        ("ALVideoDevice", "subscribeCamera", ("NaoqiBridgeCameraBottom", 1, 2, 13, 15)),
+    ]
+
+
+def test_a_camera_naoqi_refuses_to_subscribe_raises(stub_qi: type[StubSession]):
+    robot = _camera_robot(stub_qi)
+    stub_qi.returns[("ALVideoDevice", "subscribeCamera")] = ""
+    with pytest.raises(RuntimeError, match="NaoqiBridgeCameraTop"):
+        robot.subscribe_camera("top", "qvga", 10)
+
+
+def test_reading_a_camera_pulls_the_image_then_the_pose_then_releases(
+    stub_qi: type[StubSession],
+):
+    robot = _camera_robot(stub_qi)
+    robot.subscribe_camera("top", "qvga", 10)
+    stub_qi.calls.clear()
+    read = robot.read_camera("top")
+    assert stub_qi.calls == [
+        ("ALVideoDevice", "getImageRemote", ("NaoqiBridgeCameraTop_0",)),
+        ("ALMotion", "getTransform", ("CameraTop", 2, True)),
+        ("ALVideoDevice", "releaseImage", ("NaoqiBridgeCameraTop_0",)),
+    ]
+    assert read is not None
+    assert (read.width, read.height) == (2, 1)
+    assert read.data == bytes(range(6))
+    assert read.naoqi_ts == 12.5
+    assert read.fov == pytest.approx((1.0, 0.8))
+    assert read.transform == tuple(TRANSFORM)
+
+
+def test_a_camera_that_returns_no_image_reads_as_none(stub_qi: type[StubSession]):
+    robot = _camera_robot(stub_qi)
+    stub_qi.returns[("ALVideoDevice", "getImageRemote")] = None
+    robot.subscribe_camera("top", "qvga", 10)
+    assert robot.read_camera("top") is None
+
+
+def test_unsubscribing_a_camera_gives_its_handle_back_once(
+    stub_qi: type[StubSession],
+):
+    robot = _camera_robot(stub_qi)
+    robot.subscribe_camera("top", "qvga", 10)
+    stub_qi.calls.clear()
+    robot.unsubscribe_camera("top")
+    robot.unsubscribe_camera("top")
+    assert stub_qi.calls == [
+        ("ALVideoDevice", "unsubscribe", ("NaoqiBridgeCameraTop_0",))
+    ]
+    with pytest.raises(RuntimeError, match="not subscribed"):
+        robot.read_camera("top")
+
+
+def test_close_unsubscribes_the_cameras_still_held(stub_qi: type[StubSession]):
+    robot = _camera_robot(stub_qi)
+    robot.subscribe_camera("top", "qvga", 10)
+    stub_qi.calls.clear()
+    robot.close()
+    assert stub_qi.calls == [
+        ("ALVideoDevice", "unsubscribe", ("NaoqiBridgeCameraTop_0",))
+    ]
+    assert stub_qi.closed == 1
+
+
+def test_camera_calls_while_disconnected_raise(stub_qi: type[StubSession]):
+    robot = RealNaoqiRobot("10.0.0.5")
+    with pytest.raises(RobotConnectionError, match="not connected"):
+        robot.subscribe_camera("top", "qvga", 10)
+    with pytest.raises(RobotConnectionError, match="not connected"):
+        robot.read_camera("top")
+    assert stub_qi.calls == []

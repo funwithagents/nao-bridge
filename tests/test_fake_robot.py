@@ -1,5 +1,5 @@
 """The fake backend (specs/robot.md): behavior runs, timed speech and postures, the
-joints of its posture, package list and sensor simulation.
+joints of its posture, package list, sensor simulation and paced camera frames.
 
 Async runs via ``asyncio.run``.
 """
@@ -7,10 +7,16 @@ Async runs via ``asyncio.run``.
 import threading
 import time
 from collections.abc import Callable
+from typing import Any
 
 import pytest
 
-from naoqi_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoqiRobot
+from naoqi_bridge.fake_robot import (
+    FAKE_CAMERA_TRANSFORMS,
+    JOINT_NAMES,
+    POSTURE_ANGLES,
+    FakeNaoqiRobot,
+)
 
 
 def test_fake_behavior_runs_until_stopped():
@@ -190,3 +196,69 @@ def test_fake_audio_push_can_be_paused_for_injected_chunks():
     time.sleep(0.05)
     robot.close()
     assert chunks == [b"\x01\x00"]
+
+
+# --- Cameras ---
+
+
+def camera_robot() -> FakeNaoqiRobot:
+    robot = FakeNaoqiRobot()
+    robot.connect()
+    return robot
+
+
+@pytest.mark.parametrize(
+    ("resolution", "size"),
+    [("qqvga", (160, 120)), ("qvga", (320, 240)), ("vga", (640, 480))],
+)
+def test_fake_camera_serves_bgr_at_the_subscribed_size(
+    resolution: Any, size: tuple[int, int]
+):
+    robot = camera_robot()
+    robot.subscribe_camera("bottom", resolution, 10)
+    read = robot.read_camera("bottom")
+    assert read is not None
+    assert (read.width, read.height) == size
+    assert len(read.data) == size[0] * size[1] * 3
+    assert read.transform == FAKE_CAMERA_TRANSFORMS["bottom"]
+    # A horizontal ramp on blue (BGR order: blue first), the frame index on green.
+    width = size[0]
+    assert read.data[0] == 0 and read.data[(width - 1) * 3] == 255
+    assert read.data[1] == 0 and read.data[2] == 0
+
+
+def test_fake_camera_repeats_a_frame_within_its_period_and_moves_on_after():
+    robot = camera_robot()
+    robot.subscribe_camera("top", "qqvga", 20)  # a 50 ms period
+    first = robot.read_camera("top")
+    assert robot.read_camera("top") is first  # the same frame again, as Naoqi does
+    time.sleep(0.06)
+    second = robot.read_camera("top")
+    assert first is not None and second is not None
+    assert second.naoqi_ts == pytest.approx(first.naoqi_ts + 0.05)
+    assert (first.data[1], second.data[1]) == (0, 1)  # the green channel counts
+
+
+def test_fake_camera_period_overrides_the_fps_and_none_freezes_it():
+    robot = camera_robot()
+    robot.camera_period_s = 0.01
+    robot.subscribe_camera("top", "qqvga", 1)
+    first = robot.read_camera("top")
+    time.sleep(0.02)
+    assert robot.read_camera("top") is not first
+    robot.camera_period_s = None
+    frozen = robot.read_camera("top")
+    time.sleep(0.02)
+    assert robot.read_camera("top") is frozen
+
+
+def test_fake_camera_records_its_subscription_and_forgets_it():
+    robot = camera_robot()
+    robot.subscribe_camera("top", "vga", 5)
+    robot.unsubscribe_camera("top")
+    assert robot.commands[1:] == [
+        ("subscribe_camera", {"camera": "top", "resolution": "vga", "fps": 5}),
+        ("unsubscribe_camera", {"camera": "top"}),
+    ]
+    with pytest.raises(RuntimeError, match="not subscribed"):
+        robot.read_camera("top")

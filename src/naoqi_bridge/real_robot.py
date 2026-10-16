@@ -13,12 +13,21 @@ import time
 from functools import partial
 from typing import Any
 
-from .config import AudioChannel
+from .config import AudioChannel, CameraResolution
 from .robot import (
     AUDIO_CHANNEL_CODES,
     AUDIO_SAMPLE_RATE,
+    CAMERA_COLORSPACE_BGR,
+    CAMERA_HANDLES_PER_NAME,
+    CAMERA_INDEXES,
+    CAMERA_NAMES,
+    CAMERA_RESOLUTION_CODES,
+    CAMERA_SUBSCRIBER_NAMES,
+    FRAME_ROBOT,
     TOUCH_KEYS,
     AudioCallback,
+    Camera,
+    CameraRead,
     RobotConnectionError,
     TouchCallback,
 )
@@ -70,6 +79,8 @@ class RealNaoqiRobot:
         self._services: dict[str, Any] = {}
         self._touch_links: list[tuple[Any, Any]] = []
         self._audio_service_id: Any = None
+        # The ALVideoDevice handle of each subscribed camera.
+        self._camera_handles: dict[Camera, str] = {}
 
     def connect(self, cancel: threading.Event | None = None) -> None:
         if not self.ip or self.port <= 0:
@@ -120,11 +131,18 @@ class RealNaoqiRobot:
 
     def close(self) -> None:
         if self._session is not None:
+            # A subscription outlives the session on the robot: give it back first.
+            for camera in list(self._camera_handles):
+                try:
+                    self.unsubscribe_camera(camera)
+                except Exception:
+                    logger.exception("Unsubscribing the %s camera failed", camera)
             self._session.close()
         self._session = None
         self._services.clear()
         self._touch_links.clear()
         self._audio_service_id = None
+        self._camera_handles.clear()
 
     def _connected_session(self) -> Any:
         if self._session is None:
@@ -233,3 +251,52 @@ class RealNaoqiRobot:
         self._service("ALAudioDevice").unsubscribe(self.AUDIO_SERVICE_NAME)
         self._connected_session().unregisterService(self._audio_service_id)
         self._audio_service_id = None
+
+    def subscribe_camera(
+        self, camera: Camera, resolution: CameraResolution, fps: int
+    ) -> None:
+        video = self._service("ALVideoDevice")
+        name = CAMERA_SUBSCRIBER_NAMES[camera]
+        # Handles a bridge that died without unsubscribing left behind: Naoqi keeps
+        # them until a reboot and allows seven per name. An unknown one answers False.
+        for n in range(CAMERA_HANDLES_PER_NAME):
+            video.unsubscribe(f"{name}_{n}")
+        handle = video.subscribeCamera(
+            name,
+            CAMERA_INDEXES[camera],
+            CAMERA_RESOLUTION_CODES[resolution],
+            CAMERA_COLORSPACE_BGR,
+            fps,
+        )
+        if not handle:
+            raise RuntimeError(f"ALVideoDevice refused to subscribe {name}")
+        self._camera_handles[camera] = str(handle)
+
+    def read_camera(self, camera: Camera) -> CameraRead | None:
+        video = self._service("ALVideoDevice")
+        handle = self._camera_handles.get(camera)
+        if handle is None:
+            raise RuntimeError(f"the {camera} camera is not subscribed")
+        image = video.getImageRemote(handle)
+        transform = self._service("ALMotion").getTransform(
+            CAMERA_NAMES[camera], FRAME_ROBOT, True
+        )
+        video.releaseImage(handle)
+        if not image:
+            return None
+        width, height = int(image[0]), int(image[1])
+        ts_s, ts_us, buffer = image[4], image[5], image[6]
+        left, top, right, bottom = (float(a) for a in image[8:12])
+        return CameraRead(
+            width=width,
+            height=height,
+            data=bytes(buffer),
+            naoqi_ts=ts_s + ts_us / 1e6,
+            fov=(left - right, top - bottom),
+            transform=tuple(float(x) for x in transform),
+        )
+
+    def unsubscribe_camera(self, camera: Camera) -> None:
+        handle = self._camera_handles.pop(camera, None)
+        if handle is not None:
+            self._service("ALVideoDevice").unsubscribe(handle)

@@ -5,7 +5,11 @@
     "streams": {
       "touch": { "enabled": true },
       "joints": { "enabled": true, "period_s": 0.2 },
-      "audio": { "enabled": true, "channel": "front" }
+      "audio": { "enabled": true, "channel": "front" },
+      "cameras": {
+        "top": { "enabled": true, "resolution": "qvga", "fps": 10 },
+        "bottom": { "enabled": false, "resolution": "qvga", "fps": 10 }
+      }
     },
     "viewer": { "enabled": false, "config": { "ghost": true } }
   },

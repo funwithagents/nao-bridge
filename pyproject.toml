@@ -7,6 +7,9 @@ requires-python = ">=3.12,<3.14"  # capped by the libqi wheels (cp312, cp313)
 dependencies = [
     "mcp>=1.9,<2",
     "websockets>=17.2",
+    # The camera feeds (specs/camera.md): a frame's numpy view, the servers' JPEG.
+    "numpy>=1.26",
+    "Pillow>=10",
     # Only where a libqi wheel exists; elsewhere the bridge runs the fake backend only.
     "qi>=3.1.8,<4; (sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
 ]
