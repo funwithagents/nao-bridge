@@ -3,7 +3,8 @@
 Specified by [specs/bridge.md](../../specs/bridge.md). ``NaoqiBridge`` owns the
 ``start()`` / ``stop()`` lifecycle (``async with`` over it) and exposes intent-level
 async verbs that raise why they failed (``errors.py``), the behavior catalog, and the robot's streams — touch
-as an ``Event``, joints as an ``Observable``, the microphone as ``audio_input()``
+as an ``Event``, posture and joints as
+``Observable`` values, the microphone as ``audio_input()``
 subscribers over the mic feed, each camera as a ``CameraFeed`` in ``cameras`` — over
 the robot seam in [robot.py](robot.py), a real
 Nao or the fake, as the ``NaoqiBridgeConfig`` says.
@@ -35,7 +36,16 @@ from .errors import (
 from .events import Event
 from .microphone import MicFeed
 from .observable import Observable
-from .robot import CAMERAS, TOUCH_KEYS, Camera, NaoqiRobot, TouchPart, build_robot
+from .robot import (
+    CAMERAS,
+    POSTURE_KEYS,
+    TOUCH_KEYS,
+    Camera,
+    NaoqiRobot,
+    PostureKey,
+    TouchPart,
+    build_robot,
+)
 from .sim import SimLease, acquire_sim
 from .viewer import close_viewer, open_viewer, viewer_target
 
@@ -50,6 +60,7 @@ __all__ = [
     "LocalizedString",
     "NaoqiBehavior",
     "NaoqiBridge",
+    "PostureState",
     "TouchEvent",
     "TouchPart",
     "build_catalog",
@@ -89,6 +100,19 @@ class TouchEvent:
 
     part: TouchPart
     touched: bool
+
+
+@dataclass(frozen=True)
+class PostureState:
+    """The robot's posture as Naoqi reports it, whether a bridge verb is moving it,
+    and that move's target when it has one (specs/bridge.md "Posture"). While
+    ``moving``, ``posture`` and ``family`` are Naoqi's guess mid-move: in transit."""
+
+    posture: str
+    family: str
+    moving: bool
+    moving_to: str | None
+    ts: float
 
 
 @dataclass(frozen=True)
@@ -278,6 +302,14 @@ class NaoqiBridge:
         self._catalog = BehaviorCatalog()
 
         self.on_touch: Event[TouchEvent] = Event()
+        self._posture: Observable[PostureState | None] = Observable(None)
+        # (posture, family) as Naoqi last reported them; None outside a session or
+        # when the posture couldn't be read at start().
+        self._posture_names: tuple[str, str] | None = None
+        # The bridge's own posture move: its target and its robot call in flight.
+        self._moving_to: str | None = None
+        self._move_run: asyncio.Future[Any] | None = None
+        self._posture_read: asyncio.Task[None] | None = None
         self._joints: Observable[JointsState | None] = Observable(None)
         self._mic = MicFeed()
         cameras = config.streams.cameras
@@ -373,6 +405,7 @@ class NaoqiBridge:
                 logger.warning(
                     "Touch subscription failed; on_touch will not emit", exc_info=True
                 )
+            await self._start_posture(robot)
             if streams.audio.enabled:
                 await self._mic.start(robot, streams.audio.channel)
             for camera, feed in self._cameras.items():
@@ -409,6 +442,7 @@ class NaoqiBridge:
 
     async def _shut_down(self, robot: NaoqiRobot) -> None:
         await self._close_viewer()  # first: the window never shows a robot gone
+        self._end_posture()
         if self._joints_task is not None:
             self._joints_task.cancel()
             await asyncio.gather(self._joints_task, return_exceptions=True)
@@ -440,7 +474,7 @@ class NaoqiBridge:
         for feed in self._cameras.values():
             await feed.stop()
         await self._mic.stop()
-        for step in (robot.unsubscribe_touch, robot.close):
+        for step in (robot.unsubscribe_touch, robot.unsubscribe_posture, robot.close):
             try:
                 await asyncio.to_thread(step)
             except Exception:
@@ -456,6 +490,12 @@ class NaoqiBridge:
     # endregion
 
     # region Streams
+
+    @property
+    def posture(self) -> Observable[PostureState | None]:
+        """The robot's posture (``None`` outside a session, or when it couldn't be
+        read at start), and the posture a bridge verb is moving it to."""
+        return self._posture
 
     @property
     def joints(self) -> Observable[JointsState | None]:
@@ -496,6 +536,117 @@ class NaoqiBridge:
         except RuntimeError:  # the loop is closed: the session is over
             pass
 
+    async def _start_posture(self, robot: NaoqiRobot) -> None:
+        """Read the posture, publish it, then follow Naoqi's posture events; a failure
+        is logged and leaves ``posture`` at ``None`` (specs/bridge.md "Posture")."""
+        try:
+            names = await asyncio.to_thread(robot.get_posture)
+            await asyncio.to_thread(robot.subscribe_posture, self._forward_posture)
+        except Exception:
+            logger.warning(
+                "Posture read or subscription failed; posture stays None",
+                exc_info=True,
+            )
+            return
+        self._posture_names = names
+        self._publish_posture()
+
+    def _end_posture(self) -> None:
+        if self._posture_read is not None:
+            self._posture_read.cancel()
+            self._posture_read = None
+        self._posture_names = None
+        self._moving_to = None
+        self._move_run = None
+        if self._posture.value is not None:
+            self._posture.set(None)
+
+    def _publish_posture(self) -> None:
+        """Publish the posture state, when any of its fields changed."""
+        if self._posture_names is None:
+            return
+        posture, family = self._posture_names
+        current = self._posture.value
+        if current is not None and (
+            current.posture,
+            current.family,
+            current.moving,
+            current.moving_to,
+        ) == (posture, family, self._move_run is not None, self._moving_to):
+            return
+        self._posture.set(
+            PostureState(
+                posture,
+                family,
+                self._move_run is not None,
+                self._moving_to,
+                time.monotonic(),
+            )
+        )
+
+    def _forward_posture(self, key: PostureKey, value: str) -> None:
+        """Naoqi's posture callback, on Naoqi's thread: apply it on the bridge's loop."""
+        loop = self._loop
+        if loop is None or key not in POSTURE_KEYS:
+            return
+        try:
+            loop.call_soon_threadsafe(self._apply_posture_event, key, str(value))
+        except RuntimeError:  # the loop is closed: the session is over
+            pass
+
+    def _apply_posture_event(self, key: PostureKey, value: str) -> None:
+        if self._posture_names is None:
+            return
+        posture, family = self._posture_names
+        if key == "PostureChanged":
+            posture = value
+        else:
+            family = value
+        self._posture_names = (posture, family)
+        self._publish_posture()
+
+    def _posture_move(
+        self, target: str | None
+    ) -> Callable[[asyncio.Future[Any]], None]:
+        """The ``started`` hook of a verb that moves the robot (to ``target``, when it
+        has one): ``moving`` while its robot call runs, then read where it ended."""
+
+        def started(run: asyncio.Future[Any]) -> None:
+            self._moving_to = target
+            self._move_run = run
+            self._publish_posture()
+            run.add_done_callback(self._posture_move_ended)
+
+        return started
+
+    def _posture_move_ended(self, run: asyncio.Future[Any]) -> None:
+        robot = self._robot
+        if self._move_run is not run or robot is None:
+            return
+        self._posture_read = asyncio.ensure_future(self._read_posture(robot, run))
+
+    async def _read_posture(self, robot: NaoqiRobot, run: asyncio.Future[Any]) -> None:
+        """Naoqi's last event lags a move's end: read the posture it ended in, then
+        clear ``moving`` and ``moving_to``, unless a newer move began meanwhile."""
+        try:
+            names: tuple[str, str] | None = await asyncio.to_thread(robot.get_posture)
+        except Exception:
+            logger.debug("Reading the posture after a move failed", exc_info=True)
+            names = None
+        if self._move_run is not run:
+            return
+        self._move_run = None
+        self._moving_to = None
+        if names is not None and self._posture_names is not None:
+            self._posture_names = names
+        self._publish_posture()
+
+    async def _posture_settled(self) -> None:
+        """Wait for the read that ends the bridge's last posture move."""
+        read = self._posture_read
+        if read is not None:
+            await asyncio.shield(read)
+
     async def _joints_loop(self, robot: NaoqiRobot, period_s: float) -> None:
         while True:
             try:
@@ -511,12 +662,25 @@ class NaoqiBridge:
 
     # region Verbs
 
-    async def _act[T](self, verb: str, call: Callable[[NaoqiRobot], T]) -> T:
-        """Run ``call`` on the robot off the loop. ``NotRunningError`` while stopped; a
-        robot exception becomes ``CommandFailedError``, chained to it."""
+    async def _act[T](
+        self,
+        verb: str,
+        call: Callable[[NaoqiRobot], T],
+        started: Callable[[asyncio.Future[T]], None] | None = None,
+    ) -> T:
+        """Run ``call`` on the robot off the loop; ``started`` is handed its future.
+        ``NotRunningError`` while stopped; a robot exception becomes
+        ``CommandFailedError``, chained to it. Cancelled, it returns at once and the
+        call runs on to its end in its thread."""
         robot = self.robot
+        run = asyncio.ensure_future(asyncio.to_thread(call, robot))
+        if started is not None:
+            started(run)
         try:
-            return await asyncio.to_thread(call, robot)
+            return await asyncio.shield(run)
+        except asyncio.CancelledError:
+            run.add_done_callback(_drop_outcome)  # the caller gets the cancel only
+            raise
         except Exception as e:
             raise CommandFailedError(f"{verb} failed: {e or type(e).__name__}") from e
 
@@ -593,8 +757,10 @@ class NaoqiBridge:
         await self._act("wake_up", lambda r: r.wake_up())
 
     async def rest(self) -> None:
-        """Disable the robot motors."""
-        await self._act("rest", lambda r: r.rest())
+        """Relax into a safe posture (Naoqi's choice: Crouch from Stand) and disable
+        the robot motors."""
+        await self._act("rest", lambda r: r.rest(), started=self._posture_move(None))
+        await self._posture_settled()
 
     async def _go_to_posture(self, verb: str, posture: str) -> None:
         await self._require_awake(verb)
@@ -602,7 +768,9 @@ class NaoqiBridge:
             verb,
             lambda r: r.go_to_posture(posture, POSTURE_SPEED, POSTURE_MAX_TRIES),
             lambda r: r.stop_posture(),
+            started=self._posture_move(posture),
         )
+        await self._posture_settled()
         if not reached:
             raise CommandFailedError(
                 f"{verb} failed: the robot did not reach the {posture} posture"

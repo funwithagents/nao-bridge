@@ -26,11 +26,14 @@ __all__ = [
     "CAMERA_RESOLUTION_CODES",
     "CAMERA_SUBSCRIBER_NAMES",
     "FRAME_ROBOT",
+    "POSTURE_KEYS",
     "TOUCH_KEYS",
     "AudioCallback",
     "Camera",
     "CameraRead",
     "NaoqiRobot",
+    "PostureCallback",
+    "PostureKey",
     "RobotConnectionError",
     "TouchCallback",
     "TouchPart",
@@ -49,6 +52,12 @@ TOUCH_KEYS: tuple[TouchPart, ...] = (
 
 # Called on Naoqi's threads: (memory key, value 0/1).
 type TouchCallback = Callable[[TouchPart, float], None]
+
+# ALRobotPosture's events in ALMemory: the posture's name, and its family's.
+type PostureKey = Literal["PostureChanged", "PostureFamilyChanged"]
+POSTURE_KEYS: tuple[PostureKey, ...] = ("PostureChanged", "PostureFamilyChanged")
+# Called on Naoqi's threads: (memory key, the new posture or family name).
+type PostureCallback = Callable[[PostureKey, str], None]
 # Called on Naoqi's threads: (channels, samples per channel, 16-bit LE PCM buffer).
 type AudioCallback = Callable[[int, int, bytes], None]
 AUDIO_SAMPLE_RATE = 16000
@@ -113,6 +122,9 @@ class NaoqiRobot(Protocol):
     def is_awake(self) -> bool: ...
     def go_to_posture(self, posture: str, speed: float, max_tries: int) -> bool: ...
     def stop_posture(self) -> None: ...
+    def get_posture(self) -> tuple[str, str]: ...
+    def subscribe_posture(self, callback: PostureCallback) -> None: ...
+    def unsubscribe_posture(self) -> None: ...
     def set_breathing(self, chain_name: str, enabled: bool) -> None: ...
     def fade_eyes(self, color: str) -> None: ...
     def set_basic_awareness(

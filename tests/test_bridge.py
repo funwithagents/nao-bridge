@@ -19,7 +19,13 @@ from naoqi_bridge import (
     NotPlayingError,
     NotRunningError,
 )
-from naoqi_bridge.bridge import JointsState, NaoqiBridge, TouchEvent, build_catalog
+from naoqi_bridge.bridge import (
+    JointsState,
+    NaoqiBridge,
+    PostureState,
+    TouchEvent,
+    build_catalog,
+)
 from naoqi_bridge.config import (
     AudioStream,
     JointsStream,
@@ -758,11 +764,13 @@ def test_a_start_cancelled_while_connecting_closes_the_robot(
     running, elapsed = asyncio.run(run())
     assert not running
     assert elapsed >= 0.1  # waited for the connection in flight
-    # the bring-up ran through (touch is always on), then was undone
+    # the bring-up ran through (touch and posture are always on), then was undone
     assert command_names(robots[0]) == [
         "connect",
         "subscribe_touch",
+        "subscribe_posture",
         "unsubscribe_touch",
+        "unsubscribe_posture",
         "close",
     ]
     assert not robots[0].connected
@@ -817,7 +825,7 @@ def test_a_cancelled_stop_still_runs_every_teardown_step(
 
     running, commands = asyncio.run(run())
     assert not running
-    assert commands[-2:] == ["unsubscribe_touch", "close"]
+    assert commands[-3:] == ["unsubscribe_touch", "unsubscribe_posture", "close"]
 
 
 # --- Config -------------------------------------------------------------------
@@ -843,8 +851,8 @@ def test_disabled_streams_are_not_subscribed_and_their_apis_refuse():
                 bridge.audio_input()
             return [name for name, _ in fake(bridge).commands]
 
-    # Touch has no switch: the bridge subscribes it with no stream enabled.
-    assert asyncio.run(run()) == ["connect", "subscribe_touch"]
+    # Touch and posture have no switch: subscribed with no stream enabled.
+    assert asyncio.run(run()) == ["connect", "subscribe_touch", "subscribe_posture"]
 
 
 def test_a_failing_touch_subscription_is_logged_and_the_bridge_still_starts(
@@ -866,7 +874,7 @@ def test_a_failing_touch_subscription_is_logged_and_the_bridge_still_starts(
 
     running, received, commands = asyncio.run(run())
     assert running and received == []
-    assert commands == ["connect"]
+    assert commands == ["connect", "subscribe_posture"]
     assert "Touch subscription failed; on_touch will not emit" in caplog.messages
 
 
@@ -879,9 +887,10 @@ def test_enabled_streams_are_subscribed_at_start_and_released_at_stop():
     commands = asyncio.run(run())
     assert ("subscribe_touch", {}) in commands
     assert ("subscribe_audio", {"channel": "left"}) in commands
-    assert commands[-3:] == [
+    assert commands[-4:] == [
         ("unsubscribe_audio", {}),
         ("unsubscribe_touch", {}),
+        ("unsubscribe_posture", {}),
         ("close", {}),
     ]
 
@@ -905,6 +914,167 @@ def test_touch_events_are_emitted_on_the_event_loop():
         (TouchEvent("FrontTactilTouched", True), True),
         (TouchEvent("FrontTactilTouched", False), True),
     ]
+
+
+# --- Posture (specs/bridge.md "Posture") ---------------------------------------
+
+
+def settled(state: PostureState | None) -> tuple[str, str, bool, str | None] | None:
+    if state is None:
+        return None
+    return (state.posture, state.family, state.moving, state.moving_to)
+
+
+async def follow_posture(bridge: NaoqiBridge, into: list[PostureState | None]) -> None:
+    async for state in bridge.posture.changes():
+        into.append(state)  # noqa: PERF401  (cancelled: keep what came before)
+
+
+def test_the_posture_is_read_at_start_and_reset_at_stop():
+    async def run() -> list[Any]:
+        bridge = NaoqiBridge("fake")
+        seen = [settled(bridge.posture.value)]
+        await bridge.start()
+        seen.append(settled(bridge.posture.value))
+        await bridge.stop()
+        seen.append(settled(bridge.posture.value))
+        return seen
+
+    # a fake starts at rest, crouched
+    assert asyncio.run(run()) == [None, ("Crouch", "Standing", False, None), None]
+
+
+def test_each_posture_verb_shows_its_target_while_it_moves_and_returns_settled():
+    async def run() -> list[tuple[Any, Any]]:
+        async with NaoqiBridge("fake") as bridge:
+            await bridge.wake_up()
+            fake(bridge).posture_duration_s = 0.1
+            seen: list[tuple[Any, Any]] = []
+            for verb, target in [(bridge.stand_up, "Stand"), (bridge.sit_down, "Sit")]:
+                moving = asyncio.create_task(verb())
+                during = await asyncio.wait_for(
+                    bridge.posture.wait_for(lambda s: s is not None and s.moving),
+                    1.0,
+                )
+                await moving
+                seen.append((settled(during), settled(bridge.posture.value)))
+            return seen
+
+    assert asyncio.run(run()) == [
+        (("Crouch", "Standing", True, "Stand"), ("Stand", "Standing", False, None)),
+        (("Stand", "Standing", True, "Sit"), ("Sit", "Sitting", False, None)),
+    ]
+
+
+def test_rest_is_a_move_with_no_target_ending_where_naoqi_settles():
+    async def run() -> tuple[Any, Any]:
+        async with NaoqiBridge("fake") as bridge:
+            await bridge.wake_up()
+            await bridge.stand_up()
+            resting = asyncio.create_task(bridge.rest())
+            await asyncio.sleep(0)  # the verb runs up to handing the move to Naoqi
+            during = settled(bridge.posture.value)
+            await resting
+            return during, settled(bridge.posture.value)
+
+    # Where a rest ends is Naoqi's to say: the fake crouches from Stand.
+    assert asyncio.run(run()) == (
+        ("Stand", "Standing", True, None),
+        ("Crouch", "Standing", False, None),
+    )
+
+
+def test_a_cancelled_move_clears_its_target_once_the_robot_stopped():
+    async def run() -> tuple[Any, Any]:
+        async with NaoqiBridge("fake") as bridge:
+            await bridge.wake_up()
+            robot = fake(bridge)
+            robot.posture_duration_s = 5.0
+            standing = asyncio.create_task(bridge.stand_up())
+            await wait_until(lambda: robot.moving_posture)
+            during = settled(bridge.posture.value)
+            await cancel_and_wait(standing)
+            after = await asyncio.wait_for(
+                bridge.posture.wait_for(lambda s: s is not None and not s.moving),
+                1.0,
+            )
+            return during, settled(after)
+
+    # Stopped part way: the fake never got there, and says it's still crouched.
+    assert asyncio.run(run()) == (
+        ("Crouch", "Standing", True, "Stand"),
+        ("Crouch", "Standing", False, None),
+    )
+
+
+def test_naoqis_posture_events_reach_the_observable_on_the_loop_once_per_change():
+    async def run() -> list[Any]:
+        async with NaoqiBridge("fake") as bridge:
+            published: list[PostureState | None] = []
+            follower = asyncio.create_task(follow_posture(bridge, published))
+            await asyncio.sleep(0.01)
+            robot = fake(bridge)
+            # A fall, as Naoqi reports it from its own thread.
+            reporter = threading.Thread(
+                target=lambda: (
+                    robot.posture_event("PostureFamilyChanged", "LyingBack"),
+                    robot.posture_event("PostureChanged", "LyingBack"),
+                    robot.posture_event("PostureChanged", "LyingBack"),  # no change
+                )
+            )
+            reporter.start()
+            reporter.join()
+            await wait_until(
+                lambda: (
+                    settled(bridge.posture.value)
+                    == ("LyingBack", "LyingBack", False, None)
+                )
+            )
+            await asyncio.sleep(0.05)
+            follower.cancel()
+            return [settled(s) for s in published]
+
+    # latest wins: the follower may see the family change, then the posture's
+    seen = asyncio.run(run())
+    assert seen[-1] == ("LyingBack", "LyingBack", False, None)
+    assert seen.count(("LyingBack", "LyingBack", False, None)) == 1
+
+
+def test_only_the_newest_move_clears_the_target():
+    async def run() -> tuple[Any, Any]:
+        async with NaoqiBridge("fake") as bridge:
+            await bridge.wake_up()
+            robot = fake(bridge)
+            robot.posture_duration_s = 0.3
+            standing = asyncio.create_task(bridge.stand_up())
+            await wait_until(lambda: robot.moving_posture)
+            await asyncio.sleep(0.1)
+            sitting = asyncio.create_task(bridge.sit_down())
+            await standing  # the first move's end
+            after_first = settled(bridge.posture.value)
+            await sitting
+            return after_first, settled(bridge.posture.value)
+
+    after_first, after_both = asyncio.run(run())
+    assert after_first is not None and after_first[2:] == (True, "Sit")  # on its way
+    assert after_both == ("Sit", "Sitting", False, None)
+
+
+def test_a_posture_that_cannot_be_read_at_start_stays_none(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    def refuse(self: FakeNaoqiRobot) -> tuple[str, str]:
+        raise RuntimeError("no ALRobotPosture on this Naoqi")
+
+    async def run() -> tuple[bool, Any]:
+        monkeypatch.setattr(FakeNaoqiRobot, "get_posture", refuse)
+        async with NaoqiBridge("fake") as bridge:
+            await bridge.wake_up()
+            await bridge.stand_up()  # the verbs work all the same
+            return bridge.running, bridge.posture.value
+
+    assert asyncio.run(run()) == (True, None)
+    assert "Posture read or subscription failed; posture stays None" in caplog.messages
 
 
 def test_joints_are_published_while_running_and_reset_at_stop():

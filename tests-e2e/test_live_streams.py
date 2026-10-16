@@ -22,6 +22,7 @@ from naoqi_bridge import (
     CameraStreams,
     JointsState,
     JointsStream,
+    PostureState,
     StreamSettings,
     TouchEvent,
 )
@@ -49,6 +50,17 @@ def test_joints_are_sampled_from_the_robot():
     assert len(first.angles) == len(first.names)
     assert all(abs(angle) <= math.pi for angle in first.angles)  # radians
     assert later.names == first.names
+
+
+def test_the_posture_is_read_from_the_robot_at_start():
+    async def run() -> PostureState | None:
+        async with live_session(live_config()) as bridge:
+            return bridge.posture.value
+
+    state = asyncio.run(run())
+    assert state is not None
+    assert state.posture and state.family  # Naoqi's names, whatever the robot is in
+    assert state.moving_to is None
 
 
 @pytest.mark.requires("audio_in")

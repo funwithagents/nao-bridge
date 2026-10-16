@@ -288,7 +288,12 @@ def test_leaving_serve_cancels_the_behaviors_still_running():
     assert not still_serving
     assert still_running == []
     # the cancel stopped the app itself, before the bridge closed the robot
-    assert commands[-3:] == ["stop_behavior", "unsubscribe_touch", "close"]
+    assert commands[-4:] == [
+        "stop_behavior",
+        "unsubscribe_touch",
+        "unsubscribe_posture",
+        "close",
+    ]
 
 
 # --- stdout belongs to the protocol ------------------------------------------

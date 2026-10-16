@@ -17,15 +17,15 @@ tests:
 
 ## Purpose
 
-`NaoqiBridge` is the object a caller holds to drive Nao: intent-level async verbs (say, stand up, dance, react, run an installed app) plus the robot's touch, joint, audio and camera streams. It is built from a [config](config.md) and sits on top of the [robot.md](robot.md) seam, so it runs unchanged on a real robot, a simulated one ([sim.md](sim.md)) or the fake. Every client — the [MCP server](naoqi-mcp-server.md), the [WebSocket server](naoqi-websocket-server.md), or a Python caller — shares this one implementation. It replaces the earlier `NaoAPI` class.
+`NaoqiBridge` is the object a caller holds to drive Nao: intent-level async verbs (say, stand up, dance, react, run an installed app) plus the robot's touch, posture, joint, audio and camera streams. It is built from a [config](config.md) and sits on top of the [robot.md](robot.md) seam, so it runs unchanged on a real robot, a simulated one ([sim.md](sim.md)) or the fake. Every client — the [MCP server](naoqi-mcp-server.md), the [WebSocket server](naoqi-websocket-server.md), or a Python caller — shares this one implementation. It replaces the earlier `NaoAPI` class.
 
 ## Core concepts / Decided
 
 ### Construction and lifecycle
 
 - `NaoqiBridge(config: NaoqiBridgeConfig | Backend | None = None)` ([config.md](config.md)). With no argument it uses `NaoqiBridgeConfig()`, the offline fake. A bare backend string is shorthand for `NaoqiBridgeConfig(backend=...)`. `NaoqiBridge.from_dict` / `from_json` / `from_json_file` load the config, then build the bridge. Constructing the bridge does nothing else: no connection, no task.
-- **`await start()`** on the `sim` backend first acquires the sim: it starts one or borrows the one running, as `sim.spawn` says ([sim.md](sim.md)). Then, on every backend, it builds the robot with `build_robot(config)` ([robot.md](robot.md)) and connects it off the event loop. It subscribes touch, which has no switch ([config.md](config.md), "Streams"), and the streams the config enables (audio through the mic feed, [microphone.md](microphone.md); each enabled camera through its feed, [camera.md](camera.md)), loads the behavior catalog, and starts the joints task when joints are enabled. Last, with `viewer.enabled`, it opens the viewer on the robot it connected to, or logs why not ([viewer.md](viewer.md)). If any step fails, what already started is torn down (the robot closed, the sim released) and the error propagates (`RobotConnectionError` for an unreachable robot or an unavailable sim, `ViewerError` for a viewer that can't launch). Calling `start()` on a running bridge raises `BridgeError`.
-- **`await stop()`** closes the viewer if one is open, then cancels the joints task and publishes `None` on `joints`. It then stops the camera feeds (ending every `frames()` subscriber, [camera.md](camera.md)) and the mic feed (which ends every `audio_input()` subscriber), unsubscribes touch, closes the robot, clears the running-item tracking and, last, releases the sim (stopping it when the bridge started it). It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it. Cancelling `start()` or `stop()` follows "Cancellation" below: neither leaves anything half up.
+- **`await start()`** on the `sim` backend first acquires the sim: it starts one or borrows the one running, as `sim.spawn` says ([sim.md](sim.md)). Then, on every backend, it builds the robot with `build_robot(config)` ([robot.md](robot.md)) and connects it off the event loop. It reads the robot's posture and subscribes to its changes, and subscribes touch, neither of which has a switch ([config.md](config.md), "Streams"), and the streams the config enables (audio through the mic feed, [microphone.md](microphone.md); each enabled camera through its feed, [camera.md](camera.md)), loads the behavior catalog, and starts the joints task when joints are enabled. Last, with `viewer.enabled`, it opens the viewer on the robot it connected to, or logs why not ([viewer.md](viewer.md)). If any step fails, what already started is torn down (the robot closed, the sim released) and the error propagates (`RobotConnectionError` for an unreachable robot or an unavailable sim, `ViewerError` for a viewer that can't launch). Calling `start()` on a running bridge raises `BridgeError`.
+- **`await stop()`** closes the viewer if one is open, then cancels the joints task and publishes `None` on `joints` and on `posture`. It then stops the camera feeds (ending every `frames()` subscriber, [camera.md](camera.md)) and the mic feed (which ends every `audio_input()` subscriber), unsubscribes touch and posture, closes the robot, clears the running-item tracking and, last, releases the sim (stopping it when the bridge started it). It tears everything down even if one step fails. It's a no-op when the bridge isn't running, and `start()` may follow it. Cancelling `start()` or `stop()` follows "Cancellation" below: neither leaves anything half up.
 - **`async with NaoqiBridge(...) as bridge:`** is shorthand for the pair, and runs `stop()` on every way out.
 - `running: bool`. `config` and `backend` (read-only).
 - **Escape hatch:** `bridge.robot` is the `NaoqiRobot` — the `FakeNaoqiRobot` on `fake`, which tests use to assert on recorded commands. It raises `NotRunningError` when the bridge isn't running.
@@ -113,14 +113,37 @@ The streams have their own cancellation contracts: an `audio_input()` subscriber
 
 ### Streams
 
-The config's `streams` block decides what `start()` subscribes to on the robot ([config.md](config.md)); touch has no switch and is always subscribed. Each stream is consumed through its own API, open to any number of consumers. The objects below belong to the bridge and outlive its sessions.
+The config's `streams` block decides what `start()` subscribes to on the robot ([config.md](config.md)); touch and posture have no switch and are always subscribed. Each stream is consumed through its own API, open to any number of consumers. The objects below belong to the bridge and outlive its sessions.
 
 | Stream | API | Contract |
 |---|---|---|
 | touch | `bridge.on_touch: Event[TouchEvent]` ([events.md](events.md)) | `TouchEvent(part: TouchPart, touched: bool)`; `TouchPart` is the `Literal` of `FrontTactilTouched` / `MiddleTactilTouched` / `RearTactilTouched`, so a handler can match on it under pyright. Naoqi fires on its own thread, and the bridge re-emits on its event loop (`call_soon_threadsafe`), so handlers run on the loop. Always on: there is no switch, since subscribing costs nothing. A subscription that fails at `start()` is logged as a warning and `on_touch` stays silent: touch is never essential, so a Naoqi without the tactile keys still starts. |
+| posture | `bridge.posture: Observable[PostureState \| None]` ([observable.md](observable.md)) | `PostureState(posture, family, moving, moving_to, ts)`, from Naoqi's posture manager and the bridge's own moves ("Posture" below). `None` outside a session. Always on, like touch. |
 | joints | `bridge.joints: Observable[JointsState \| None]` ([observable.md](observable.md)) | `JointsState(names, angles, ts)`, angles in radians, `ts` on the monotonic clock, `set` every `streams.joints.period_s` by a bridge task. `None` outside a session. A failing read is logged and the loop continues. Disabled: reading `joints` raises `BridgeError`. |
 | audio | `bridge.audio_input(preroll_s=0.0)`, `bridge.mic` ([microphone.md](microphone.md)) | Each call is a subscriber yielding int16 LE mono `bytes` at `mic.sample_rate` (16000). `mic.latest()` and `published_count` are for samplers. Disabled: `audio_input()` raises `BridgeError` at the call; bridge not running: `NotRunningError`. |
 | cameras | `bridge.cameras["top"]`, `bridge.cameras["bottom"]`: `CameraFeed` ([camera.md](camera.md)) | `latest()` is the newest `CameraFrame` (BGR `data`, a numpy `image` view, `camera_transform` camera → FRAME_ROBOT, `fov`) or `None`; `frames()` is a latest-wins iterator ending with the session; `published_count` for samplers. Both feeds exist from construction. Disabled: `frames()` / `wait_for` raise `BridgeError` at the call, `latest()` is `None`; bridge not running: `NotRunningError`. |
+
+### Posture
+
+`bridge.posture` says what posture the robot is in, at any time, and whether the bridge is moving it to another one.
+
+```python
+@dataclass(frozen=True)
+class PostureState:
+    posture: str            # Naoqi's posture name: "Stand", "Sit", "Crouch", "StandInit", "LyingBack", …, "Unknown"
+    family: str             # Naoqi's posture family: "Standing", "Sitting", "LyingBack", "Left", …, "Unknown" (version-dependent: Crouch is "Standing" on 2.1, "Crouching" on 2.8)
+    moving: bool            # a bridge verb is moving the robot: stand_up, sit_down, rest
+    moving_to: str | None   # that move's target, when the verb has one ("Stand", "Sit"), else None
+    ts: float               # when it was published, on the monotonic clock
+```
+
+- **Naoqi is the source, not the bridge.** The robot changes posture without the bridge: resting crouches it when it stands (and leaves it seated when it sits), a dance or an app ends anywhere, a fall or a push moves it, a cancelled move stops part way. So `posture` and `family` are what Naoqi's `ALRobotPosture` reports, never what the bridge last asked for, as the motors check asks the robot rather than tracking `wake_up()` ("Action verb contract").
+- **How it's fed.** `start()` reads the posture (`robot.get_posture()`), publishes it, then subscribes to Naoqi's `PostureChanged` and `PostureFamilyChanged` events, which fire on Naoqi's threads and are marshalled onto the loop like touch. Naoqi raises them about once a second, and smooths them: polled directly, the posture flickers between neighbours (`Sit` / `SitOnChair`) even at rest.
+- **`moving` and `moving_to` are the bridge's.** `stand_up()`, `sit_down()` and `rest()` set `moving` when they hand the move to Naoqi (after the motors check, for the first two), and clear it when the robot call returns: the move ended, failed, or was stopped by a cancel. `stand_up()` and `sit_down()` also set `moving_to` to their target (`"Stand"`, `"Sit"`). `rest()` leaves it `None`, because where it ends is Naoqi's: on a Nao (2.1.4.13), a rest from Stand crouches, and a rest from Sit relaxes in place and stays `Sit` (5.3 s), while a 2.1 sim crouches from both. Naoqi doesn't report a move's target, and its posture mid-move is a nearest-posture guess that can name anything: measured on a simulated Nao, a stand-up from Sit passed through `SitOnChair`, `Unknown`, `LyingBack`, `StandInit` and `Crouch`, with the family going `Left` and `Right`. So **while `moving` is set, `posture` and `family` mean "in transit"**, and a consumer that wants a settled posture waits for `not moving`. A move that isn't the bridge's (a dance, an app, a fall) has `moving` false: its intermediate postures show as Naoqi reports them.
+- **A bridge move ends with a fresh read.** Naoqi's last event lags the end of a move by up to a second, so when a bridge move's robot call returns, the bridge reads the posture again and publishes it with `moving` and `moving_to` cleared. When `stand_up()`, `sit_down()` or `rest()` returns normally, `bridge.posture.value` already holds that read. After a cancel, the read happens in the background, so the cancel isn't delayed by it.
+- **Published on change.** A new state is `set` when `posture`, `family`, `moving` or `moving_to` changes; a report that changes none of them publishes nothing.
+- **Concurrent moves.** A second posture verb while one is in flight sets `moving_to` to its own target; only the end of the newest move clears `moving` and `moving_to`.
+- **Failures.** A posture read or subscription that fails at `start()` is logged as a warning, and `posture` stays `None` for the session: like touch, it is never essential. A read that fails after a move is logged at `DEBUG`, and the state keeps what the events say.
 
 ### Errors
 
@@ -143,11 +166,12 @@ So `except (BridgeError, ValueError)` catches every expected verb failure, and t
 `from naoqi_bridge import NaoqiBridge` re-exports what a caller needs:
 - `NaoqiBridge`;
 - the config classes (`NaoqiBridgeConfig`, `RobotSettings`, `StreamSettings`, `JointsStream`, `AudioStream`, `CameraStreams`, `CameraStream`, `CameraResolution`, `SimSettings`, `ViewerSettings`, `Backend`, `SimSpawn`);
-- the stream values (`TouchEvent`, `TouchPart`, `JointsState`, `MicChunk`, `CameraFrame`, `Camera`) and the `Event` / `Observable` types;
+- the stream values (`TouchEvent`, `TouchPart`, `PostureState`, `JointsState`, `MicChunk`, `CameraFrame`, `Camera`) and the `Event` / `Observable` types;
 - `BehaviorInfos`, `LocalizedString`;
 - the errors (`BridgeError`, `NotRunningError`, `NotPlayingError`, `MotorsOffError`, `CommandFailedError`, `ViewerError`, `ConfigError`, `RobotConnectionError`). Library modules only use `logging.getLogger(__name__)`; `logging.basicConfig` belongs to the CLIs.
 
 ## Open questions
 
-1. **Concurrent `say` calls.** Two overlapping `say` calls are queued or mixed by Naoqi as it sees fit. Whether the newest `say` should interrupt the one in flight is deferred. Cancelling one `say` stops the speech (`ALTextToSpeech.stopAll`), and that silences the other too.
-2. **`stopAll` and animated speech.** It's assumed (not yet verified live on Naoqi 2.1.4.13) that `ALTextToSpeech.stopAll` makes `ALAnimatedSpeech.say` return and stops its gestures. If the gestures play on, the `say` row needs an `ALAnimatedSpeech`-level stop.
+1. **Concurrent `say` calls.** Naoqi queues them: on a Nao (2.1.4.13), a second `say` sent while the first plays waits for it and speaks after, and one stop (`stop_say`, or cancelling either) silences both. Whether the newest `say` should interrupt the one in flight instead is deferred.
+2. **The posture over the servers.** Neither server sends `bridge.posture` yet: a WebSocket `Posture` message and an MCP tool reading it are the natural next steps, deferred until a client asks.
+3. **Back to the previous posture after a cancel.** A cancelled `stand_up` / `sit_down` stops where it is ("Cancellation": no rewind). Whether a stop mid-move leaves a Nao steady is unchecked on a robot; if not, the cancel could return the robot to the posture it started from, which `posture` now knows.

@@ -71,12 +71,13 @@ A live test says what it needs with `@pytest.mark.requires(...)`, never which ta
 
 | Test | Requires |
 |---|---|
-| `test_live_robot.py`, `test_live_verbs.py`, the MCP server test, cancelling a `say`, cancelling a `start()`, the joints stream | nothing: any target |
+| `test_live_robot.py`, `test_live_verbs.py`, the MCP server test, cancelling a `say`, cancelling a `start()`, the joints stream, the posture read at `start()` | nothing: any target |
 | The audio stream at 16 kHz mono | `audio_in` |
 | The top camera feed: a 320×240 frame with the camera's pose, at least 5 frames a second ([camera.md](camera.md)) | `camera` |
 | A 440 Hz tone played into the sim's microphone reaches `audio_input()` | `audio_inject` |
 | A head touch reaches `on_touch` | `touch_sensors`, `person_present` |
 | Motors, postures and breathing; cancelling a reaction or a `stand_up` | `room_to_move` |
+| `bridge.posture` follows `stand_up`, `sit_down` and `rest`, with `moving` set during each move and `moving_to` naming the first two's target ([bridge.md](bridge.md), "Posture") | `room_to_move` |
 | A body action and a reaction run to their end; cancelling a body action | `room_to_move`, `body_actions` |
 | `stop_dance`; cancelling a dance (both cases) | `room_to_move`, `dances` |
 | An app runs until `stop_app` ends it; cancelling `run_app` stops it on the robot (new: the app verbs have no live test yet) | `room_to_move`, `apps` |

@@ -1,6 +1,13 @@
 """naoqi-bridge: drive a Naoqi robot (a real one, a simulated one, or the offline fake) from Python, MCP or WebSocket."""
 
-from .bridge import BehaviorInfos, JointsState, LocalizedString, NaoqiBridge, TouchEvent
+from .bridge import (
+    BehaviorInfos,
+    JointsState,
+    LocalizedString,
+    NaoqiBridge,
+    PostureState,
+    TouchEvent,
+)
 from .camera import CameraFrame
 from .config import (
     AudioStream,
@@ -53,6 +60,7 @@ __all__ = [
     "NotPlayingError",
     "NotRunningError",
     "Observable",
+    "PostureState",
     "RobotConnectionError",
     "RobotSettings",
     "SimSettings",

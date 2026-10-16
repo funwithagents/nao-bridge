@@ -24,10 +24,12 @@ from .robot import (
     CAMERA_RESOLUTION_CODES,
     CAMERA_SUBSCRIBER_NAMES,
     FRAME_ROBOT,
+    POSTURE_KEYS,
     TOUCH_KEYS,
     AudioCallback,
     Camera,
     CameraRead,
+    PostureCallback,
     RobotConnectionError,
     TouchCallback,
 )
@@ -78,6 +80,7 @@ class RealNaoqiRobot:
         self._session: Any = None
         self._services: dict[str, Any] = {}
         self._touch_links: list[tuple[Any, Any]] = []
+        self._posture_links: list[tuple[Any, Any]] = []
         self._audio_service_id: Any = None
         # The ALVideoDevice handle of each subscribed camera.
         self._camera_handles: dict[Camera, str] = {}
@@ -141,6 +144,7 @@ class RealNaoqiRobot:
         self._session = None
         self._services.clear()
         self._touch_links.clear()
+        self._posture_links.clear()
         self._audio_service_id = None
         self._camera_handles.clear()
 
@@ -192,6 +196,22 @@ class RealNaoqiRobot:
 
     def stop_posture(self) -> None:
         self._service("ALRobotPosture").stopMove()
+
+    def get_posture(self) -> tuple[str, str]:
+        robot_posture = self._service("ALRobotPosture")
+        return str(robot_posture.getPosture()), str(robot_posture.getPostureFamily())
+
+    def subscribe_posture(self, callback: PostureCallback) -> None:
+        memory = self._service("ALMemory")
+        for key in POSTURE_KEYS:
+            subscriber = memory.subscriber(key)
+            link = subscriber.signal.connect(partial(callback, key))
+            self._posture_links.append((subscriber, link))
+
+    def unsubscribe_posture(self) -> None:
+        for subscriber, link in self._posture_links:
+            subscriber.signal.disconnect(link)
+        self._posture_links.clear()
 
     def set_breathing(self, chain_name: str, enabled: bool) -> None:
         self._service("ALMotion").setBreathEnabled(chain_name, enabled)

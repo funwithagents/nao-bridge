@@ -112,11 +112,13 @@ def test_real_backend_close_forgets_its_subscriptions(stub_qi: type[StubSession]
     robot = RealNaoqiRobot("10.0.0.5")
     robot.connect()
     robot.subscribe_touch(lambda key, value: None)
+    robot.subscribe_posture(lambda key, value: None)
     robot.subscribe_audio(lambda *_: None, "front")
     robot.close()
     stub_qi.calls.clear()
     # Nothing left to release: no disconnect, no unregister, and no error either.
     robot.unsubscribe_touch()
+    robot.unsubscribe_posture()
     robot.unsubscribe_audio()
     assert stub_qi.calls == []
 
@@ -145,6 +147,32 @@ def test_real_backend_stops_a_posture_move(stub_qi: type[StubSession]):
     robot.connect()
     robot.stop_posture()
     assert stub_qi.calls == [("ALRobotPosture", "stopMove", ())]
+
+
+def test_real_backend_reads_the_posture_and_its_family(stub_qi: type[StubSession]):
+    stub_qi.returns = {
+        ("ALRobotPosture", "getPosture"): "Sit",
+        ("ALRobotPosture", "getPostureFamily"): "Sitting",
+    }
+    robot = RealNaoqiRobot("10.0.0.5")
+    robot.connect()
+    assert robot.get_posture() == ("Sit", "Sitting")
+
+
+def test_real_backend_follows_naoqis_posture_events_until_unsubscribed(
+    stub_qi: type[StubSession],
+):
+    robot = RealNaoqiRobot("10.0.0.5")
+    robot.connect()
+    robot.subscribe_posture(lambda key, value: None)
+    robot.unsubscribe_posture()
+    robot.unsubscribe_posture()  # nothing left to release
+    assert stub_qi.calls == [
+        ("ALMemory", "connect", ("PostureChanged",)),
+        ("ALMemory", "connect", ("PostureFamilyChanged",)),
+        ("ALMemory", "disconnect", ("PostureChanged",)),
+        ("ALMemory", "disconnect", ("PostureFamilyChanged",)),
+    ]
 
 
 class _AnimatedSpeech:
