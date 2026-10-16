@@ -179,26 +179,38 @@ def test_a_cancelled_app_stops_on_the_robot(caplog: pytest.LogCaptureFixture):
 
 @pytest.mark.requires("room_to_move")
 def test_a_timeout_around_a_reaction_stops_it(caplog: pytest.LogCaptureFixture):
+    # The reaction is picked at random and some last under a second, so a fixed
+    # timeout can outlast one: the timeout fires once Naoqi runs the pick instead.
     async def run() -> tuple[float, bool]:
         async with live_session(live_config(), motion=True) as bridge:
             await bridge.stand_up()
-            playing: list[str] = []
+            loop = asyncio.get_running_loop()
+            picked: list[str] = []
+            fired_at = 0.0
 
-            async def note_the_pick() -> None:
-                await wait_until(lambda: "Happy" in bridge.current_expressive_reactions)
-                playing.append(bridge.current_expressive_reactions["Happy"])
+            def playing() -> bool:
+                behavior = bridge.current_expressive_reactions.get("Happy")
+                return behavior is not None and behavior_running(bridge, behavior)
 
-            noting = asyncio.create_task(note_the_pick())
-            started = time.monotonic()
+            async def fire_once_playing(deadline: asyncio.Timeout) -> None:
+                nonlocal fired_at
+                await wait_until(playing)
+                picked.append(bridge.current_expressive_reactions["Happy"])
+                fired_at = time.monotonic()
+                deadline.reschedule(loop.time())  # the timeout fires now
+
             with pytest.raises(TimeoutError):
-                async with asyncio.timeout(1.0):
-                    await bridge.expressive_reaction("Happy")
-            elapsed = time.monotonic() - started - 1.0  # past the timeout firing
-            await noting
+                async with asyncio.timeout(None) as deadline:
+                    firing = asyncio.create_task(fire_once_playing(deadline))
+                    try:
+                        await bridge.expressive_reaction("Happy")
+                    finally:
+                        firing.cancel()
+            elapsed = time.monotonic() - fired_at
             MEASUREMENTS.append(
                 ("cancel reaction (timeout)", f"{elapsed * 1000:.0f} ms")
             )
-            return elapsed, behavior_running(bridge, playing[0])
+            return elapsed, behavior_running(bridge, picked[0])
 
     elapsed, still_running = asyncio.run(run())
     assert elapsed < CANCEL_BOUND_S
