@@ -6,10 +6,12 @@ Ready-to-use server configs (see [specs/config.md](../../specs/config.md)). Each
 |---|---|---|---|
 | `mcp-fake.json` | `naoqi-mcp-server` | fake | none |
 | `mcp-real.json` | `naoqi-mcp-server` | real (edit `robot.ip`) | none |
-| `websocket-fake.json` | `naoqi-websocket-server` | fake | touch, joints, audio, top camera |
-| `websocket-real.json` | `naoqi-websocket-server` | real (edit `robot.ip`) | touch, joints, audio, top camera |
+| `websocket-fake.json` | `naoqi-websocket-server` | fake | joints, audio, top camera |
+| `websocket-real.json` | `naoqi-websocket-server` | real (edit `robot.ip`) | joints, audio, top camera |
 | `mcp-sim.json` | `naoqi-mcp-server` | sim, NAOqi 2.1 | none |
-| `websocket-sim.json` | `naoqi-websocket-server` | sim, NAOqi 2.1 | touch, joints, audio, top camera |
+| `websocket-sim.json` | `naoqi-websocket-server` | sim, NAOqi 2.1 | joints, audio, top camera |
+
+Touch has no switch and is always on, so every file streams it.
 
 ```bash
 uv run naoqi-mcp-server --config examples/configs/mcp-fake.json

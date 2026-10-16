@@ -24,7 +24,6 @@ from naoqi_bridge import (
     JointsStream,
     StreamSettings,
     TouchEvent,
-    TouchStream,
 )
 from naoqi_bridge.testing import LiveTarget, live_config, live_session
 
@@ -154,7 +153,7 @@ def test_the_top_camera_streams_frames_with_its_pose():
 
 @pytest.mark.requires("touch_sensors", "person_present")
 def test_a_head_touch_reaches_on_touch(capsys: pytest.CaptureFixture[str]):
-    config = live_config(StreamSettings(touch=TouchStream(enabled=True)))
+    config = live_config()  # touch is always on
 
     async def run() -> TouchEvent:
         async with live_session(config) as bridge:

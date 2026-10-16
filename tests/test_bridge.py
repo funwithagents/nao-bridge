@@ -25,14 +25,12 @@ from naoqi_bridge.config import (
     JointsStream,
     NaoqiBridgeConfig,
     StreamSettings,
-    TouchStream,
 )
 from naoqi_bridge.fake_robot import JOINT_NAMES, POSTURE_ANGLES, FakeNaoqiRobot
 from naoqi_bridge.robot import RobotConnectionError
 
 ALL_STREAMS = NaoqiBridgeConfig(
     streams=StreamSettings(
-        touch=TouchStream(enabled=True),
         joints=JointsStream(enabled=True, period_s=0.02),
         audio=AudioStream(enabled=True, channel="left"),
     )
@@ -760,7 +758,13 @@ def test_a_start_cancelled_while_connecting_closes_the_robot(
     running, elapsed = asyncio.run(run())
     assert not running
     assert elapsed >= 0.1  # waited for the connection in flight
-    assert command_names(robots[0]) == ["connect", "close"]
+    # the bring-up ran through (touch is always on), then was undone
+    assert command_names(robots[0]) == [
+        "connect",
+        "subscribe_touch",
+        "unsubscribe_touch",
+        "close",
+    ]
     assert not robots[0].connected
 
 
@@ -803,9 +807,7 @@ def test_a_cancelled_stop_still_runs_every_teardown_step(
 
     async def run() -> tuple[bool, list[str]]:
         monkeypatch.setattr(FakeNaoqiRobot, "unsubscribe_touch", slow_unsubscribe)
-        bridge = NaoqiBridge(
-            NaoqiBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True)))
-        )
+        bridge = NaoqiBridge("fake")  # touch is always on
         await bridge.start()
         robot = fake(bridge)
         stopping = asyncio.create_task(bridge.stop())
@@ -824,8 +826,8 @@ def test_a_cancelled_stop_still_runs_every_teardown_step(
 def test_construction_from_a_config_a_backend_string_or_nothing():
     assert NaoqiBridge().backend == "fake"
     assert NaoqiBridge("fake").config == NaoqiBridgeConfig()
-    from_dict = NaoqiBridge.from_dict({"streams": {"touch": {"enabled": True}}})
-    assert from_dict.config.streams.touch.enabled
+    from_dict = NaoqiBridge.from_dict({"streams": {"joints": {"enabled": True}}})
+    assert from_dict.config.streams.joints.enabled
     assert NaoqiBridge.from_json('{"backend": "fake"}').backend == "fake"
 
 
@@ -841,7 +843,31 @@ def test_disabled_streams_are_not_subscribed_and_their_apis_refuse():
                 bridge.audio_input()
             return [name for name, _ in fake(bridge).commands]
 
-    assert asyncio.run(run()) == ["connect"]
+    # Touch has no switch: the bridge subscribes it with no stream enabled.
+    assert asyncio.run(run()) == ["connect", "subscribe_touch"]
+
+
+def test_a_failing_touch_subscription_is_logged_and_the_bridge_still_starts(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    def refuse(self: FakeNaoqiRobot, callback: Any) -> None:
+        raise RuntimeError("no tactile keys on this Naoqi")
+
+    async def run() -> tuple[bool, list[TouchEvent], list[str]]:
+        monkeypatch.setattr(FakeNaoqiRobot, "subscribe_touch", refuse)
+        received: list[TouchEvent] = []
+        async with NaoqiBridge("fake") as bridge:
+            bridge.on_touch.subscribe(received.append)
+            fake(bridge).touch("FrontTactilTouched", 1.0)  # nothing is listening
+            await asyncio.sleep(0.01)
+            running = bridge.running
+            commands = command_names(fake(bridge))
+        return running, received, commands
+
+    running, received, commands = asyncio.run(run())
+    assert running and received == []
+    assert commands == ["connect"]
+    assert "Touch subscription failed; on_touch will not emit" in caplog.messages
 
 
 def test_enabled_streams_are_subscribed_at_start_and_released_at_stop():

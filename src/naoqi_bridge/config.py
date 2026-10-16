@@ -48,7 +48,6 @@ __all__ = [
     "SimSettings",
     "SimSpawn",
     "StreamSettings",
-    "TouchStream",
     "ViewerSettings",
     "as_bool",
     "as_choice",
@@ -237,15 +236,6 @@ class RobotSettings(JsonConfig):
 
 
 @dataclass(frozen=True)
-class TouchStream(JsonConfig):
-    enabled: bool = False
-
-    @classmethod
-    def parse(cls, data: Any, path: str) -> Self:
-        return parse_block(cls, data, path, enabled=as_bool)
-
-
-@dataclass(frozen=True)
 class JointsStream(JsonConfig):
     enabled: bool = False
     period_s: float = 0.2
@@ -335,9 +325,9 @@ class CameraStreams(JsonConfig):
 
 @dataclass(frozen=True)
 class StreamSettings(JsonConfig):
-    """Which robot streams the bridge subscribes to at ``start()``."""
+    """Which robot streams the bridge subscribes to at ``start()``. Touch has no
+    switch: it costs nothing and is always on."""
 
-    touch: TouchStream = field(default_factory=TouchStream)
     joints: JointsStream = field(default_factory=JointsStream)
     audio: AudioStream = field(default_factory=AudioStream)
     cameras: CameraStreams = field(default_factory=CameraStreams)
@@ -348,7 +338,6 @@ class StreamSettings(JsonConfig):
             cls,
             data,
             path,
-            touch=TouchStream.parse,
             joints=JointsStream.parse,
             audio=AudioStream.parse,
             cameras=CameraStreams.parse,

@@ -32,8 +32,8 @@ Exactly one client at a time. A new connection ends the previous session (its st
 - On client **disconnect**: its streams stop, then eyes white, breathing off, `rest`.
 - A step of either ritual that fails is logged as a warning (and, on connect, mirrored to the client as a `Log`); the next steps still run, and the session goes on.
 
-**Streams per client session** (each only when enabled in the bridge config):
-- **Touch:** the session subscribes its handler to `bridge.on_touch` for its lifetime and sends a `Touch` message for each event.
+**Streams per client session** (touch always; the others only when enabled in the bridge config):
+- **Touch:** always on, as on the bridge ([config.md](config.md), "Streams"): the session subscribes its handler to `bridge.on_touch` for its lifetime and sends a `Touch` message for each event.
 - **A session closed while opening streams nothing.** `close()` can run while the connect ritual is still going (the server stopping, for one). The session then subscribes no stream once the ritual ends, and `close()` releases only what was subscribed. Found on Windows, where the ritual's steps take longer.
 - **Joints:** a task follows `bridge.joints.changes()` and sends a `Joints` message per published sample. It is latest-wins, so a slow connection skips poses rather than lagging.
 - **Audio:** a task drains one `bridge.audio_input()` subscriber and sends an `Audio` message per chunk, base64-encoding it here, where the JSON transport needs it ([microphone.md](microphone.md)).

@@ -30,7 +30,6 @@ It covers the **backend**, the **robot connection**, the **sim** a `sim` backend
   "backend": "real",
   "robot": { "ip": "192.168.1.42", "port": 9559, "connect_timeout_s": 5.0 },
   "streams": {
-    "touch": { "enabled": true },
     "joints": { "enabled": false, "period_s": 0.2 },
     "audio": { "enabled": false, "channel": "front" },
     "cameras": {
@@ -68,7 +67,6 @@ class RobotSettings:
 
 @dataclass
 class StreamSettings:
-    touch: TouchStream = field(default_factory=TouchStream)     # enabled: bool = False
     joints: JointsStream = field(default_factory=JointsStream)  # enabled: bool = False, period_s: float = 0.2
     audio: AudioStream = field(default_factory=AudioStream)     # enabled: bool = False, channel: "front" | "rear" | "left" | "right" = "front"
     cameras: CameraStreams = field(default_factory=CameraStreams)  # top / bottom: CameraStream(enabled=False, resolution="qvga", fps=10) — camera.md
@@ -112,16 +110,17 @@ Specified in [viewer.md](viewer.md) ("Config: the `viewer` block"). In short: `e
 
 ### Streams: config switches, bridge APIs
 
-The callbacks (`on_touch`, `on_joints`, `on_audio`) are **removed**. The config decides what the bridge subscribes to on the robot, **eagerly** at `start()`. Each stream is then consumed through a bridge API that any number of consumers can use:
+The callbacks (`on_touch`, `on_joints`, `on_audio`) are **removed**. The config decides which of the streams that cost something the bridge subscribes to on the robot, **eagerly** at `start()`; touch costs nothing and is always on. Each stream is then consumed through a bridge API that any number of consumers can use:
 
 | Stream | Config | Bridge API | Model |
 |---|---|---|---|
-| touch | `streams.touch.enabled` | `bridge.on_touch: Event[TouchEvent]`, with `TouchEvent(part, touched)` | `Event[T]` (`events.py`, specified in `events.md`): synchronous handlers, any number, emitted on the bridge's event loop |
+| touch | none: always on | `bridge.on_touch: Event[TouchEvent]`, with `TouchEvent(part, touched)` | `Event[T]` (`events.py`, specified in `events.md`): synchronous handlers, any number, emitted on the bridge's event loop |
 | joints | `streams.joints.enabled`, `period_s` | `bridge.joints: Observable[JointsState | None]`, with `JointsState(names, angles, ts)` | `Observable[T]` (`observable.py`, specified in `observable.md`): `value`, `changes()` latest-wins, `wait_for` |
 | audio | `streams.audio.enabled`, `channel` | `bridge.audio_input(preroll_s=0.0)` and `bridge.mic` | [microphone.md](microphone.md): one feed, a ring, any number of subscribers |
 | cameras | `streams.cameras.top` / `.bottom`: `enabled`, `resolution`, `fps` | `bridge.cameras["top"]` / `["bottom"]`: `latest()`, `frames()`, `wait_for` | [camera.md](camera.md): one feed per camera, pulled at `fps`, the newest frame with the camera's pose on an `Observable` |
 
-- **Using a disabled stream's API raises `BridgeError`.** For joints and audio that's at the call. For touch, `on_touch` always exists and simply never emits.
+- **Touch has no switch.** It is three `ALMemory` subscribers that fire only when a sensor changes: no task, no bandwidth, nothing to save by leaving it off. `start()` subscribes it on every backend, so `on_touch` emits without configuration, and a handler that never fires means the sensor wasn't pressed, not a forgotten flag. `streams.touch` is an unknown key, so a config from before this rule fails at load, naming it.
+- **Using a disabled stream's API raises `BridgeError`** at the call: joints, audio, cameras.
 - Because nothing is a callback any more, a server's config can't contradict its code. The MCP server just leaves streams disabled.
 
 ### `NaoqiBridge` construction
@@ -142,7 +141,7 @@ Each server has its own config object, wrapping a `NaoqiBridgeConfig` under `bri
   "bridge": {
     "backend": "real",
     "robot": { "ip": "192.168.1.42" },
-    "streams": { "touch": { "enabled": true }, "joints": { "enabled": true }, "audio": { "enabled": true } }
+    "streams": { "joints": { "enabled": true }, "audio": { "enabled": true } }
   },
   "server": { "host": "", "port": 8002 }
 }
@@ -154,7 +153,7 @@ Each server has its own config object, wrapping a `NaoqiBridgeConfig` under `bri
 }
 ```
 
-- `NaoqiWebsocketServerConfig(bridge, server: WebsocketServerSettings(host="", port=8002))`. `host` is the bind address; empty (the default) means the host's LAN IP, found at start (`127.0.0.1` when there's no route out); `port` 0 means an OS-assigned port ([naoqi-websocket-server.md](naoqi-websocket-server.md)). Its bridge streams replace `--with-joints-data` / `--with-audio-data`. Touch is no longer forced on: it's on when the config says so. The server subscribes to `on_touch`, follows `bridge.joints.changes()`, and drains one `audio_input()` per client.
+- `NaoqiWebsocketServerConfig(bridge, server: WebsocketServerSettings(host="", port=8002))`. `host` is the bind address; empty (the default) means the host's LAN IP, found at start (`127.0.0.1` when there's no route out); `port` 0 means an OS-assigned port ([naoqi-websocket-server.md](naoqi-websocket-server.md)). Its bridge streams replace `--with-joints-data` / `--with-audio-data`; touch is always on, as on the bridge. The server subscribes to `on_touch`, follows `bridge.joints.changes()`, and drains one `audio_input()` per client.
 - `NaoqiMcpServerConfig(bridge, server: McpServerSettings(transport="stdio" | "sse"))`.
 - The `bridge` block is exactly a `NaoqiBridgeConfig`, so it can be copied between files. Each server config class lives in its server module; `NaoqiBridgeConfig` and `ConfigError` live in `config.py`.
 

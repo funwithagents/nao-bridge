@@ -103,7 +103,7 @@ Every spec is `Implemented`, and every plan in [plans/_index.md](../plans/_index
 
 ## Configuration
 
-One JSON shape, `NaoqiBridgeConfig`: `backend` (`fake` by default, `real` or `sim`), `robot` (`ip`, `port`, `connect_timeout_s`), `streams` (`touch`, `joints`, `audio`, `cameras.top` / `cameras.bottom`, all off by default) and `sim` (`spawn`: `auto` by default, `never` or `always`; `config`: a naoqi-sim config as it is) and `viewer` (`enabled`; `config`: a naoqi-viewer config, minus what the bridge sets). Unknown keys, bad types and a `real` backend without an IP fail at load with a `ConfigError` naming the key path. Each server wraps it as `{"bridge": …, "server": …}`, and its CLI takes `--config FILE` only (exit 2 on a bad config, 1 on an unreachable robot or an unavailable sim). Ready-made files live in `examples/configs/`. Details: [config.md](config.md).
+One JSON shape, `NaoqiBridgeConfig`: `backend` (`fake` by default, `real` or `sim`), `robot` (`ip`, `port`, `connect_timeout_s`), `streams` (`joints`, `audio`, `cameras.top` / `cameras.bottom`, all off by default; touch has no switch and is always on) and `sim` (`spawn`: `auto` by default, `never` or `always`; `config`: a naoqi-sim config as it is) and `viewer` (`enabled`; `config`: a naoqi-viewer config, minus what the bridge sets). Unknown keys, bad types and a `real` backend without an IP fail at load with a `ConfigError` naming the key path. Each server wraps it as `{"bridge": …, "server": …}`, and its CLI takes `--config FILE` only (exit 2 on a bad config, 1 on an unreachable robot or an unavailable sim). Ready-made files live in `examples/configs/`. Details: [config.md](config.md).
 
 ## Packaging and platforms
 

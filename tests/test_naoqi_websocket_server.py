@@ -29,7 +29,6 @@ from naoqi_bridge.config import (
     JointsStream,
     NaoqiBridgeConfig,
     StreamSettings,
-    TouchStream,
 )
 from naoqi_bridge.fake_robot import (
     FAKE_CAMERA_TRANSFORMS,
@@ -47,14 +46,13 @@ from naoqi_bridge.naoqi_websocket_server import (
 LOOPBACK = WebsocketServerSettings(host="127.0.0.1", port=0)
 # The version is part of the contract: bumping it should take a test change too.
 NAOQI_STATE = {"protocolVersion": 2, "connected": True, "fakeRobot": True}
-TOUCH_ONLY = NaoqiWebsocketServerConfig(
-    bridge=NaoqiBridgeConfig(streams=StreamSettings(touch=TouchStream(enabled=True))),
+TOUCH_ONLY = NaoqiWebsocketServerConfig(  # no stream switched on: touch is always on
+    bridge=NaoqiBridgeConfig(),
     server=LOOPBACK,
 )
 ALL_STREAMS = NaoqiWebsocketServerConfig(
     bridge=NaoqiBridgeConfig(
         streams=StreamSettings(
-            touch=TouchStream(enabled=True),
             joints=JointsStream(enabled=True, period_s=0.02),
             audio=AudioStream(enabled=True),
         )

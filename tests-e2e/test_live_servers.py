@@ -18,7 +18,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
 
-from naoqi_bridge import AudioStream, JointsStream, StreamSettings, TouchStream
+from naoqi_bridge import AudioStream, JointsStream, StreamSettings
 from naoqi_bridge.naoqi_websocket_server import (
     NaoqiWebsocketServer,
     NaoqiWebsocketServerConfig,
@@ -64,7 +64,6 @@ def test_the_websocket_server_streams_the_robot_to_its_client():
     config = NaoqiWebsocketServerConfig(
         bridge=live_config(
             StreamSettings(
-                touch=TouchStream(enabled=True),
                 joints=JointsStream(enabled=True, period_s=0.2),
                 audio=AudioStream(enabled=True, channel="front"),
             )

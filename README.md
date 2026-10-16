@@ -118,7 +118,6 @@ The bridge is built from a `NaoqiBridgeConfig`, in code or from JSON (`NaoqiBrid
   "backend": "real",
   "robot": { "ip": "192.168.1.42", "port": 9559, "connect_timeout_s": 5.0 },
   "streams": {
-    "touch": { "enabled": true },
     "joints": { "enabled": true, "period_s": 0.2 },
     "audio": { "enabled": true, "channel": "front" },
     "cameras": {
@@ -131,7 +130,7 @@ The bridge is built from a `NaoqiBridgeConfig`, in code or from JSON (`NaoqiBrid
 
 - **`backend`**: `"fake"` (default, offline stand-in), `"real"` (needs `qi` and `robot.ip`) or `"sim"` (a simulated Nao, see [above](#simulated-nao-the-sim-backend))
 - **`robot`**: the robot's address, and how long to wait for it: one connection attempt of at most `connect_timeout_s`, so a wrong address fails within 5 s by default. Validated but ignored on `fake`, so switching backend is a one-word change
-- **`streams`**: which robot streams the bridge subscribes to; `channel` picks the microphone (`front`, `rear`, `left`, `right`); each camera (`top`, `bottom`) has its own `resolution` (`qqvga`, `qvga`, `vga`, `4vga`) and `fps` (1 to 30)
+- **`streams`**: which robot streams the bridge subscribes to (touch has no switch: it costs nothing and is always on); `channel` picks the microphone (`front`, `rear`, `left`, `right`); each camera (`top`, `bottom`) has its own `resolution` (`qqvga`, `qvga`, `vga`, `4vga`) and `fps` (1 to 30)
 - **`sim`**: on `sim`, whether to start the sim or use the running one (`spawn`) and the naoqi-sim config (`config`). Validated but ignored on the other backends
 - **`viewer`**: a window mirroring the robot (`enabled`) and its naoqi-viewer config (`config`), see [above](#watching-the-robot-the-viewer)
 
@@ -141,11 +140,10 @@ A malformed config raises `ConfigError` naming the key (e.g. `streams.joints.per
 
 ### Streams
 
-Each enabled stream has its own API, open to any number of consumers:
+Each stream has its own API, open to any number of consumers. Touch is always on; the others when enabled:
 
 ```python
 streams = {
-    "touch": {"enabled": True},
     "joints": {"enabled": True},
     "audio": {"enabled": True},
     "cameras": {"top": {"enabled": True}},
@@ -167,7 +165,7 @@ async with NaoqiBridge.from_dict({"streams": streams}) as bridge:
         ...  # feed your ASR
 ```
 
-- **Touch**: `bridge.on_touch` is an event; handlers receive a `TouchEvent(part, touched)` on the event loop
+- **Touch**: always on; `bridge.on_touch` is an event; handlers receive a `TouchEvent(part, touched)` on the event loop
 - **Joints**: `bridge.joints` holds the latest `JointsState(names, angles, ts)` (radians): read `.value`, iterate `.changes()` (a slow reader skips to the latest), or `await .wait_for(predicate)`
 - **Audio**: every `bridge.audio_input()` call is its own subscriber receiving every chunk; `preroll_s=` starts it in the past, as far as the ring of the last 200 chunks reaches (e.g. to hear the sentence that woke a wake-word detector); `bridge.mic.latest()` gives the newest chunk for level meters
 - **Cameras**: `bridge.cameras["top"]` / `["bottom"]` pull their camera at the configured `fps` and hold the newest `CameraFrame`: `frame_id`, `width` × `height` BGR `data` (`frame.image` is a `(height, width, 3)` numpy view), Naoqi's `naoqi_ts`, `camera_transform` (a row-major 4×4, camera → `FRAME_ROBOT`, read with the frame) and `fov` (radians). `.latest()` is a picture now (`None` outside a session or for a disabled camera); `async for frame in .frames()` follows each new one, latest-wins, so a slow consumer skips frames rather than lagging. A sim renders the top camera only

@@ -15,7 +15,6 @@ from .config import (
     SimSettings,
     SimSpawn,
     StreamSettings,
-    TouchStream,
     ViewerSettings,
 )
 from .errors import (
@@ -61,7 +60,6 @@ __all__ = [
     "StreamSettings",
     "TouchEvent",
     "TouchPart",
-    "TouchStream",
     "ViewerError",
     "ViewerSettings",
 ]
